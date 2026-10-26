@@ -1,0 +1,155 @@
+================================================================================
+PROYECTO: SISTEMA DE REVISIÓN Y PRIORIZACIÓN TÉCNICO-DOCUMENTAL DE PLACA HUELLAS
+ENTIDAD RECEPTORA: GOBERNACIÓN DE ANTIOQUIA - SECRETARÍA DE INFRAESTRUCTURA FÍSICA
+OBJETIVO: AUTOMATIZAR Y ESTRUCTURAR LA REVISIÓN DOCUMENTAL, ESTRUCTURAL Y ESPACIAL
+================================================================================
+
+1. DESCRIPCIÓN GENERAL Y ARQUITECTURA DEL SISTEMA
+--------------------------------------------------------------------------------
+El sistema opera bajo un modelo de compuertas secuenciales ("Gatekeepers"). Su
+propósito es optimizar el tiempo de supervisión técnica descartando o solicitando
+subsanación temprana en aspectos críticos (diseño de acero y localización espacial)
+antes de proceder a la validación documental y legal exhaustiva.
+
+Flujo de Estados:
+[Recepción de Documentos (Ítems 1 al 27)]
+                  │
+                  ▼
+[FASE 1A: Verificación de Acero Mínimo (INVIAS)] ──(No cumple / Incoherente)──► [Alerta Subsanación 1A]
+                  │ (Aprobado / Supera mínimo)
+                  ▼
+[FASE 1B: Verificación Espacial (Buffer GeoJSON)] ──(Fuera de red / Código erróneo)──► [Alerta Subsanación 1B]
+                  │ (Dentro de tolerancia)
+                  ▼
+[FASE 2: Validación Documental y Legal Cruzada] ──(Incompleto / Vencido)──► [Reporte Subsanación F2]
+                  │ (100% Conforme)
+                  ▼
+[FASE 3: Emisión Ficha de Priorización Aprobada]
+
+
+2. ESPECIFICACIÓN DETALLADA POR FASES
+--------------------------------------------------------------------------------
+
+FASE 1A: CONTROL ESTRUCTURAL Y DESPIECE DE ACERO
+- Insumos de Entrada:
+  * Ítem 3: Despiece del acero solicitado (longitud, peso total y figuración).
+  * Ítem 2: Esquema de especificaciones técnicas firmado por ingeniero civil.
+  * Insumo Base del Sistema: Guía/Cartilla de Diseño de Placa Huella del INVIAS.
+- Lógica de Validación:
+  1. Extracción de datos: Reconocimiento tabular de diámetros (calibre/barra),
+     figuraciones, longitudes unitarias, cantidades y pesos totales.
+  2. Consistencia matemática interna:
+     Validar: Sumatoria (Longitud * Masa Lineal Nominal NTC/NSR-10) == Peso Total Declarado (kg).
+  3. Principio de Umbral Mínimo Normativo:
+     * El municipio goza de autonomía de diseño, por lo cual puede usar metodologías
+       propias o especificaciones superiores.
+     * Criterio de aceptación: La cuantía de acero total por metro lineal (kg/m)
+       y la distribución por módulo estructural (vigas riostras intermedias, vigas
+       transversales y placas) deben ser IGUALES O SUPERIORES al estándar base de la guía INVIAS.
+     * Si el acero propuesto está por debajo de los mínimos estructurales admisibles
+       por INVIAS, se genera No Conformidad inmediata.
+  4. Validez Profesional: Verificación de presencia de firma y número de matrícula
+     profesional legible del ingeniero civil en el Ítem 2.
+
+FASE 1B: CONTROL ESPACIAL Y GEORREFERENCIACIÓN VIAL
+- Insumos de Entrada:
+  * Ítem 24: Georreferenciación de tramos (archivos KML, KMZ o GPX).
+  * Ítem 4: Certificado municipal de vía terciaria a cargo del municipio (con códigos).
+  * Insumo Base del Sistema: Capa oficial de la Red Vial Departamental en formato GeoJSON.
+- Lógica de Validación:
+  1. Conversión geométrica: Parseo de archivos KML/KMZ a geometrías vectoriales (LineString).
+  2. Análisis de Proximidad Espacial (Buffer de Tolerancia):
+     * Aplicación de un buffer de baja tolerancia (ej. 10 a 15 metros) sobre el trazado
+       de la red vial GeoJSON para compensar imprecisión del GPS municipal.
+     * Evaluación de cobertura: El trazado KML debe caer al menos en un 95% dentro
+       del buffer de la vía registrada.
+  3. Coincidencia de Nomenclatura y Jerarquía:
+     * El código vial consignado en el Certificado (Ítem 4) debe coincidir con el
+       atributo oficial del GeoJSON.
+     * La vía debe figurar estrictamente clasificada como "VÍA TERCIARIA" y bajo
+       jurisdicción municipal/departamental (no primarias ni vías privadas).
+  4. Concordancia Métrica: La longitud lineal del KML debe ser consistente con
+     la longitud de intervención sobre la cual se calculó el acero en la Fase 1A.
+
+FASE 2: VALIDACIÓN DOCUMENTAL, JURÍDICA Y FINANCIERA
+Se activa únicamente tras superar exitosamente las Fases 1A y 1B.
+Verificación de los 25 ítems restantes según los siguientes clusters:
+
+* Cluster A: Capacidad Jurídica y Representación Legal
+  - Ítems: 1 (Solicitud alcalde), 7 (Cédula), 8 (Acta posesión), 9 (Acuerdo concejo), 10 (RUT).
+  - Regla: Coincidencia cruzada idéntica de nombre completo y número de documento del alcalde.
+  - Regla: Acuerdo del Concejo (Ítem 9) expedido o suscrito hace menos de 1 mes y con facultades explícitas para suscribir convenios/contratos.
+
+* Cluster B: Antecedentes, Paz y Salvos y Consultas
+  - Ítems: 11 (Contraloría), 12 (Medidas correctivas), 13 (Judiciales), 14 (Procuraduría),
+           15 (Paz y salvo seg. social), 16 (REDAM), 21 (PACO), 22 (Inhabilidades menores).
+  - Regla de Vigencia: Ítems 11, 12, 13 y 14 con expedición menor a 1 mes.
+  - Regla de Estado: Ítem 15 al mes presente; Ítems 16, 21 y 22 en estado "Sin novedades / Negativo / No reporta sanciones vigentes".
+
+* Cluster C: Declaraciones Juramentadas
+  - Ítems: 17 (Anticorrupción), 18 (Lavado de activos/FT), 19 (Inhabilidades/Incompatibilidades),
+           20 (No multas ni sanciones).
+  - Regla: Formatos anexos completamente diligenciados y debidamente firmados por el alcalde.
+
+* Cluster D: Coherencia Técnica, Financiera y Social
+  - Ítems: 5 (Acta socialización comunitaria), 6 (Registro fotográfico a color),
+           23/26 (Certificado de banco de proyectos municipal), 25 (Cronograma de actividades),
+           27 (Certificado de financiación con aporte municipio y departamento).
+  - Regla: Coherencia temporal del cronograma con los plazos marco del convenio.
+  - Regla: Montos del Ítem 27 consistentes con el presupuesto y banco de proyectos.
+
+
+3. MODELO DE DATOS Y ESTRUCTURA DE SALIDAS
+--------------------------------------------------------------------------------
+El sistema generará dos tipos de salida estructurada:
+
+A. En caso de RECHAZO O SUBSANACIÓN TÉCNICA (Fase 1A o 1B):
+   {
+     "codigo_proyecto": "ANT-MUN-202X-XXX",
+     "fase_detencion": "1A_ACERO" | "1B_ESPACIAL",
+     "estado": "REQUIERE_SUBSANACION",
+     "hallazgos": [
+       {
+         "criterio": "Cuantía de acero mínima",
+         "observacion": "El acero proyectado arroja 18.5 kg/m, inferior a los 22.0 kg/m exigidos por el estándar base INVIAS.",
+         "accion_requerida": "Ajustar despiece de acero o remitir memoria técnica justificativa."
+       }
+     ]
+   }
+
+B. En caso de ÉXITO (Pasa Fase 1A, 1B y Fase 2):
+   - Ficha de Priorización consolidada.
+   - Matriz de verificación con sello de "CONFORME" en los 27 ítems.
+   - Concepto técnico favorable para suscripción de convenio interadministrativo.
+
+
+4. INVENTARIO COMPLETO DE ARCHIVOS REQUERIDOS (NUMERACIÓN ESTRICTA)
+--------------------------------------------------------------------------------
+01. Solicitud formal del alcalde dirigida a la Secretaría de Infraestructura Física.
+02. Esquema de especificaciones técnicas firmado por un ingeniero civil.
+03. Despiece del acero solicitado con longitud, peso total y figuración.
+04. Certificado de vías a intervenir como terciarias a cargo del municipio (con códigos).
+05. Acta de socialización con la comunidad beneficiada.
+06. Registro fotográfico a color.
+07. Fotocopia de la cédula de ciudadanía del alcalde.
+08. Acta de posesión del alcalde.
+09. Acuerdo del Concejo que faculta al alcalde para contratar (vigencia < 1 mes).
+10. Copia del RUT del municipio (vigencia < 1 mes).
+11. Certificado de Responsables Fiscales de la Contraloría General (vigencia < 1 mes).
+12. Certificado de Medidas Correctivas del alcalde (vigencia < 1 mes).
+13. Certificado de Antecedentes Judiciales del alcalde (vigencia < 1 mes).
+14. Certificado de Antecedentes Disciplinarios de la Procuraduría (vigencia < 1 mes).
+15. Certificado de paz y salvo de seguridad social y parafiscales del mes presente.
+16. Certificado Registro de Deudores Alimentarios Morosos (REDAM).
+17. Compromiso anticorrupción (Documento anexo).
+18. Declaración de no lavado de activos ni financiación del terrorismo (Documento anexo).
+19. Declaración de inhabilidades, incompatibilidades y conflictos de interés (Documento anexo).
+20. Declaración de no multas, sanciones ni declaratorias de incumplimiento (Documento anexo).
+21. Constancia de consulta en el portal anticorrupción de Colombia - PACO.
+22. Certificado de inhabilidades por delitos sexuales contra menores del alcalde.
+23. Certificado de banco y programas de proyectos del municipio.
+24. Georreferenciación de los tramos de vías a intervenir (tracks en KML, KMZ o GPX).
+25. Cronograma de actividades (etapas de contratación, ejecución y recibo).
+26. Certificado de banco de proyectos del municipio.
+27. Certificado de financiación (especificando valor total y aportes depto/municipio).
+================================================================================

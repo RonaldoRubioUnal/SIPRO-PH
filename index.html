@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIPRO-PH | Sistema de Revisión y Priorización Técnico-Documental de Placa Huellas</title>
+  <meta name="description" content="Sistema automatizado de revisión secuencial y compuertas técnicas para proyectos de placa huella de la Gobernación de Antioquia.">
+  
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS for Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+  <!-- Master Styles -->
+  <link rel="stylesheet" href="css/styles.css?v=20261026_v11">
+</head>
+<body>
+
+  <!-- Hidden File & Folder Inputs -->
+  <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+  <input type="file" id="geojsonFileInput" accept=".geojson,.json" style="display:none">
+  <input type="file" id="item3FileInput" accept=".xlsx,.xls,.xlsm,.pdf" style="display:none">
+
+  <div class="app-container">
+    
+    <!-- 1. SIDEBAR NAVIGATION RAIL -->
+    <aside class="sidebar-rail">
+      <div class="brand-badge" title="SIPRO-PH | Sistema de Revisión de Placa Huellas">
+        <span class="brand-text-mini">SIPRO-PH</span>
+      </div>
+
+      <!-- Prominent Folder Upload Button in Sidebar -->
+      <button id="btnSidebarLoadFolder" class="sidebar-upload-btn" title="Cargar Carpeta de Proyecto (Lista de Documentos)">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          <line x1="12" y1="11" x2="12" y2="17"></line>
+          <line x1="9" y1="14" x2="15" y2="14"></line>
+        </svg>
+        <span class="nav-tooltip">📁 Cargar Carpeta de Documentos</span>
+      </button>
+
+      <nav class="nav-menu">
+        <div class="nav-item">
+          <button class="nav-link active" data-tab="tab-1a" title="Fase 1A: Control Estructural de Acero">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+            </svg>
+            <span class="nav-tooltip">Fase 1A: Control Estructural de Acero</span>
+          </button>
+        </div>
+
+        <div class="nav-item">
+          <button class="nav-link" data-tab="tab-1b" title="Fase 1B: Contraste Espacial y Alineación Vial">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+              <line x1="8" y1="2" x2="8" y2="18"></line>
+              <line x1="16" y1="6" x2="16" y2="22"></line>
+            </svg>
+            <span class="nav-tooltip">Fase 1B: Contraste Espacial Red Terciaria</span>
+          </button>
+        </div>
+
+        <div class="nav-item">
+          <button class="nav-link" data-tab="tab-2" title="Fase 2: Matriz 27 Ítems">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span class="nav-tooltip">Fase 2: Lista Numérica (27 Ítems)</span>
+          </button>
+        </div>
+
+        <div class="nav-item">
+          <button class="nav-link" data-tab="tab-3" title="Fase 3: Salidas y Ficha de Priorización">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            <span class="nav-tooltip">Fase 3: Ficha de Priorización e Informe Técnico</span>
+          </button>
+        </div>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <button id="themeToggleBtn" class="theme-toggle-btn" title="Alternar Modo Claro / Modo Oscuro Auditoría">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 2. MAIN APPLICATION CONTENT -->
+    <main class="main-wrapper">
+      
+      <!-- Top Header & Actions -->
+      <header class="top-header">
+        <div class="header-brand-block">
+          <img src="Inspo/Logo.png" alt="Gobernación de Antioquia" class="header-gov-logo" onerror="this.src='assets/Logo.png'">
+          <div class="header-titles">
+            <div class="header-badge-row">
+              <span class="gov-pill">Gobernación de Antioquia</span>
+              <span style="font-size:12px;font-weight:700;color:var(--text-muted)">Secretaría de Infraestructura Física - Dirección de Infraestructura Física y Apoyo Territorial</span>
+            </div>
+            <h1 class="app-title">Sistema de Revisión y Priorización Técnico-Documental</h1>
+            <p class="app-subtitle">Revisión Técnico-Documental, Estructural y Espacial de Proyectos de Placa Huella</p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button id="btnHeaderLoadFolder" class="btn-primary" title="Cargar carpeta completa de un municipio (PDFs, KMZ, etc.)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            Cargar Carpeta Municipio
+          </button>
+
+          <div class="project-select-box" title="Seleccionar expediente municipal en evaluación">
+            <span class="project-select-label">Expediente:</span>
+            <select id="projectSelect" class="project-dropdown" aria-label="Seleccionar Expediente Municipal" onchange="cargarProyecto(this.value)"><option value="">-- Sin expedientes cargados --</option></select>
+          </div>
+
+          <button id="btnEditExpediente" class="btn-secondary" title="Nombrar, renombrar o ajustar los datos del expediente activo">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            Nombrar Expediente
+          </button>
+
+          <button id="btnHeaderDeleteExpediente" class="btn-danger-subtle" onclick="App.deleteCurrentExpediente()" title="Quitar o eliminar el expediente activo de la sesión">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            Quitar Proyecto
+          </button>
+
+          <button class="btn-primary" onclick="ReportsEngine.imprimirInformeTecnico()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            Imprimir Informe
+          </button>
+        </div>
+      </header>
+
+      <!-- BARRA DE PESTAÑAS / CHIPS RÁPIDOS DE PROYECTOS CARGADOS -->
+      <div id="projectChipsContainer" class="project-chips-wrapper" style="display:none;"></div>
+
+      <!-- BANNER DE IDENTIFICACIÓN Y GESTIÓN DEL EXPEDIENTE MUNICIPAL -->
+      <section class="expediente-active-card" id="expedienteActiveCard">
+        <div class="expediente-info-left">
+          <div class="expediente-pin-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          </div>
+          <div>
+            <div class="expediente-tag-row">
+              <span class="badge-mpio" id="expBannerMpio">MUNICIPIO: PENDIENTE DE CARGA</span>
+              <span class="badge-subreg" id="expBannerSubreg">SUBREGIÓN: ANTIOQUIA</span>
+              <span class="badge-code" id="expBannerCode">EXP-PH</span>
+              <span class="badge-count" id="expBannerFilesCount">0 Archivos</span>
+            </div>
+            <h2 class="expediente-name-title" id="expBannerName">Expedientes Municipales en Evaluación</h2>
+            <div class="expediente-meta-row">
+              <span id="expBannerFichaDoc" class="ficha-doc-pill">📄 Ficha de Priorización: Pendiente de carga</span>
+              <span id="expBannerTramoInfo" style="color:var(--text-muted);font-size:12px">• Cargue una carpeta municipal para iniciar la auditoría y verificación de cálculos</span>
+            </div>
+          </div>
+        </div>
+        <div class="expediente-actions-right">
+          <button class="btn-secondary btn-sm" id="btnBannerEditExpediente" title="Editar nombre, municipio o radicado de este expediente">
+            ✏️ Editar Expediente
+          </button>
+          <button class="btn-danger-subtle btn-sm" id="btnBannerDeleteExpediente" onclick="App.deleteCurrentExpediente()" title="Quitar este expediente de la sesión">
+            🗑️ Quitar Proyecto
+          </button>
+          <button class="btn-primary btn-sm" id="btnBannerNewExpediente" title="Cargar y auditar otro municipio">
+            ➕ Cargar Otro Municipio
+          </button>
+        </div>
+      </section>
+
+      <!-- SEQUENTIAL GATEKEEPER PIPELINE BANNER -->
+      <section class="pipeline-banner">
+        <div class="pipeline-header">
+          <div class="pipeline-title-group">
+            <div class="pipeline-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            </div>
+            <div>
+              <div class="pipeline-title">Flujo de Compuertas Secuenciales ("Gatekeepers")</div>
+              <div style="font-size:11px;color:var(--text-muted)">Control temprano de Acero (1A) y Buffer Vial (1B) antes de validar los 27 ítems documentales</div>
+            </div>
+          </div>
+          <div id="gatekeeperStatusPill" class="gatekeeper-status-pill status-approved">
+            &#10003; EVALUANDO ESTADO
+          </div>
+        </div>
+
+        <div class="pipeline-track">
+          <!-- Gate 1A -->
+          <div class="gate-step" id="stepGate1A" data-target-tab="tab-1a">
+            <div class="gate-step-number">1A</div>
+            <div class="gate-step-info">
+              <div class="gate-step-tag">Compuerta 1A</div>
+              <div class="gate-step-title">Control Estructural de Acero</div>
+            </div>
+          </div>
+
+          <!-- Gate 1B -->
+          <div class="gate-step" id="stepGate1B" data-target-tab="tab-1b">
+            <div class="gate-step-number">1B</div>
+            <div class="gate-step-info">
+              <div class="gate-step-tag">Compuerta 1B</div>
+              <div class="gate-step-title">Contraste Espacial y Alineación Vial</div>
+            </div>
+          </div>
+
+          <!-- Gate 2 -->
+          <div class="gate-step" id="stepGate2" data-target-tab="tab-2">
+            <div class="gate-step-number">F2</div>
+            <div class="gate-step-info">
+              <div class="gate-step-tag">Compuerta 2</div>
+              <div class="gate-step-title">Lista Numérica (27 Ítems)</div>
+            </div>
+          </div>
+
+          <!-- Gate 3 -->
+          <div class="gate-step" id="stepGate3" data-target-tab="tab-3">
+            <div class="gate-step-number">F3</div>
+            <div class="gate-step-info">
+              <div class="gate-step-tag">Salida Final</div>
+              <div class="gate-step-title">Ficha de Priorización / Convenio</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- KPI METRICS GRID -->
+      <section class="metrics-grid">
+        <!-- Conformidad General Gauge -->
+        <div class="kpi-card kpi-radial-featured">
+          <div class="kpi-header">
+            <span class="kpi-label">Conformidad General</span>
+            <span style="font-size:11px;font-weight:700;color:var(--color-accent)">Criterio Técnico</span>
+          </div>
+          <div class="radial-container">
+            <div class="radial-gauge">
+              <svg viewBox="-8 -8 96 96">
+                <circle class="gauge-center-bg" cx="40" cy="40" r="29"></circle>
+                <circle class="gauge-bg" cx="40" cy="40" r="35"></circle>
+                <circle class="gauge-fill" id="kpiGaugeCircle" cx="40" cy="40" r="35"></circle>
+              </svg>
+            </div>
+            <div>
+              <div class="radial-val-text" id="kpiConformidadVal">100%</div>
+              <div class="radial-subtext">Criterios Técnicos y Documentales</div>
+            </div>
+          </div>
+          <div class="kpi-footer-note" style="color:rgba(255,255,255,0.85)">
+            &#9679; Evaluado bajo Criterio Técnico Departamental (26.25 kg/m)
+          </div>
+        </div>
+
+        <!-- Total Evaluado -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Longitud Intervención</span>
+            <div class="kpi-icon-pill icon-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            </div>
+          </div>
+          <div class="kpi-number-row">
+            <span class="kpi-number" id="kpiTotalEvaluado">1000 m</span>
+            <span class="kpi-unit">tramo</span>
+          </div>
+          <div class="kpi-footer-note" id="kpiTotalEvaluadoSub">
+            8 marcas de acero | 27 ítems
+          </div>
+        </div>
+
+        <!-- No Conformidades Críticas -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Hallazgos Críticos</span>
+            <div class="kpi-icon-pill icon-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </div>
+          </div>
+          <div class="kpi-number-row">
+            <span class="kpi-number" id="kpiCriticas" style="color:var(--status-danger)">0</span>
+            <span class="kpi-unit">detenciones</span>
+          </div>
+          <div class="kpi-footer-note">
+            Subsanación inmediata exigida
+          </div>
+        </div>
+
+        <!-- Cuantía de Acero (Fase 1A) -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Cuantía Acero (1A)</span>
+            <div class="kpi-icon-pill icon-success">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+            </div>
+          </div>
+          <div class="kpi-number-row">
+            <span class="kpi-number" id="kpiCuantiaVal">26.85 kg/m</span>
+          </div>
+          <div class="kpi-footer-note" id="kpiCuantiaSub">
+            <span class="kpi-tag-good">&#9650; +0.60 kg/m vs Referencia Técnica (26.25)</span>
+          </div>
+        </div>
+
+        <!-- Cobertura GIS (Fase 1B) -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Alineación Red Vial (1B)</span>
+            <div class="kpi-icon-pill icon-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+            </div>
+          </div>
+          <div class="kpi-number-row">
+            <span class="kpi-number" id="kpiCoberturaVal">98.2%</span>
+          </div>
+          <div class="kpi-footer-note" id="kpiCoberturaSub">
+            <span class="kpi-tag-good">&#10003; Alineado con corredor vial (10m)</span>
+          </div>
+        </div>
+
+        <!-- Validación Documental (Fase 2) -->
+        <div class="kpi-card">
+          <div class="kpi-header">
+            <span class="kpi-label">Lista 27 Ítems (F2)</span>
+            <div class="kpi-icon-pill icon-success">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            </div>
+          </div>
+          <div class="kpi-number-row">
+            <span class="kpi-number" id="kpiDocVal">27 / 27</span>
+          </div>
+          <div class="kpi-footer-note" id="kpiDocSub">
+            <span class="kpi-tag-good">&#10003; 100% Conforme y Vigente</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- NAVIGATION TABS -->
+      <section class="tabs-container">
+        <div class="tabs-bar">
+          <button class="tab-btn active" data-tab="tab-1a">
+            <span>Fase 1A: Control Estructural de Acero</span>
+            <span class="tab-badge">Criterio Técnico</span>
+          </button>
+          <button class="tab-btn" data-tab="tab-1b">
+            <span>Fase 1B: Contraste Espacial y Alineación Vial</span>
+            <span class="tab-badge">Google Satélite</span>
+          </button>
+          <button class="tab-btn" data-tab="tab-2">
+            <span>Fase 2: Validación Documental (27 Ítems)</span>
+            <span class="tab-badge">Lista 1-27</span>
+          </button>
+          <button class="tab-btn" data-tab="tab-3">
+            <span>Fase 3: Salidas, Ficha y Dictamen</span>
+            <span class="tab-badge">Informe / Ficha</span>
+          </button>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 1A: CONTROL ESTRUCTURAL Y DESPIECE     -->
+        <!-- ========================================== -->
+        <div id="tab-1a" class="tab-content active">
+          
+          <!-- RESUMEN DESCRIPTIVO DE GEOMETRÍA Y ELEMENTOS (SEGÚN DOCUMENTO) -->
+          <div id="geometricSummaryContainer"></div>
+
+          <!-- BLOQUE 2: INFORMACIÓN DE DESPIECE CONSIGNADA EN EL DOCUMENTO (ANCHO COMPLETO) -->
+          <div id="despieceExtraidoContainer"></div>
+
+
+          <!-- REUBICACIÓN INFERIOR A ANCHO COMPLETO (FULL-WIDTH 100%) -->
+          <!-- Card de Auditoría de Volúmenes de Concreto y Cemento (Cálculo Técnico) -->
+          <div class="concrete-memory-fullwidth" style="margin-top:24px; width:100%;">
+            <div class="audit-card">
+              <div class="audit-card-header">
+                <div class="audit-title-block">
+                  <div class="audit-title">Memoria de Volúmenes de Concreto y Cemento (Cálculo Técnico)</div>
+                  <div class="audit-subtitle">Cubicación paramétrica integral: Losas huellas (21 MPa), franja central ciclópeo, cunetas, riostras y transición</div>
+                </div>
+                <div class="audit-summary-pills">
+                  <span class="summary-pill" style="background:var(--color-bg-alt);color:var(--text-main)">
+                    Concreto Global: <b class="font-mono" id="statConcreteTotal">0.00 m³</b>
+                  </span>
+                  <span class="summary-pill" style="background:rgba(2,132,199,0.1);color:#0284C7;border-color:rgba(2,132,199,0.3)">
+                    Cemento Requerido: <b class="font-mono" id="statCementTotal">0 sacos</b>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Container espacioso y responsive para las 6 tarjetas KPI y la tabla de 6 elementos -->
+              <div id="concreteVolumesContainer" style="padding: 20px;"></div>
+
+              <div style="padding:14px 24px;background:var(--color-bg-alt);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;border-top:1px solid var(--border-subtle)">
+                <div style="font-size:12px;color:var(--text-muted)">
+                  <b>Base de Dosificación y Rendimiento Técnico:</b> Huellas + Cunetas + Riostras en f'c = 21 MPa (210 kg/cm²). Franja central en Concreto Ciclópeo (f'c = 21 MPa con piedra pegada). Rendimiento: ~7.0 a 7.5 sacos de 50 kg por metro lineal de placa huella estándar.
+                </div>
+                <span class="gov-pill" style="font-size:11px;">Criterio Departamental</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 1B: CONTRASTE ESPACIAL Y BUFFER        -->
+        <!-- ========================================== -->
+        <div id="tab-1b" class="tab-content">
+          <div class="spatial-contrast-wrapper">
+            
+            <!-- Top Dark Header matching user's reference image -->
+            <div class="spatial-contrast-banner">
+              <div>
+                <div class="spatial-banner-title">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 16 12 12 8"></polygon></svg>
+                  CONTRASTE ESPACIAL: PUNTOS Y TRAZADO vs. RED VIAL TERCIARIA
+                </div>
+                <div class="spatial-banner-sub">
+                  Calcula automáticamente sobre qué CODIGO_VIA cae cada punto y valida contra los códigos del informe municipal
+                </div>
+              </div>
+
+                <div class="spatial-banner-actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                  <!-- Status indicator for auto-loaded base network & ArcGIS FeatureServer -->
+                  <div id="baseTerciariaStatusPill" class="spatial-status-pill status-loading" title="Conexión en curso con el servicio oficial ArcGIS FeatureServer R10 de la Gobernación de Antioquia">
+                    🌐 Conectando ArcGIS R10...
+                  </div>
+
+                  <!-- Hidden file input for uploading custom GeoJSON -->
+                  <input type="file" id="geojsonFileInput" accept=".geojson,.json" style="display:none">
+
+                  <!-- Button to upload or update road network -->
+                  <button id="btnLoadGeoJson" class="btn-cyan" title="Subir o actualizar un archivo GeoJSON con la red vial">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    📤 Subir / Actualizar Red Vial
+                  </button>
+
+                  <button class="btn-emerald" onclick="SpatialEngine.exportCsv(App.currentProject)" title="Exportar reporte de contraste en formato CSV">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    Exportar CSV
+                  </button>
+
+                  <button class="btn-amber" onclick="SpatialEngine.exportKml(App.currentProject)" title="Exportar trazado KML">
+                    Exportar KML
+                  </button>
+
+                  <!-- Botón Prominente para Centrar / Zoom en Tramos del Proyecto Activo -->
+                  <button type="button" class="btn-primary" id="btnZoomProjectTracksTop" onclick="SpatialEngine.zoomToProjectTracks()" style="background:#059669;color:#ffffff;border:1px solid #10b981;font-weight:700;display:inline-flex;align-items:center;gap:6px;" title="Centrar y hacer zoom en los tramos de placa huella del proyecto activo">
+                    🎯 Ir a Tramos / Zoom Proyecto
+                  </button>
+                </div>
+              </div>
+
+            <!-- BARRA DE CONTROL MULTICAPA (Encendido / Apagado Independiente de Capas) -->
+            <div class="spatial-layer-bar">
+              <div class="layer-bar-section">
+                <span class="layer-bar-title">CAPAS VIALES:</span>
+
+                <!-- Red Terciaria (Cargada por defecto) -->
+                <button type="button" class="layer-toggle-btn active" id="btnToggleTerciaria" onclick="SpatialEngine.toggleLayer('terciaria')" title="Encender/apagar visualización de la Red Vial Terciaria">
+                  <span class="layer-indicator" style="background:#0284c7;"></span>
+                  <span>Red Terciaria</span>
+                  <span class="layer-count-badge" id="badgeTerciariaCount">4.442</span>
+                </button>
+
+                <!-- Red Secundaria (Toggle) -->
+                <button type="button" class="layer-toggle-btn" id="btnToggleSecundaria" onclick="SpatialEngine.toggleLayer('secundaria')" title="Encender/apagar visualización de la Red Vial Secundaria">
+                  <span class="layer-indicator" style="background:#f59e0b;"></span>
+                  <span>Red Secundaria</span>
+                  <span class="layer-count-badge" id="badgeSecundariaCount">169</span>
+                </button>
+
+                <!-- Red Primaria (Toggle) -->
+                <button type="button" class="layer-toggle-btn" id="btnTogglePrimaria" onclick="SpatialEngine.toggleLayer('primaria')" title="Encender/apagar visualización de la Red Vial Primaria">
+                  <span class="layer-indicator" style="background:#ef4444;"></span>
+                  <span>Red Primaria</span>
+                  <span class="layer-count-badge" id="badgePrimariaCount">76</span>
+                </button>
+
+                <!-- Red Personalizada (Visible al subir archivo) -->
+                <button type="button" class="layer-toggle-btn active" id="btnToggleCustom" onclick="SpatialEngine.toggleLayer('custom')" style="display:none;" title="Encender/apagar capa GeoJSON subida por el usuario">
+                  <span class="layer-indicator" style="background:#8b5cf6;"></span>
+                  <span id="lblCustomLayer">Red Subida</span>
+                  <span class="layer-count-badge" id="badgeCustomCount">0</span>
+                </button>
+              </div>
+
+              <div class="layer-bar-divider"></div>
+
+              <div class="layer-bar-section">
+                <span class="layer-bar-title">PROYECTO:</span>
+
+                <!-- Trazado KML -->
+                <button type="button" class="layer-toggle-btn active" id="btnToggleTrack" onclick="SpatialEngine.toggleLayer('projectTrack')" title="Encender/apagar trazado KML del proyecto">
+                  <span class="layer-indicator" style="background:#00FF66; border:1px solid #000; box-shadow:0 0 6px #00FF66;"></span>
+                  <span>Trazado KML</span>
+                </button>
+
+                <!-- Buffer 10m -->
+                <button type="button" class="layer-toggle-btn active" id="btnToggleBuffer" onclick="SpatialEngine.toggleLayer('buffer10m')" title="Encender/apagar buffer de 10 metros">
+                  <span class="layer-indicator" style="background:#96bf8a;"></span>
+                  <span>Buffer 10m</span>
+                </button>
+
+                <!-- Puntos -->
+                <button type="button" class="layer-toggle-btn active" id="btnTogglePoints" onclick="SpatialEngine.toggleLayer('points')" title="Encender/apagar puntos de inspección">
+                  <span class="layer-indicator" style="background:#38bdf8; border-radius:50%;"></span>
+                  <span>Puntos</span>
+                </button>
+
+                <!-- 📏 Cota al Eje / Vectores de Distancia -->
+                <button type="button" class="layer-toggle-btn active" id="btnToggleMeasurementVectors" onclick="SpatialEngine.toggleMeasurementVectors()" title="Encender/apagar líneas de medición y proyección de distancia al eje vial">
+                  <span class="layer-indicator" style="background:#00E676;"></span>
+                  <span>📏 Cota al Eje</span>
+                </button>
+              </div>
+
+              <div class="layer-bar-divider"></div>
+
+              <!-- Filtro Territorial -->
+              <div class="layer-bar-section" style="margin-left:auto;">
+                <button type="button" class="layer-filter-btn" id="btnToggleMpioFilter" onclick="SpatialEngine.toggleMpioFilter()" title="Alternar entre ver las vías del municipio activo o toda la red de Antioquia">
+                  <span id="lblMpioFilterIcon">📍</span>
+                  <span id="lblMpioFilterText">Solo Municipio Activo</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Banner de Alerta Aislada de Archivo Comprimido (Solo visible si el proyecto activo falla y no tiene KML/KMZ) -->
+            <div id="spatialAlertContainer" class="spatial-alert-banner" style="display:none;"></div>
+
+            <!-- Split Grid: Left Google Sat Map, Right Contrast Table -->
+            <div class="spatial-contrast-grid">
+              
+              <!-- Left Map: Google Satellite Hybrid with Tertiary Layer in Blue -->
+              <div class="spatial-map-container" style="position:relative;">
+                <div id="leafletMapContainer" class="spatial-map-canvas"></div>
+                <!-- Control Flotante para Centrar / Zoom en Tramos del Proyecto -->
+                <button type="button" id="btnFloatingZoomTracks" class="map-floating-zoom-btn" onclick="SpatialEngine.zoomToProjectTracks()" title="Centrar y hacer zoom en los tramos de placa huella del proyecto">
+                  <span>🎯 Zoom a Tramos</span>
+                </button>
+              </div>
+
+              <!-- Right Table: Spatial Contrast Data -->
+              <div class="spatial-table-panel">
+                <div class="spatial-table-stats-header">
+                  <span id="spatialViasCount" style="color:#38bdf8">&#9679; 4442 vías leídas (115 en jurisdicción/entorno)</span>
+                  <span id="spatialPointsCloseCount" style="color:#34d399">&#10003; 9 de 9 puntos a menos de 35 m de un eje vial</span>
+                </div>
+
+                <div class="spatial-table-scroll table-responsive">
+                  <table class="contrast-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Sector / Tramo KML</th>
+                        <th>Cód. Informe (P / Ejec.)</th>
+                        <th>CODIGO_VIA (ArcGIS / GeoJSON)</th>
+                        <th>NOMBRE_VIA / Categoría</th>
+                        <th style="text-align:right">Longitud / Dist.</th>
+                        <th style="text-align:center">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody id="spatialContrastTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 2: VALIDACIÓN DOCUMENTAL (LISTA 1-27)  -->
+        <!-- ========================================== -->
+        <div id="tab-2" class="tab-content">
+          <div style="display:flex;flex-direction:column;gap:18px">
+            
+            <!-- Quick Filter Bar -->
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <button class="layer-chip doc-filter-btn active" data-filter="ALL">Todos los Ítems (01 al 27)</button>
+                <button class="layer-chip doc-filter-btn" data-filter="CONFORMES">Solo Conformes</button>
+                <button class="layer-chip doc-filter-btn" data-filter="SUBSANAR">Por Subsanar / Faltantes</button>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px">
+                <button class="btn-primary" style="padding:8px 18px;font-size:12px" onclick="document.getElementById('folderInput').click()">
+                  📁 Cargar Carpeta para Auditoría
+                </button>
+              </div>
+            </div>
+
+            <!-- Contenedor de la Lista Numérica Unificada -->
+            <div id="documentalMatrixContainer"></div>
+
+          </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- TAB 3: SALIDAS Y FICHA DE PRIORIZACIÓN     -->
+        <!-- ========================================== -->
+        <div id="tab-3" class="tab-content">
+          <div class="results-container">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px">
+              <div>
+                <h3 style="font-size:18px;font-weight:800;color:var(--color-primary)">Informe de Resultados de Revisión y Subsanación (Fase 3)</h3>
+                <p style="font-size:12px;color:var(--text-muted)">Secretaría de Infraestructura Física - Dirección de Infraestructura Física y Apoyo Territorial</p>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button class="btn-primary" style="background:#0284C7;border-color:#0284C7;box-shadow:0 2px 6px rgba(2,132,199,0.25);" onclick="ReportsEngine.descargarInformeWord()" title="Descargar informe completo en formato Word editable (.docx)">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  📝 Descargar Informe Editable (.docx / Word)
+                </button>
+                <button class="btn-secondary" onclick="ReportsEngine.imprimirInformeTecnico()" title="Visualizar e imprimir formato oficial">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                  📄 Imprimir / Vista Previa
+                </button>
+              </div>
+            </div>
+
+            <div id="officialReportContainer"></div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL DE VISUALIZACIÓN E INSPECCIÓN DE DOCUMENTOS (FASE 2) -->
+  <div id="documentModal" class="modal-overlay">
+    <div id="documentModalWindow" class="modal-window">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:12px;overflow:hidden;flex:1;margin-right:12px;">
+          <h4 id="modalDocTitle" class="modal-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Inspección de Documento</h4>
+          <span id="modalDocStatusBadge" class="status-pill cumple" style="font-size:11px;display:none;white-space:nowrap;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+          <a id="modalDocOpenTabBtn" href="#" target="_blank" class="btn-primary" style="display:none;padding:6px 14px;font-size:12px;text-decoration:none;align-items:center;gap:6px;" title="Abrir documento en una pestaña completa del navegador">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            Abrir en Pestaña Completa
+          </a>
+          <a id="modalDocDownloadBtn" href="#" download class="btn-secondary" style="display:none;padding:5px 12px;font-size:12px;text-decoration:none;align-items:center;gap:6px;" title="Descargar este archivo a su equipo">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Descargar
+          </a>
+          <button class="modal-close-btn" onclick="DocumentalEngine.closeModal()">&times;</button>
+        </div>
+      </div>
+      <div id="modalDocBody" class="modal-body"></div>
+      <div id="modalDocFooter" style="padding:14px 24px;border-top:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;">
+        <div id="modalDocFooterMeta" style="font-size:12px;color:var(--text-muted);"></div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn-primary" onclick="DocumentalEngine.closeModal()">Cerrar Vista Previa</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL PARA NOMBRAR Y CONFIGURAR EXPEDIENTE MUNICIPAL -->
+  <div id="expedienteModal" class="modal-overlay">
+    <div class="modal-window" style="max-width: 600px;">
+      <div class="modal-header">
+        <div>
+          <h4 class="modal-title">🏷️ Nombrar e Identificar Expediente Municipal</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:2px">Asigna o ajusta el nombre, municipio y código para mantener el control de múltiples auditorías simultáneas.</p>
+        </div>
+        <button id="btnExpModalClose" class="modal-close-btn" onclick="App.closeExpedienteModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="gap:16px;">
+        <div class="form-group">
+          <label class="form-label" for="expModalInputName">Nombre / Rótulo del Expediente:</label>
+          <input type="text" id="expModalInputName" class="form-input" placeholder="Ej: Proyecto Placa Huella Veredal 2024">
+        </div>
+
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label class="form-label" for="expModalSelectMpio">Municipio de Antioquia:</label>
+            <select id="expModalSelectMpio" class="form-input" onchange="App.onExpModalMpioChange()"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="expModalInputCode">Código de Radicado / Convenio:</label>
+            <input type="text" id="expModalInputCode" class="form-input" placeholder="Ej: EXP-05000-2024">
+          </div>
+        </div>
+
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label class="form-label" for="expModalInputSubreg">Subregión Departamental:</label>
+            <input type="text" id="expModalInputSubreg" class="form-input" readonly style="background:rgba(0,0,0,0.04)">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="expModalInputTramo">Veredas / Sectores:</label>
+            <input type="text" id="expModalInputTramo" class="form-input" placeholder="Ej: Salto Abajo, Socorro, Cimarronas">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Documento Ficha de Priorización Asociado:</label>
+          <div id="expModalFichaStatus" style="padding:10px 14px;border-radius:8px;background:rgba(16,185,129,0.08);font-size:12px;border:1px solid rgba(16,185,129,0.2);display:flex;align-items:center;gap:8px;">
+            📄 Detectando...
+          </div>
+        </div>
+      </div>
+      <div style="padding:16px 24px;border-top:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;">
+        <button id="btnExpModalDelete" class="btn-danger-outline" onclick="App.deleteCurrentExpediente()">
+          🗑️ Eliminar Expediente
+        </button>
+        <div style="display:flex;gap:10px;">
+          <button id="btnExpModalCancel" class="btn-secondary" onclick="App.closeExpedienteModal()">Cancelar</button>
+          <button id="btnExpModalSave" class="btn-primary" onclick="App.saveExpedienteModal()">Guardar Cambios</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS Library -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- PDF.js, JSZip & LibArchive (Wasm) for In-Browser Document Parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/libarchive.js@1.3.0/dist/libarchive.js"></script>
+  <script>
+    if (typeof pdfjsLib !== "undefined") {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+    if (typeof Archive !== "undefined") {
+      try {
+        const workerBlob = new Blob([
+          "importScripts('https://cdn.jsdelivr.net/npm/libarchive.js@1.3.0/dist/worker-bundle.js');"
+        ], { type: 'application/javascript' });
+        Archive.init({
+          workerUrl: URL.createObjectURL(workerBlob)
+        });
+        window._libarchiveWorkerInitialized = true;
+      } catch(e) {
+        console.warn('LibArchive init warning:', e);
+      }
+    }
+  </script>
+
+  <!-- SheetJS (xlsx) for Standard Excel Template & docx.js for Native Word (.docx) generation -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+
+  <!-- Application Modules -->
+  <script src="js/data.js?v=20261026_fase1b"></script>
+  <script src="js/structural.js?v=20261026_fase1b"></script>
+  <script src="js/spatial.js?v=20261026_fase1b"></script>
+  <script src="js/documental.js?v=20261026_fase1b"></script>
+  <script src="js/reports.js?v=20261026_fase1b"></script>
+  <script src="js/folderReader.js?v=20261026_fase1b"></script>
+  <script src="js/app.js?v=20261026_fase1b"></script>
+
+</body>
+</html>
