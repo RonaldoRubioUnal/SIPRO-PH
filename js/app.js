@@ -1965,24 +1965,42 @@ const App = {
               if (window.proyectosAuditados && window.proyectosAuditados[projectId]) {
                 window.proyectosAuditados[projectId].fase1B = exp.fase1B;
               }
-              if (typeof SpatialEngine.recalculateProjectProximity === "function") {
-                SpatialEngine.recalculateProjectProximity(exp.datos);
-              } else if (typeof SpatialEngine.calculateOverallRoadAlignment === "function") {
-                SpatialEngine.calculateOverallRoadAlignment(exp.datos);
-              }
-              if (typeof SpatialEngine.auditProject === "function") {
-                const audit1B = SpatialEngine.auditProject(exp.datos);
-                exp.fase1B = { ...exp.fase1B, ...audit1B };
-                if (exp.auditGlobal) exp.auditGlobal.audit1B = exp.fase1B;
-              }
-              if (typeof SpatialEngine.initOrUpdateMap === "function") {
-                SpatialEngine.initOrUpdateMap("leafletMapContainer", exp.datos);
-              }
-              if (typeof SpatialEngine.renderContrastTable === "function") {
-                SpatialEngine.renderContrastTable(exp.datos);
-              }
-              if (typeof SpatialEngine.zoomToProjectTracks === "function") {
-                SpatialEngine.zoomToProjectTracks(exp.datos);
+              if (typeof SpatialEngine !== "undefined") {
+                try {
+                  if (typeof SpatialEngine.recalculateProjectProximity === "function") {
+                    SpatialEngine.recalculateProjectProximity(exp.datos);
+                  } else if (typeof SpatialEngine.calculateOverallRoadAlignment === "function") {
+                    SpatialEngine.calculateOverallRoadAlignment(exp.datos);
+                  }
+                  if (typeof SpatialEngine.auditProject === "function") {
+                    const audit1B = SpatialEngine.auditProject(exp.datos);
+                    exp.fase1B = { ...exp.fase1B, ...audit1B };
+                    if (exp.auditGlobal) exp.auditGlobal.audit1B = exp.fase1B;
+                  }
+                  if (typeof SpatialEngine.initOrUpdateMap === "function") {
+                    SpatialEngine.initOrUpdateMap("leafletMapContainer", exp.datos);
+                  }
+                  if (typeof SpatialEngine.renderTerciariaLayer === "function") {
+                    SpatialEngine.renderTerciariaLayer();
+                  }
+                  if (typeof SpatialEngine.renderProjectTrack === "function") {
+                    SpatialEngine.renderProjectTrack(exp.datos);
+                  }
+                  if (typeof SpatialEngine.renderBufferLayer === "function") {
+                    SpatialEngine.renderBufferLayer(exp.datos);
+                  }
+                  if (typeof SpatialEngine.renderMeasurementVectorsLayer === "function") {
+                    SpatialEngine.renderMeasurementVectorsLayer(exp.datos);
+                  }
+                  if (typeof SpatialEngine.renderContrastTable === "function") {
+                    SpatialEngine.renderContrastTable(exp.datos);
+                  }
+                  if (typeof SpatialEngine.zoomToProjectTracks === "function") {
+                    SpatialEngine.zoomToProjectTracks(exp.datos);
+                  }
+                } catch (eSpatial) {
+                  console.warn("Aviso al actualizar visor espacial tras subsanación:", eSpatial);
+                }
               }
             }
           }

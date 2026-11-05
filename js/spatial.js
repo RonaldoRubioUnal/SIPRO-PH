@@ -196,6 +196,7 @@ const SpatialEngine = {
 
   /**
    * Carga paralela de las tres redes viales base departamentales completas
+   * 100% desde ArcGIS FeatureServer (Circular 10) con paginación automática
    * Almacena intacto window.redVialDepartamentalCompleta (sin recortes)
    */
   async loadBaseRoads() {
@@ -217,77 +218,92 @@ const SpatialEngine = {
     this.fullDeptGeoData = window.redVialDepartamentalCompleta;
 
     this._loadingBaseRoadsPromise = (async () => {
+      this.updateArcgisStatusIndicator("CONNECTING");
 
-    try {
-      const [tercRes, secRes, primRes] = await Promise.all([
-        fetch(encodeURI("Base/Red Vial/Terciaria.geojson")).catch(e => null),
-        fetch(encodeURI("Base/Red Vial/Secundaria.geojson")).catch(e => null),
-        fetch(encodeURI("Base/Red Vial/Primaria.geojson")).catch(e => null)
-      ]);
+      try {
+        const fetchGeoJson = async (url) => {
+          try {
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            return await res.json();
+          } catch (e) {
+            console.warn("Fallo en consulta ArcGIS:", url, e);
+            return null;
+          }
+        };
 
-      if (tercRes && tercRes.ok) {
-        const data = await tercRes.json();
-        window.redVialDepartamentalCompleta.terciaria = data;
-        this.cachedGeoData.terciaria = data;
-        (data.features || []).forEach(f => {
-          f.properties = f.properties || {};
-          f.properties.CATEGORIA_VIAL = f.properties.CATEGORIA_VIAL || "Red Terciaria (Orden 3)";
-          f.properties.ORDEN_VIAL = f.properties.ORDEN_VIAL || 3;
-          f.properties.COLOR_CATEGORIA = f.properties.COLOR_CATEGORIA || "#0284c7";
-        });
-      }
+        const base = this.ARCGIS_BASE_URL;
+        // Paginación de Terciarias (4489 registros en bloques de 2000) + Secundarias (169) + Primarias (76)
+        const [primData, secData, tercP1, tercP2, tercP3] = await Promise.all([
+          fetchGeoJson(`${base}/1/query?where=1%3D1&outFields=*&outSR=4326&f=geojson`),
+          fetchGeoJson(`${base}/2/query?where=1%3D1&outFields=*&outSR=4326&f=geojson`),
+          fetchGeoJson(`${base}/3/query?where=1%3D1&resultOffset=0&resultRecordCount=2000&outFields=*&outSR=4326&f=geojson`),
+          fetchGeoJson(`${base}/3/query?where=1%3D1&resultOffset=2000&resultRecordCount=2000&outFields=*&outSR=4326&f=geojson`),
+          fetchGeoJson(`${base}/3/query?where=1%3D1&resultOffset=4000&resultRecordCount=2000&outFields=*&outSR=4326&f=geojson`)
+        ]);
 
-      if (secRes && secRes.ok) {
-        const data = await secRes.json();
-        window.redVialDepartamentalCompleta.secundaria = data;
-        this.cachedGeoData.secundaria = data;
-        (data.features || []).forEach(f => {
-          f.properties = f.properties || {};
-          f.properties.CATEGORIA_VIAL = f.properties.CATEGORIA_VIAL || "Red Secundaria (Orden 2)";
-          f.properties.ORDEN_VIAL = f.properties.ORDEN_VIAL || 2;
-          f.properties.COLOR_CATEGORIA = f.properties.COLOR_CATEGORIA || "#f59e0b";
-        });
-      }
-
-      if (primRes && primRes.ok) {
-        const data = await primRes.json();
-        window.redVialDepartamentalCompleta.primaria = data;
-        this.cachedGeoData.primaria = data;
-        (data.features || []).forEach(f => {
+        const primFeatures = (primData && Array.isArray(primData.features)) ? primData.features : [];
+        primFeatures.forEach(f => {
           f.properties = f.properties || {};
           f.properties.CATEGORIA_VIAL = f.properties.CATEGORIA_VIAL || "Red Primaria (Orden 1)";
           f.properties.ORDEN_VIAL = f.properties.ORDEN_VIAL || 1;
           f.properties.COLOR_CATEGORIA = f.properties.COLOR_CATEGORIA || "#ef4444";
         });
+
+        const secFeatures = (secData && Array.isArray(secData.features)) ? secData.features : [];
+        secFeatures.forEach(f => {
+          f.properties = f.properties || {};
+          f.properties.CATEGORIA_VIAL = f.properties.CATEGORIA_VIAL || "Red Secundaria (Orden 2)";
+          f.properties.ORDEN_VIAL = f.properties.ORDEN_VIAL || 2;
+          f.properties.COLOR_CATEGORIA = f.properties.COLOR_CATEGORIA || "#f59e0b";
+        });
+
+        const tercFeatures = [];
+        const seenTercIds = new Set();
+        [tercP1, tercP2, tercP3].forEach(chunk => {
+          if (chunk && Array.isArray(chunk.features)) {
+            chunk.features.forEach(f => {
+              const id = (f.properties && (f.properties.OBJECTID || f.properties.CODIGO_VIA)) || JSON.stringify(f.geometry);
+              if (!seenTercIds.has(id)) {
+                seenTercIds.add(id);
+                f.properties = f.properties || {};
+                f.properties.CATEGORIA_VIAL = f.properties.CATEGORIA_VIAL || "Red Terciaria (Orden 3)";
+                f.properties.ORDEN_VIAL = f.properties.ORDEN_VIAL || 3;
+                f.properties.COLOR_CATEGORIA = f.properties.COLOR_CATEGORIA || "#0284c7";
+                tercFeatures.push(f);
+              }
+            });
+          }
+        });
+
+        window.redVialDepartamentalCompleta.primaria = { type: "FeatureCollection", features: primFeatures };
+        window.redVialDepartamentalCompleta.secundaria = { type: "FeatureCollection", features: secFeatures };
+        window.redVialDepartamentalCompleta.terciaria = { type: "FeatureCollection", features: tercFeatures };
+        window.redVialDepartamentalCompleta.features = [...tercFeatures, ...secFeatures, ...primFeatures];
+
+        this.cachedGeoData.primaria = window.redVialDepartamentalCompleta.primaria;
+        this.cachedGeoData.secundaria = window.redVialDepartamentalCompleta.secundaria;
+        this.cachedGeoData.terciaria = window.redVialDepartamentalCompleta.terciaria;
+
+        // Construir índice por código DANE para Terciarias
+        this.terciariaByMpio = {};
+        tercFeatures.forEach(f => {
+          const mpioCod = f.properties && f.properties.MUNICIPIO ? String(f.properties.MUNICIPIO).trim() : "SIN_MPIO";
+          if (!this.terciariaByMpio[mpioCod]) this.terciariaByMpio[mpioCod] = [];
+          this.terciariaByMpio[mpioCod].push(f);
+        });
+
+        this.updateArcgisStatusIndicator("CONNECTED", window.redVialDepartamentalCompleta.features.length);
+        this.updateLayerBadges();
+        console.log(`[SpatialEngine] Base Departamental Circular 10 cargada: ${tercFeatures.length} terciarias, ${secFeatures.length} secundarias, ${primFeatures.length} primarias.`);
+      } catch (err) {
+        console.warn("Aviso al cargar bases viales departamentales desde ArcGIS:", err);
+        this.updateArcgisStatusIndicator("OFFLINE_FALLBACK");
+      } finally {
+        this._loadingBaseRoadsPromise = null;
       }
 
-      // Consolidar arreglo maestro intacto
-      window.redVialDepartamentalCompleta.features = [
-        ...(window.redVialDepartamentalCompleta.terciaria.features || []),
-        ...(window.redVialDepartamentalCompleta.secundaria.features || []),
-        ...(window.redVialDepartamentalCompleta.primaria.features || [])
-      ];
-
-      // Construir índice por código DANE para Terciarias
-      this.terciariaByMpio = {};
-      (window.redVialDepartamentalCompleta.terciaria.features || []).forEach(f => {
-        const mpioCod = f.properties && f.properties.MUNICIPIO ? String(f.properties.MUNICIPIO).trim() : "SIN_MPIO";
-        if (!this.terciariaByMpio[mpioCod]) this.terciariaByMpio[mpioCod] = [];
-        this.terciariaByMpio[mpioCod].push(f);
-      });
-
-      this.updateLayerBadges();
-      const countT = (window.redVialDepartamentalCompleta.terciaria.features || []).length;
-      const countS = (window.redVialDepartamentalCompleta.secundaria.features || []).length;
-      const countP = (window.redVialDepartamentalCompleta.primaria.features || []).length;
-      console.log(`[SpatialEngine] Base Departamental cargada: ${countT} terciarias, ${countS} secundarias, ${countP} primarias.`);
-    } catch (err) {
-      console.warn("Aviso al cargar bases viales departamentales:", err);
-    } finally {
-      this._loadingBaseRoadsPromise = null;
-    }
-
-    return window.redVialDepartamentalCompleta;
+      return window.redVialDepartamentalCompleta;
     })();
 
     return this._loadingBaseRoadsPromise;
@@ -492,6 +508,112 @@ const SpatialEngine = {
   },
 
   /**
+   * Consulta espacial garantizada y asíncrona de la Red Vial Oficial (Circular 10) para un proyecto:
+   * Combina el Bounding Box expandido (+/- 5 km / 0.05°) y el código DANE del municipio.
+   * Descarga de Capas 3, 2 y 1, deduplica e indexa en memoria antes de evaluar distancias.
+   */
+  async obtenerRedVialParaProyecto(municipio, bbox, codMunicipio) {
+    const daneCode = codMunicipio || (municipio ? this.getDaneCodeForMunicipio(municipio) : null);
+    const base = this.ARCGIS_BASE_URL;
+
+    this.updateArcgisStatusIndicator("CONNECTING");
+
+    const fetchGeoJson = async (url) => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch (e) {
+        console.warn("Aviso en consulta espacial ArcGIS:", url, e);
+        return null;
+      }
+    };
+
+    const promises = [];
+
+    if (bbox && bbox.minLon !== undefined && !isNaN(bbox.minLon) && isFinite(bbox.minLon)) {
+      const MARGIN = 0.05; // ~5 km de margen de seguridad
+      const minLon = +(bbox.minLon - MARGIN).toFixed(6);
+      const minLat = +(bbox.minLat - MARGIN).toFixed(6);
+      const maxLon = +(bbox.maxLon + MARGIN).toFixed(6);
+      const maxLat = +(bbox.maxLat + MARGIN).toFixed(6);
+
+      // Terciarias en BBox
+      promises.push(fetchGeoJson(`${base}/3/query?geometry=${minLon},${minLat},${maxLon},${maxLat}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&f=geojson`));
+      // Secundarias en BBox
+      promises.push(fetchGeoJson(`${base}/2/query?geometry=${minLon},${minLat},${maxLon},${maxLat}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&f=geojson`));
+      // Primarias en BBox
+      promises.push(fetchGeoJson(`${base}/1/query?geometry=${minLon},${minLat},${maxLon},${maxLat}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326&f=geojson`));
+    }
+
+    if (daneCode) {
+      // Terciarias por código DANE municipal
+      promises.push(fetchGeoJson(`${base}/3/query?where=MUNICIPIO%3D%27${daneCode}%27&outFields=*&outSR=4326&f=geojson`));
+    }
+
+    const responses = await Promise.all(promises);
+
+    const tercFeatures = [];
+    const secFeatures = [];
+    const primFeatures = [];
+    const seenIds = new Set();
+
+    responses.forEach(res => {
+      if (!res || !Array.isArray(res.features)) return;
+      res.features.forEach(f => {
+        const p = f.properties || {};
+        const id = (p.CODIGO_VIA || p.OBJECTID) ? `${p.TIPO_VIA || ''}_${p.CODIGO_VIA || p.OBJECTID}` : JSON.stringify(f.geometry);
+        if (seenIds.has(id)) return;
+        seenIds.add(id);
+
+        const cat = this.classifyFeature(f, p.TIPO_VIA);
+        if (cat === "primaria") {
+          p.ORDEN_VIAL = 1;
+          p.CATEGORIA_VIAL = "Red Primaria (Orden 1)";
+          p.COLOR_CATEGORIA = "#ef4444";
+          primFeatures.push(f);
+        } else if (cat === "secundaria") {
+          p.ORDEN_VIAL = 2;
+          p.CATEGORIA_VIAL = "Red Secundaria (Orden 2)";
+          p.COLOR_CATEGORIA = "#f59e0b";
+          secFeatures.push(f);
+        } else {
+          p.ORDEN_VIAL = 3;
+          p.CATEGORIA_VIAL = "Red Terciaria (Orden 3)";
+          p.COLOR_CATEGORIA = "#0284c7";
+          tercFeatures.push(f);
+        }
+      });
+    });
+
+    this.projectRoadsData.terciaria = { type: "FeatureCollection", features: tercFeatures };
+    this.projectRoadsData.secundaria = { type: "FeatureCollection", features: secFeatures };
+    this.projectRoadsData.primaria = { type: "FeatureCollection", features: primFeatures };
+
+    if (daneCode) {
+      this.terciariaByMpio = this.terciariaByMpio || {};
+      this.terciariaByMpio[daneCode] = tercFeatures.filter(f => String(f.properties?.MUNICIPIO).trim() === daneCode);
+    }
+
+    const totalDownloaded = tercFeatures.length + secFeatures.length + primFeatures.length;
+    if (totalDownloaded > 0) {
+      this.updateArcgisStatusIndicator("CONNECTED", totalDownloaded);
+    } else {
+      this.updateArcgisStatusIndicator("OFFLINE_FALLBACK");
+    }
+
+    this.updateLayerBadges();
+
+    return {
+      type: "FeatureCollection",
+      features: [...tercFeatures, ...secFeatures, ...primFeatures],
+      terciaria: this.projectRoadsData.terciaria,
+      secundaria: this.projectRoadsData.secundaria,
+      primaria: this.projectRoadsData.primaria
+    };
+  },
+
+  /**
    * Sincroniza dinámicamente las vías con ArcGIS FeatureServer para el proyecto activo
    * Almacena únicamente en expedientesMap[proyectoId].fase1B.redVialRecortada
    * Jamás sobrescribe ni recorta window.redVialDepartamentalCompleta
@@ -500,60 +622,16 @@ const SpatialEngine = {
     project = project || this.currentProject;
     if (!project) return;
 
-    if (!window.redVialDepartamentalCompleta || !window.redVialDepartamentalCompleta.features || window.redVialDepartamentalCompleta.features.length === 0) {
-      await this.loadBaseRoads();
-    }
-
     const bbox = this.calculateProjectBbox(project);
-    let arcgisData = null;
-
-    if (bbox) {
-      try {
-        arcgisData = await this.fetchArcgisRoads(bbox);
-      } catch (arcgisErr) {
-        console.warn("Aviso al consultar ArcGIS FeatureServer:", arcgisErr);
-      }
-    }
-
     const activeMpio = project.municipio;
     const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
 
-    // 1. Terciaria Recortada (Consolida la red completa del municipio + entorno del proyecto)
-    let tercFeatures = [];
-    if (daneCode && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
-      tercFeatures = [...this.terciariaByMpio[daneCode]];
-    }
-    if (arcgisData && arcgisData.terciaria && arcgisData.terciaria.features && arcgisData.terciaria.features.length > 0) {
-      const existingIds = new Set(tercFeatures.map(f => (f.properties && (f.properties.CODIGO_VIA || f.properties.OBJECTID)) || JSON.stringify(f.geometry)));
-      arcgisData.terciaria.features.forEach(f => {
-        const id = (f.properties && (f.properties.CODIGO_VIA || f.properties.OBJECTID)) || JSON.stringify(f.geometry);
-        if (!existingIds.has(id)) {
-          tercFeatures.push(f);
-          existingIds.add(id);
-        }
-      });
-    } else if (tercFeatures.length === 0 && bbox && window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.terciaria) {
-      tercFeatures = this.filterFeaturesByBbox(window.redVialDepartamentalCompleta.terciaria.features || [], bbox);
-    }
-    this.projectRoadsData.terciaria = { type: "FeatureCollection", features: tercFeatures };
+    // Obtener red vial garantizada para el entorno del proyecto desde ArcGIS Circular 10
+    await this.obtenerRedVialParaProyecto(activeMpio, bbox, project.codMunicipio || daneCode);
 
-    // 2. Secundaria Recortada
-    let secFeatures = [];
-    if (arcgisData && arcgisData.secundaria && arcgisData.secundaria.features && arcgisData.secundaria.features.length > 0) {
-      secFeatures = arcgisData.secundaria.features;
-    } else if (bbox && window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.secundaria) {
-      secFeatures = this.filterFeaturesByBbox(window.redVialDepartamentalCompleta.secundaria.features || [], bbox);
-    }
-    this.projectRoadsData.secundaria = { type: "FeatureCollection", features: secFeatures };
-
-    // 3. Primaria Recortada
-    let primFeatures = [];
-    if (arcgisData && arcgisData.primaria && arcgisData.primaria.features && arcgisData.primaria.features.length > 0) {
-      primFeatures = arcgisData.primaria.features;
-    } else if (bbox && window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.primaria) {
-      primFeatures = this.filterFeaturesByBbox(window.redVialDepartamentalCompleta.primaria.features || [], bbox);
-    }
-    this.projectRoadsData.primaria = { type: "FeatureCollection", features: primFeatures };
+    const tercFeatures = (this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features) || [];
+    const secFeatures = (this.projectRoadsData.secundaria && this.projectRoadsData.secundaria.features) || [];
+    const primFeatures = (this.projectRoadsData.primaria && this.projectRoadsData.primaria.features) || [];
 
     // Guardar en expedientesMap[proyectoId].fase1B.redVialRecortada (Sin tocar window.redVialDepartamentalCompleta)
     const redRecortada = {
@@ -716,21 +794,28 @@ const SpatialEngine = {
   },
 
   /**
-   * Carga la Red Vial Secundaria Departamental (Base/Red Vial/Secundaria.geojson)
+   * Carga la Red Vial Secundaria Departamental desde ArcGIS FeatureServer (R10)
    * Sin mostrar nunca 'Error'
    */
   async loadSecundariaAuto() {
-    if (this.cachedGeoData.secundaria || this.isLoadingSecundaria) return;
+    if (this.cachedGeoData.secundaria && this.cachedGeoData.secundaria.features && this.cachedGeoData.secundaria.features.length > 0) return;
+    if (this.isLoadingSecundaria) return;
 
     this.isLoadingSecundaria = true;
     const badge = document.getElementById("badgeSecundariaCount");
     if (badge) badge.innerText = "⏳...";
 
     try {
-      const url = encodeURI("Base/Red Vial/Secundaria.geojson");
+      const url = `${this.ARCGIS_BASE_URL}/2/query?where=1%3D1&outFields=*&outSR=4326&f=geojson`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const geojson = await res.json();
+      (geojson.features || []).forEach(f => {
+        f.properties = f.properties || {};
+        f.properties.CATEGORIA_VIAL = "Red Secundaria (Orden 2)";
+        f.properties.ORDEN_VIAL = 2;
+        f.properties.COLOR_CATEGORIA = "#f59e0b";
+      });
       this.cachedGeoData.secundaria = geojson;
       if (window.redVialDepartamentalCompleta) {
         window.redVialDepartamentalCompleta.secundaria = geojson;
@@ -740,7 +825,7 @@ const SpatialEngine = {
         this.renderSecundariaLayer();
       }
     } catch (err) {
-      console.warn("Aviso al cargar Red Secundaria:", err);
+      console.warn("Aviso al cargar Red Secundaria desde ArcGIS:", err);
       if (badge) badge.innerText = "0";
     } finally {
       this.isLoadingSecundaria = false;
@@ -748,21 +833,28 @@ const SpatialEngine = {
   },
 
   /**
-   * Carga la Red Vial Primaria Nacional/Concesionada (Base/Red Vial/Primaria.geojson)
+   * Carga la Red Vial Primaria Nacional/Concesionada desde ArcGIS FeatureServer (R10)
    * Sin mostrar nunca 'Error'
    */
   async loadPrimariaAuto() {
-    if (this.cachedGeoData.primaria || this.isLoadingPrimaria) return;
+    if (this.cachedGeoData.primaria && this.cachedGeoData.primaria.features && this.cachedGeoData.primaria.features.length > 0) return;
+    if (this.isLoadingPrimaria) return;
 
     this.isLoadingPrimaria = true;
     const badge = document.getElementById("badgePrimariaCount");
     if (badge) badge.innerText = "⏳...";
 
     try {
-      const url = encodeURI("Base/Red Vial/Primaria.geojson");
+      const url = `${this.ARCGIS_BASE_URL}/1/query?where=1%3D1&outFields=*&outSR=4326&f=geojson`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const geojson = await res.json();
+      (geojson.features || []).forEach(f => {
+        f.properties = f.properties || {};
+        f.properties.CATEGORIA_VIAL = "Red Primaria (Orden 1)";
+        f.properties.ORDEN_VIAL = 1;
+        f.properties.COLOR_CATEGORIA = "#ef4444";
+      });
       this.cachedGeoData.primaria = geojson;
       if (window.redVialDepartamentalCompleta) {
         window.redVialDepartamentalCompleta.primaria = geojson;
@@ -772,7 +864,7 @@ const SpatialEngine = {
         this.renderPrimariaLayer();
       }
     } catch (err) {
-      console.warn("Aviso al cargar Red Primaria:", err);
+      console.warn("Aviso al cargar Red Primaria desde ArcGIS:", err);
       if (badge) badge.innerText = "0";
     } finally {
       this.isLoadingPrimaria = false;
@@ -1159,8 +1251,9 @@ const SpatialEngine = {
 
     if (bestProj && bestFeature) {
       const p = bestFeature.properties || {};
-      const cod = (p.CODIGO_VIA ? String(p.CODIGO_VIA).trim() : "") || "05000VT01";
+      const rawCod = p.CODIGO_VIA ? String(p.CODIGO_VIA).trim() : "";
       const nom = (p.NOMBRE_VIA ? String(p.NOMBRE_VIA).trim() : "") || "Vía Oficial";
+      const cod = rawCod || (p.RUTA_VIA ? String(p.RUTA_VIA).trim() : "") || (p.TRAMO_VIA ? String(p.TRAMO_VIA).trim() : "") || nom || "05000VT01";
       const orden = p.ORDEN_VIAL || p.ORDEN || p.TIPO_VIA || (p._arcgisLayerId === 1 ? 1 : (p._arcgisLayerId === 2 ? 2 : 3));
       const catName = p.CATEGORIA_VIAL || (orden === 1 ? "Red Primaria (Orden 1)" : (orden === 2 ? "Red Secundaria (Orden 2)" : "Red Terciaria (Orden 3)"));
       const catColor = p.COLOR_CATEGORIA || (orden === 1 ? "#ef4444" : (orden === 2 ? "#f59e0b" : "#0284c7"));
@@ -1457,6 +1550,7 @@ const SpatialEngine = {
         const sub = this.analyzeTrackSubSegments(coords, candidates);
         if (sub) {
           t.subAnalysis = sub;
+          t.visualRuns = sub.visualRuns;
           t.cumpleTotal = sub.cumpleTotal;
           t.noCumpleTotal = sub.noCumpleTotal;
           t.cumpleParcial = sub.cumpleParcial;
@@ -1588,6 +1682,38 @@ const SpatialEngine = {
       geo.motivoRechazo = 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.';
     }
 
+    // Reconstruir lista de contraste sincronizada para vistas y tablas
+    const puntosContraste = [];
+    tramos.forEach(t => {
+      puntosContraste.push({
+        id: t.idTramo,
+        sector: t.nombrePlacemark,
+        codInforme: t.codigoViaDeclarado,
+        codGeoJSON: t.codigoViaGeoJSON,
+        nombreVia: t.nombreViaGeoJSON,
+        distM: t.distanciaEjeM,
+        lat: t.coordenadas && t.coordenadas[0] ? t.coordenadas[0].lat : 0,
+        lng: t.coordenadas && t.coordenadas[0] ? t.coordenadas[0].lng : 0,
+        cumple: t.cumple,
+        cumpleTotal: t.cumpleTotal,
+        cumpleParcial: t.cumpleParcial,
+        estado: t.estado,
+        detalleParcial: t.detalleParcial,
+        coordsTrack: t.coordenadas,
+        subAnalysis: t.subAnalysis,
+        visualRuns: t.visualRuns,
+        puntosDesviacion: t.puntosDesviacion,
+        vectorPrincipal: t.vectorPrincipal,
+        vectoresMedicion: t.vectoresMedicion,
+        coordOrigenKML: t.coordOrigenKML,
+        coordMasCercanaEje: t.coordMasCercanaEje
+      });
+    });
+    puntos.forEach(p => {
+      puntosContraste.push(p);
+    });
+    geo.puntosContraste = puntosContraste;
+
     const pId = project.id || project.codigo || (window.App && window.App.currentProjectId);
     const expMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || (window.App && window.App.expedientesMap);
     if (expMap && pId && expMap[pId]) {
@@ -1601,6 +1727,8 @@ const SpatialEngine = {
       exp.fase1B.aprobado = geo.coberturaConforme;
       exp.fase1B.estado = geo.estado;
       exp.fase1B.tramos = tramos;
+      exp.fase1B.puntos = puntos;
+      exp.fase1B.puntosContraste = puntosContraste;
       exp.fase1B.puntosAnomalia = geo.puntosAnomalia;
 
       if (!tieneKMZ) {
@@ -1633,6 +1761,7 @@ const SpatialEngine = {
       project.fase1B.tieneKMZ = tieneKMZ;
       project.fase1B.coberturaConforme = geo.coberturaConforme;
       project.fase1B.aprobado = geo.coberturaConforme;
+      project.fase1B.puntosContraste = puntosContraste;
     }
   },
 
@@ -1923,8 +2052,32 @@ const SpatialEngine = {
     const tramos = geo.tramos || [];
 
     if (tramos.length > 0) {
+      const candidates = this.getCandidateFeatures(project);
       tramos.forEach(t => {
-        const sub = t.subAnalysis;
+        let sub = t.subAnalysis;
+        if (!sub && t.coordenadas && t.coordenadas.length > 1) {
+          sub = this.analyzeTrackSubSegments(t.coordenadas, candidates);
+          if (sub) {
+            t.subAnalysis = sub;
+            t.visualRuns = sub.visualRuns;
+            t.puntosDesviacion = sub.puntosDesviacion;
+            t.longitudEnViaM = sub.longitudEnViaM;
+            t.longitudFueraViaM = sub.longitudFueraViaM;
+            t.pctEnVia = sub.pctEnVia;
+            t.pctFueraVia = sub.pctFueraVia;
+            t.cumpleTotal = sub.cumpleTotal;
+            t.cumpleParcial = sub.cumpleParcial;
+            t.distanciaEjeM = sub.maxDistM;
+            if (sub.vMax) {
+              t.vectorPrincipal = sub.vMax;
+              t.vectoresMedicion = [sub.vMax];
+              t.coordOrigenKML = sub.vMax.coordOrigenKML;
+              t.coordMasCercanaEje = sub.vMax.coordMasCercanaEje;
+              t.codigoViaGeoJSON = sub.vMax.codigoVia;
+              t.nombreViaGeoJSON = sub.vMax.nombreVia;
+            }
+          }
+        }
         if (sub && sub.visualRuns && sub.visualRuns.length > 0) {
           // PASO B — Renderizado Bicolor en el Mapa (Tramo que Cumple vs. Tramo que No Cumple)
           sub.visualRuns.forEach((run, rIdx) => {
@@ -2215,7 +2368,12 @@ const SpatialEngine = {
    * 3. Tooltip claro: 📏 Distancia al eje: X.XX m | Desde: [Nombre] ➔ Hacia Vía: [CODIGO_VIA]
    */
   renderMeasurementVectorsLayer(project) {
-    if (!this.leafletMap || !this.layers.measurementVectorsLayer) return;
+    if (!this.leafletMap) return;
+    if (!this.layers.measurementVectorsLayer) {
+      this.layers.measurementVectorsLayer = L.layerGroup().addTo(this.leafletMap);
+    } else if (!this.leafletMap.hasLayer(this.layers.measurementVectorsLayer)) {
+      this.leafletMap.addLayer(this.layers.measurementVectorsLayer);
+    }
     this.layers.measurementVectorsLayer.clearLayers();
 
     if (!this.layerVisibility.measurementVectors) return;
@@ -2226,12 +2384,28 @@ const SpatialEngine = {
     const geo = project.georreferenciacion || project.fase1B || {};
     const tramos = geo.tramos || [];
     const puntos = geo.puntos || geo.puntosInspeccion || geo.puntosContraste || [];
+    const candidates = this.getCandidateFeatures(project);
 
     const drawVector = (v, parentItem, isTramo) => {
-      if (!v || !v.coordOrigenKML || !v.coordMasCercanaEje) return null;
-      const [lat1, lng1] = v.coordOrigenKML;
-      const [lat2, lng2] = v.coordMasCercanaEje;
-      const dist = v.distM;
+      if (!v) return null;
+      let lat1, lng1, lat2, lng2;
+      if (Array.isArray(v.coordOrigenKML)) {
+        lat1 = v.coordOrigenKML[0];
+        lng1 = v.coordOrigenKML[1];
+      } else if (v.coordOrigenKML && typeof v.coordOrigenKML === "object") {
+        lat1 = v.coordOrigenKML.lat;
+        lng1 = v.coordOrigenKML.lng;
+      }
+      if (Array.isArray(v.coordMasCercanaEje)) {
+        lat2 = v.coordMasCercanaEje[0];
+        lng2 = v.coordMasCercanaEje[1];
+      } else if (v.coordMasCercanaEje && typeof v.coordMasCercanaEje === "object") {
+        lat2 = v.coordMasCercanaEje.lat;
+        lng2 = v.coordMasCercanaEje.lng;
+      }
+      if (lat1 == null || lng1 == null || lat2 == null || lng2 == null || isNaN(lat1) || isNaN(lat2)) return null;
+
+      const dist = v.distM !== undefined ? v.distM : (v.distanciaEjeM || 0);
       const cumple = dist <= this.BUFFER_TOLERANCIA_M;
       const color = cumple ? "#00E676" : "#FF1744";
       const itemLabel = v.nombrePunto || parentItem.nombrePlacemark || parentItem.sector || (isTramo ? 'Tramo KML' : 'Punto KML');
@@ -2294,16 +2468,59 @@ const SpatialEngine = {
 
     tramos.forEach(t => {
       t._vectorLayers = [];
-      const vectors = t.vectoresMedicion && t.vectoresMedicion.length > 0 ? t.vectoresMedicion : (t.vectorPrincipal ? [t.vectorPrincipal] : []);
+      let vectors = t.vectoresMedicion && t.vectoresMedicion.length > 0 ? [...t.vectoresMedicion] : (t.vectorPrincipal ? [t.vectorPrincipal] : []);
+      if (vectors.length === 0 && t.coordenadas && t.coordenadas.length > 1) {
+        let sub = t.subAnalysis;
+        if (!sub) {
+          sub = this.analyzeTrackSubSegments(t.coordenadas, candidates);
+          if (sub) {
+            t.subAnalysis = sub;
+            t.visualRuns = sub.visualRuns;
+            t.puntosDesviacion = sub.puntosDesviacion;
+          }
+        }
+        if (sub && sub.vMax) {
+          t.vectorPrincipal = sub.vMax;
+          t.vectoresMedicion = [sub.vMax];
+          vectors = [sub.vMax];
+        }
+      }
+      if (t.subAnalysis && t.subAnalysis.puntosDesviacion && t.subAnalysis.puntosDesviacion.length > 0) {
+        t.subAnalysis.puntosDesviacion.forEach((ptDesv, pIdx) => {
+          const vDesv = this.findClosestProjectionToRoads(ptDesv.lat, ptDesv.lng, candidates);
+          vDesv.nombrePunto = `Punto de Quiebre / Desviación (K0+${Math.round(ptDesv.abscisaM)}m)`;
+          vDesv.tipoControl = "desviacion";
+          const already = vectors.some(ev => {
+            const eLat = Array.isArray(ev.coordOrigenKML) ? ev.coordOrigenKML[0] : (ev.coordOrigenKML ? ev.coordOrigenKML.lat : 0);
+            const eLng = Array.isArray(ev.coordOrigenKML) ? ev.coordOrigenKML[1] : (ev.coordOrigenKML ? ev.coordOrigenKML.lng : 0);
+            return Math.abs(eLat - ptDesv.lat) < 0.00005 && Math.abs(eLng - ptDesv.lng) < 0.00005;
+          });
+          if (!already) {
+            vectors.push(vDesv);
+          }
+        });
+      }
       vectors.forEach(v => {
         const drawn = drawVector(v, t, true);
         if (drawn) t._vectorLayers.push(drawn);
       });
     });
 
-    puntos.forEach(p => {
+    puntos.forEach((p, pIdx) => {
       p._vectorLayers = [];
-      const vectors = p.vectoresMedicion && p.vectoresMedicion.length > 0 ? p.vectoresMedicion : (p.vectorMedicion ? [p.vectorMedicion] : []);
+      let vectors = p.vectoresMedicion && p.vectoresMedicion.length > 0 ? [...p.vectoresMedicion] : (p.vectorMedicion ? [p.vectorMedicion] : (p.vectorPrincipal ? [p.vectorPrincipal] : []));
+      if (vectors.length === 0) {
+        const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
+        const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
+        if (lat && lng) {
+          const v = this.findClosestProjectionToRoads(lat, lng, candidates);
+          v.nombrePunto = p.nombrePlacemark || p.sector || p.idPunto || `Punto ${pIdx + 1}`;
+          p.vectorMedicion = v;
+          p.vectorPrincipal = v;
+          p.vectoresMedicion = [v];
+          vectors = [v];
+        }
+      }
       vectors.forEach(v => {
         const drawn = drawVector(v, p, false);
         if (drawn) p._vectorLayers.push(drawn);
@@ -2347,10 +2564,15 @@ const SpatialEngine = {
     if (isTramo && tramos[index]) {
       const t = tramos[index];
       const v = t.vectorPrincipal || (t.vectoresMedicion && t.vectoresMedicion[0]);
-      if (v && v.coordOrigenKML && v.coordMasCercanaEje) {
+      const oLat = v && (Array.isArray(v.coordOrigenKML) ? v.coordOrigenKML[0] : (v.coordOrigenKML ? v.coordOrigenKML.lat : null));
+      const oLng = v && (Array.isArray(v.coordOrigenKML) ? v.coordOrigenKML[1] : (v.coordOrigenKML ? v.coordOrigenKML.lng : null));
+      const eLat = v && (Array.isArray(v.coordMasCercanaEje) ? v.coordMasCercanaEje[0] : (v.coordMasCercanaEje ? v.coordMasCercanaEje.lat : null));
+      const eLng = v && (Array.isArray(v.coordMasCercanaEje) ? v.coordMasCercanaEje[1] : (v.coordMasCercanaEje ? v.coordMasCercanaEje.lng : null));
+
+      if (oLat != null && oLng != null && eLat != null && eLng != null) {
         const center = [
-          (v.coordOrigenKML[0] + v.coordMasCercanaEje[0]) / 2,
-          (v.coordOrigenKML[1] + v.coordMasCercanaEje[1]) / 2
+          (oLat + eLat) / 2,
+          (oLng + eLng) / 2
         ];
         this.leafletMap.flyTo(center, 18, { duration: 1.2 });
         if (t._vectorLayers && t._vectorLayers.length > 0 && t._vectorLayers[0].node) {

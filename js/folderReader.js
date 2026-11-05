@@ -1843,13 +1843,13 @@ const FolderReader = {
       this.showToast(msg);
     }
 
-    // Disparar sincronización vial y cálculo de proximidad en segundo plano sin esperar al clic en la pestaña
+    // Sincronización vial con ArcGIS Circular 10 y cálculo espacial completo
     if (typeof SpatialEngine !== "undefined" && typeof SpatialEngine.syncRoadsForProject === "function") {
-      setTimeout(() => {
-        SpatialEngine.syncRoadsForProject(window.proyectosAuditados[proyectoId].datos || window.proyectosAuditados[proyectoId]).catch(err => {
-          console.warn("Aviso en sincronización vial en segundo plano:", err);
-        });
-      }, 50);
+      try {
+        await SpatialEngine.syncRoadsForProject(window.proyectosAuditados[proyectoId].datos || window.proyectosAuditados[proyectoId]);
+      } catch (errSync) {
+        console.warn("Aviso en sincronización vial:", errSync);
+      }
     }
 
     return window.proyectosAuditados[proyectoId];
@@ -2072,6 +2072,8 @@ const FolderReader = {
 
     const tramos = [];
     const puntosInspeccion = [];
+    const rawTramos = [];
+    const rawPuntos = [];
     const seenPoints = new Set();
     const seenTramos = new Set();
     let tramoCounter = 1;
@@ -2080,6 +2082,9 @@ const FolderReader = {
 
     const parser = new DOMParser();
 
+    // =========================================================================
+    // PASO 1: Extraer geometrías crudas (LineStrings, Polygons, Points) de los KMLs
+    // =========================================================================
     for (const item of allExtractedKmls) {
       try {
         const xmlDoc = parser.parseFromString(item.kmlText, "text/xml");
@@ -2128,26 +2133,14 @@ const FolderReader = {
                   : baseName;
 
                 const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
-                const prox = this.calculateProximity(coords, fichaData);
 
-                // Regla actualizada Buffer 10m
-                const distM = prox.distM;
-                const cumple = distM <= 10.0;
-                const estado = cumple ? `✓ SOBRE ${prox.codGeoJSON}` : `! A ${distM.toFixed(1)} m DE ${prox.codGeoJSON}`;
-
-                tramos.push({
+                rawTramos.push({
                   idTramo: idTramo,
                   nombrePlacemark: tramoName,
-                  carpetaContenedora: item.sourceFile,
+                  sourceFile: item.sourceFile,
                   tipoGeometria: "LineString",
-                  coordenadas: coords,
-                  longitudCalculada: Math.round(lenM * 10) / 10,
-                  codigoViaDeclarado: prox.codDeclarado,
-                  codigoViaGeoJSON: prox.codGeoJSON,
-                  nombreViaGeoJSON: prox.nombreVia,
-                  distanciaEjeM: distM,
-                  cumple: cumple,
-                  estado: estado
+                  coords: coords,
+                  lenM: lenM
                 });
               }
             }
@@ -2191,24 +2184,14 @@ const FolderReader = {
                   : `${baseName} (Polígono)`;
 
                 const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
-                const prox = this.calculateProximity(coords, fichaData);
-                const distM = prox.distM;
-                const cumple = distM <= 10.0;
-                const estado = cumple ? `✓ SOBRE ${prox.codGeoJSON}` : `! A ${distM.toFixed(1)} m DE ${prox.codGeoJSON}`;
 
-                tramos.push({
+                rawTramos.push({
                   idTramo: idTramo,
                   nombrePlacemark: tramoName,
-                  carpetaContenedora: item.sourceFile,
+                  sourceFile: item.sourceFile,
                   tipoGeometria: "Polygon",
-                  coordenadas: coords,
-                  longitudCalculada: Math.round(lenM * 10) / 10,
-                  codigoViaDeclarado: prox.codDeclarado,
-                  codigoViaGeoJSON: prox.codGeoJSON,
-                  nombreViaGeoJSON: prox.nombreVia,
-                  distanciaEjeM: distM,
-                  cumple: cumple,
-                  estado: estado
+                  coords: coords,
+                  lenM: lenM
                 });
               }
             }
@@ -2241,34 +2224,13 @@ const FolderReader = {
                 const description = descNode ? descNode.textContent.trim() : "";
 
                 const idPunto = `PTO-${String(puntoCounter++).padStart(2, "0")}`;
-                const prox = this.calculateProximity([primaryCoord], fichaData);
 
-                const distM = prox.distM;
-                const cumple = distM <= 10.0;
-                const estado = cumple ? `✓ SOBRE ${prox.codGeoJSON}` : `! A ${distM.toFixed(1)} m DE ${prox.codGeoJSON}`;
-
-                puntosInspeccion.push({
+                rawPuntos.push({
                   idPunto: idPunto,
-                  id: idPunto,
                   nombrePlacemark: ptName,
-                  nombre: ptName,
-                  name: ptName,
-                  descripcion: description,
                   description: description,
-                  sector: ptName,
-                  carpetaContenedora: item.sourceFile,
-                  tipoGeometria: "Point",
-                  lat: primaryCoord.lat,
-                  lng: primaryCoord.lng,
-                  coordenadas: [primaryCoord.lat, primaryCoord.lng],
-                  coordsTrack: [primaryCoord],
-                  codInforme: prox.codDeclarado,
-                  codGeoJSON: prox.codGeoJSON,
-                  nombreVia: prox.nombreVia,
-                  distM: distM,
-                  distanciaEjeM: distM,
-                  cumple: cumple,
-                  estado: estado
+                  sourceFile: item.sourceFile,
+                  primaryCoord: primaryCoord
                 });
               }
             }
@@ -2278,6 +2240,190 @@ const FolderReader = {
         console.warn(`Error al parsear KML de ${item.sourceFile}:`, err);
       }
     }
+
+    // =========================================================================
+    // PASO 2: Calcular el Bounding Box del proyecto (+/- 5 km de margen)
+    // =========================================================================
+    let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+    let validCoordCount = 0;
+
+    rawTramos.forEach(t => {
+      (t.coords || []).forEach(c => {
+        if (c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
+          validCoordCount++;
+          if (c.lng < minLon) minLon = c.lng;
+          if (c.lng > maxLon) maxLon = c.lng;
+          if (c.lat < minLat) minLat = c.lat;
+          if (c.lat > maxLat) maxLat = c.lat;
+        }
+      });
+    });
+
+    rawPuntos.forEach(p => {
+      const c = p.primaryCoord;
+      if (c && c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
+        validCoordCount++;
+        if (c.lng < minLon) minLon = c.lng;
+        if (c.lng > maxLon) maxLon = c.lng;
+        if (c.lat < minLat) minLat = c.lat;
+        if (c.lat > maxLat) maxLat = c.lat;
+      }
+    });
+
+    const projectBbox = validCoordCount > 0 ? { minLon, minLat, maxLon, maxLat } : null;
+
+    // =========================================================================
+    // PASO 3: Await obligatorio para descargar las vías oficiales de la Circular 10
+    // =========================================================================
+    if (window.SpatialEngine && typeof window.SpatialEngine.obtenerRedVialParaProyecto === "function") {
+      try {
+        await window.SpatialEngine.obtenerRedVialParaProyecto(fichaData.municipio, projectBbox, fichaData.codMunicipio);
+      } catch (errSync) {
+        console.warn("Aviso al obtener red vial oficial para el proyecto:", errSync);
+      }
+    }
+
+    // =========================================================================
+    // PASO 4: Con las vías oficiales YA en memoria, evaluar distancias ortogonales y conformidad
+    // =========================================================================
+    const candidates = (window.SpatialEngine && typeof window.SpatialEngine.getCandidateFeatures === "function")
+      ? window.SpatialEngine.getCandidateFeatures({ municipio: fichaData.municipio, codMunicipio: fichaData.codMunicipio })
+      : [];
+
+    rawTramos.forEach(item => {
+      let sub = null;
+      if (window.SpatialEngine && typeof window.SpatialEngine.analyzeTrackSubSegments === "function" && item.coords && item.coords.length > 1) {
+        sub = window.SpatialEngine.analyzeTrackSubSegments(item.coords, candidates);
+      }
+
+      if (sub) {
+        const distM = sub.maxDistM;
+        const cumpleTotal = sub.cumpleTotal;
+        const cumpleParcial = sub.cumpleParcial;
+        const noCumpleTotal = sub.noCumpleTotal;
+        const codGeo = (sub.vMax && sub.vMax.codigoVia) || (fichaData.codigosViales && fichaData.codigosViales[0]) || "05000VT01";
+        const nomGeo = (sub.vMax && sub.vMax.nombreVia) || "Vía Oficial";
+
+        let estado = "";
+        let detalleParcial = null;
+        if (cumpleTotal) {
+          estado = `✓ SOBRE ${codGeo}`;
+        } else if (cumpleParcial) {
+          estado = `⚠️ PARCIAL: ${sub.longitudEnViaM} m en vía (${sub.pctEnVia}%) / ${sub.longitudFueraViaM} m fuera`;
+          detalleParcial = `De ${sub.totalTrackLengthM} m totales: ${sub.longitudEnViaM} m coinciden con ${codGeo}, pero ${sub.longitudFueraViaM} m se desvían hasta ${distM} m del eje.`;
+        } else {
+          estado = `! A ${distM} m DE ${codGeo}`;
+          detalleParcial = `Todo el tramo (${sub.totalTrackLengthM} m) se encuentra fuera del corredor de 10 m de la vía oficial (desviación máx: ${distM} m).`;
+        }
+
+        tramos.push({
+          idTramo: item.idTramo,
+          nombrePlacemark: item.nombrePlacemark,
+          carpetaContenedora: item.sourceFile,
+          tipoGeometria: item.tipoGeometria,
+          coordenadas: item.coords,
+          longitudCalculada: Math.round(item.lenM * 10) / 10,
+          codigoViaDeclarado: (fichaData.codigosViales && fichaData.codigosViales[0]) || codGeo,
+          codigoViaGeoJSON: codGeo,
+          nombreViaGeoJSON: nomGeo,
+          distanciaEjeM: distM,
+          distanciaMetros: distM,
+          cumple: cumpleTotal,
+          cumpleTotal: cumpleTotal,
+          cumpleParcial: cumpleParcial,
+          noCumpleTotal: noCumpleTotal,
+          estado: estado,
+          detalleParcial: detalleParcial,
+          subAnalysis: sub,
+          visualRuns: sub.visualRuns,
+          puntosDesviacion: sub.puntosDesviacion,
+          vectorPrincipal: sub.vMax,
+          vectoresMedicion: sub.vMax ? [sub.vMax] : [],
+          coordOrigenKML: sub.vMax ? sub.vMax.coordOrigenKML : (item.coords[0] ? [item.coords[0].lat, item.coords[0].lng] : null),
+          coordMasCercanaEje: sub.vMax ? sub.vMax.coordMasCercanaEje : null,
+          longitudEnViaM: sub.longitudEnViaM,
+          longitudFueraViaM: sub.longitudFueraViaM,
+          pctEnVia: sub.pctEnVia,
+          pctFueraVia: sub.pctFueraVia
+        });
+      } else {
+        const prox = this.calculateProximity(item.coords, fichaData);
+        const distM = prox.distM;
+        const cumple = distM <= 10.0;
+        const estado = cumple ? `✓ SOBRE ${prox.codGeoJSON}` : `! A ${distM.toFixed(1)} m DE ${prox.codGeoJSON}`;
+
+        tramos.push({
+          idTramo: item.idTramo,
+          nombrePlacemark: item.nombrePlacemark,
+          carpetaContenedora: item.sourceFile,
+          tipoGeometria: item.tipoGeometria,
+          coordenadas: item.coords,
+          longitudCalculada: Math.round(item.lenM * 10) / 10,
+          codigoViaDeclarado: prox.codDeclarado,
+          codigoViaGeoJSON: prox.codGeoJSON,
+          nombreViaGeoJSON: prox.nombreVia,
+          distanciaEjeM: distM,
+          distanciaMetros: distM,
+          cumple: cumple,
+          estado: estado,
+          coordOrigenKML: item.coords[0] ? [item.coords[0].lat, item.coords[0].lng] : null,
+          coordMasCercanaEje: prox.coordMasCercanaEje || null,
+          vectorPrincipal: prox.coordMasCercanaEje ? {
+            distM: distM,
+            coordOrigenKML: item.coords[0] ? [item.coords[0].lat, item.coords[0].lng] : null,
+            coordMasCercanaEje: prox.coordMasCercanaEje,
+            codigoVia: prox.codGeoJSON,
+            nombreVia: prox.nombreVia
+          } : null,
+          vectoresMedicion: []
+        });
+      }
+    });
+
+    rawPuntos.forEach(item => {
+      const primaryCoord = item.primaryCoord;
+      let v = null;
+      if (window.SpatialEngine && typeof window.SpatialEngine.findClosestProjectionToRoads === "function") {
+        v = window.SpatialEngine.findClosestProjectionToRoads(primaryCoord.lat, primaryCoord.lng, candidates);
+      }
+      const distM = v ? v.distM : (this.calculateProximity([primaryCoord], fichaData)).distM;
+      const codGeo = v ? v.codigoVia : "05000VT01";
+      const nomGeo = v ? v.nombreVia : "Vía Oficial";
+      const cumple = distM <= 10.0;
+      const estado = cumple ? `✓ SOBRE ${codGeo}` : `! A ${distM.toFixed(1)} m DE ${codGeo}`;
+
+      puntosInspeccion.push({
+        idPunto: item.idPunto,
+        id: item.idPunto,
+        nombrePlacemark: item.nombrePlacemark,
+        nombre: item.nombrePlacemark,
+        name: item.nombrePlacemark,
+        descripcion: item.description,
+        description: item.description,
+        sector: item.nombrePlacemark,
+        carpetaContenedora: item.sourceFile,
+        tipoGeometria: "Point",
+        lat: primaryCoord.lat,
+        lng: primaryCoord.lng,
+        coordenadas: [primaryCoord.lat, primaryCoord.lng],
+        coordsTrack: [primaryCoord],
+        codInforme: (fichaData.codigosViales && fichaData.codigosViales[0]) || codGeo,
+        codGeoJSON: codGeo,
+        codigoViaGeoJSON: codGeo,
+        nombreVia: nomGeo,
+        nombreViaGeoJSON: nomGeo,
+        distM: distM,
+        distanciaEjeM: distM,
+        distanciaMetros: distM,
+        cumple: cumple,
+        estado: estado,
+        coordOrigenKML: v ? v.coordOrigenKML : [primaryCoord.lat, primaryCoord.lng],
+        coordMasCercanaEje: v ? v.coordMasCercanaEje : null,
+        vectorMedicion: v,
+        vectorPrincipal: v,
+        vectoresMedicion: v ? [v] : []
+      });
+    });
 
     // Unificar lista de contraste para compatibilidad de vistas
     const puntosContraste = [];
@@ -2292,18 +2438,46 @@ const FolderReader = {
         lat: t.coordenadas[0] ? t.coordenadas[0].lat : 0,
         lng: t.coordenadas[0] ? t.coordenadas[0].lng : 0,
         cumple: t.cumple,
+        cumpleTotal: t.cumpleTotal,
+        cumpleParcial: t.cumpleParcial,
         estado: t.estado,
-        coordsTrack: t.coordenadas
+        detalleParcial: t.detalleParcial,
+        coordsTrack: t.coordenadas,
+        subAnalysis: t.subAnalysis,
+        visualRuns: t.visualRuns,
+        puntosDesviacion: t.puntosDesviacion,
+        vectorPrincipal: t.vectorPrincipal,
+        vectoresMedicion: t.vectoresMedicion,
+        coordOrigenKML: t.coordOrigenKML,
+        coordMasCercanaEje: t.coordMasCercanaEje
       });
     });
     puntosInspeccion.forEach(p => {
       puntosContraste.push(p);
     });
 
+    // Cobertura calculada por longitud lineal exacta de subsegmentos si existen tramos
     const tramosConformes = tramos.filter(t => t.cumple).length;
-    const coberturaBufferPct = tramos.length > 0
-      ? +((tramosConformes / tramos.length) * 100).toFixed(1)
-      : (puntosInspeccion.length > 0 ? +((puntosInspeccion.filter(p => p.cumple).length / puntosInspeccion.length) * 100).toFixed(1) : 0);
+    let sumEnViaM = 0;
+    let sumTotalTrackM = 0;
+    let hasTrackSubAnalysis = false;
+    tramos.forEach(t => {
+      if (t.subAnalysis && t.subAnalysis.totalTrackLengthM > 0) {
+        hasTrackSubAnalysis = true;
+        sumEnViaM += t.subAnalysis.longitudEnViaM;
+        sumTotalTrackM += t.subAnalysis.totalTrackLengthM;
+      }
+    });
+
+    let coberturaBufferPct = 0;
+    if (hasTrackSubAnalysis && sumTotalTrackM > 0) {
+      coberturaBufferPct = +((sumEnViaM / sumTotalTrackM) * 100).toFixed(1);
+    } else if (tramos.length > 0) {
+      coberturaBufferPct = +((tramosConformes / tramos.length) * 100).toFixed(1);
+    } else if (puntosInspeccion.length > 0) {
+      const puntosCumplen = puntosInspeccion.filter(p => p.cumple).length;
+      coberturaBufferPct = +((puntosCumplen / puntosInspeccion.length) * 100).toFixed(1);
+    }
 
     const lengthKmzM = totalLengthM > 10 ? Math.round(totalLengthM) : (fichaData.longitudTotalM || 0);
     const primaryCod = tramos[0] ? tramos[0].codigoViaGeoJSON : (puntosInspeccion[0] ? puntosInspeccion[0].codGeoJSON : "05000VT01");
@@ -2347,7 +2521,7 @@ const FolderReader = {
         : 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) con geometrías válidas en el expediente.',
       longitudKmlM: lengthKmzM,
       desviacionLongitudPct: 0.8,
-      puntosAnomalia: tramos.length - tramosConformes,
+      puntosAnomalia: tramos.length > 0 ? Math.max(0, tramos.length - tramosConformes) : Math.max(0, puntosInspeccion.length - puntosInspeccion.filter(p => p.cumple).length),
       tramos: tramos,
       puntos: puntosInspeccion,
       puntosInspeccion: puntosInspeccion,
