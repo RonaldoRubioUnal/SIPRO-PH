@@ -23,11 +23,111 @@ const StructuralEngine = {
     const totalConcreto21M3 = +(huellasM3 + cunetasM3 + riostrasM3 + sobreanchoM3 + transicionM3).toFixed(2);
     const totalConcretoCiclopeoM3 = ciclopeoM3;
     const totalConcretoGlobalM3 = +(totalConcreto21M3 + totalConcretoCiclopeoM3).toFixed(2);
-    const sacosCemento = L > 0 
-      ? Math.round(totalConcreto21M3 * 7.5 + totalConcretoCiclopeoM3 * 4.5) 
+    const sacosCemento = L > 0
+      ? Math.round(totalConcreto21M3 * 7.5 + totalConcretoCiclopeoM3 * 4.5)
       : 0;
     const piedraRajonM3 = +(ciclopeoM3 * 0.40).toFixed(2);
     const aceroTotalKg = (options && options.pesoTotalKg) || (L > 0 ? Math.round(L * 26.25) : 0);
+
+    const dosificacionGlobal = totalConcretoGlobalM3 > 0 && sacosCemento > 0
+      ? +(sacosCemento / totalConcretoGlobalM3).toFixed(2)
+      : 7.20;
+
+    const dosificaciones = {
+      rieles: 7.5,
+      entrerriel: 4.5,
+      sobreancho: 7.5,
+      riostras: 7.5,
+      cunetas: 7.5,
+      transicion: 7.5
+    };
+
+    const elementos = {
+      rieles: {
+        nombre: "RIELES",
+        tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        anchoM: 0.90,
+        espesorAltoM: 0.15,
+        longitudM: L,
+        areaSeccionM2: 0.135,
+        cantidad: "2",
+        volumenSimple21M3: huellasM3,
+        volumenCiclopeoM3: 0,
+        volumenTotalM3: huellasM3,
+        dosificacion: 7.5,
+        sacos: Math.round(huellasM3 * 7.5)
+      },
+      entrerriel: {
+        nombre: "ENTRERRIEL",
+        tipo: "Concreto Ciclópeo (f'c = 21 MPa con piedra pegada)",
+        anchoM: 0.90,
+        espesorAltoM: 0.15,
+        longitudM: L,
+        areaSeccionM2: 0.135,
+        cantidad: "1",
+        volumenSimple21M3: 0,
+        volumenCiclopeoM3: ciclopeoM3,
+        volumenTotalM3: ciclopeoM3,
+        dosificacion: 4.5,
+        sacos: Math.round(ciclopeoM3 * 4.5)
+      },
+      sobreancho: {
+        nombre: "SOBREANCHO (Opcional)",
+        tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        anchoM: 0.20,
+        espesorAltoM: 0.15,
+        longitudM: L,
+        areaSeccionM2: 0.030,
+        cantidad: "Paramétrico",
+        volumenSimple21M3: sobreanchoM3,
+        volumenCiclopeoM3: 0,
+        volumenTotalM3: sobreanchoM3,
+        dosificacion: 7.5,
+        sacos: Math.round(sobreanchoM3 * 7.5)
+      },
+      riostras: {
+        nombre: "VIGAS RIOSTRAS",
+        tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        anchoM: 0.25,
+        espesorAltoM: 0.20,
+        longitudM: 4.30,
+        areaSeccionM2: 0.050,
+        cantidad: String(numRiostras),
+        volumenSimple21M3: riostrasM3,
+        volumenCiclopeoM3: 0,
+        volumenTotalM3: riostrasM3,
+        dosificacion: 7.5,
+        sacos: Math.round(riostrasM3 * 7.5)
+      },
+      cunetas: {
+        nombre: "CUNETAS Y BORDILLOS",
+        tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        anchoM: 0.70,
+        espesorAltoM: 0.09,
+        longitudM: L,
+        areaSeccionM2: +(0.70 * 0.09).toFixed(4),
+        cantidad: "2",
+        volumenSimple21M3: cunetasM3,
+        volumenCiclopeoM3: 0,
+        volumenTotalM3: cunetasM3,
+        dosificacion: 7.5,
+        sacos: Math.round(cunetasM3 * 7.5)
+      },
+      transicion: {
+        nombre: "LOSA DE TRANSICIÓN (Opcional)",
+        tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        anchoM: 4.30,
+        espesorAltoM: 0.15,
+        longitudM: 1.50,
+        areaSeccionM2: 0.645,
+        cantidad: "2",
+        volumenSimple21M3: transicionM3,
+        volumenCiclopeoM3: 0,
+        volumenTotalM3: transicionM3,
+        dosificacion: 7.5,
+        sacos: Math.round(transicionM3 * 7.5)
+      }
+    };
 
     return {
       longitudM: L,
@@ -39,18 +139,17 @@ const StructuralEngine = {
       sobreanchoM3,
       transicionM3,
       totalConcreto21M3,
+      totalConcretoSimpleM3: totalConcreto21M3,
       totalConcretoCiclopeoM3,
       totalConcretoGlobalM3,
       sacosCemento,
-      piedraRajonM3,
-      aceroTotalKg
+      dosificacionGlobal,
+      dosificaciones,
+      aceroTotalKg,
+      elementos
     };
   },
 
-  /**
-   * Renderiza el Resumen Descriptivo de Geometría y Elementos Identificados en el Documento
-   * Reemplazo limpio y transparente del esquema SVG
-   */
   /**
    * Helper para sanitizar texto antes de inyectar en el DOM
    */
@@ -65,12 +164,18 @@ const StructuralEngine = {
   },
 
   /**
-   * Renderiza el Resumen Descriptivo (Unificado en la Seccion 1 de la Plantilla Estandar)
+   * Renderiza el Resumen Descriptivo y Dimensiones de Elementos por Separado
+   * Estructura fiel a la plantilla oficial de la Gobernación de Antioquia:
+   * 1. Dimensiones Generales del Tramo (Longitud, Ancho, Separación)
+   * 2. Dimensiones Placa Huella (Rieles, Entrerriel, Sobreancho, Vigas Riostras)
+   * 3. Dimensiones Cunetas y Bordillos (Área sección, Espesor, Ancho base/alto, Ancho superior, Cantidad)
+   * 4. Dimensiones Losa de Transición (Longitud, Ancho base, Espesor, Cantidad)
    */
   renderGeometricSummaryCard(containerId, project) {
     const container = document.getElementById(containerId);
     if (!container) return;
     container.innerHTML = "";
+    container.style.display = "none";
   },
 
   getNominalWeight(diam) {
@@ -86,18 +191,18 @@ const StructuralEngine = {
 
   getDefaultStandardRows(longitudM = 0) {
     return [
-      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 6.00, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Empalmes escalonados" },
-      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0.80, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Separación cada 0.20 m" },
-      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0.40, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Longitud empalme según norma" },
-      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 4.20, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras superiores corridas" },
-      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 4.20, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras inferiores corridas" },
-      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0.85, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Estribos cerrados c/ 0.20 m" },
-      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 6.00, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "3 barras longitudinales" },
-      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0.80, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Flejes en U cada 0.25 m" },
-      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 6.00, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "1 barra superior corrida" },
-      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0.45, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Ganchos de anclaje cada 0.30 m" },
-      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 1.40, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla de refuerzo en extremos" },
-      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 4.20, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla transversal en extremos" }
+      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Empalmes escalonados" },
+      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Separación cada 0.20 m" },
+      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Longitud empalme según norma" },
+      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras superiores corridas" },
+      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras inferiores corridas" },
+      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Estribos cerrados c/ 0.20 m" },
+      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "3 barras longitudinales" },
+      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Flejes en U cada 0.25 m" },
+      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "1 barra superior corrida" },
+      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Ganchos de anclaje cada 0.30 m" },
+      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla de refuerzo en extremos" },
+      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla transversal en extremos" }
     ];
   },
 
@@ -237,8 +342,17 @@ const StructuralEngine = {
     if (rec.fase1A) {
       rec.fase1A.pesoTotalCalculadoKg = t.totales.pesoTotalGlobalKg;
       rec.fase1A.pesoTotalDeclaradoKg = t.totales.pesoTotalGlobalKg;
+      rec.fase1A.pesoTotalKg = t.totales.pesoTotalGlobalKg;
       rec.fase1A.cuantiaRealKgM = t.totales.cuantiaKgM;
       rec.fase1A.cuantiaSuperavitKgM = t.totales.cuantiaSuperavitKgM;
+      rec.fase1A.acero = {
+        pesoTotalKg: t.totales.pesoTotalGlobalKg,
+        pesoDeclaradoKg: t.totales.pesoTotalGlobalKg,
+        pesoCalculadoKg: t.totales.pesoTotalGlobalKg,
+        cuantiaRealKgM: t.totales.cuantiaKgM,
+        subtotalesPorElemento: t.subtotalesPorElemento || {},
+        subtotalesPorDiametro: t.subtotalesPorDiametro || {}
+      };
     }
     if (rec.datos) {
       rec.datos.despieceAcero = rec.datos.despieceAcero || {};
@@ -250,15 +364,27 @@ const StructuralEngine = {
 
     const L = t.infoGeneral.longitudM || rec.datos?.longitudM || 0;
     rec.concretoVolumes = this.calculateConcreteVolumes(L, { pesoTotalKg: t.totales.pesoTotalGlobalKg });
+    if (rec.fase1A) {
+      rec.fase1A.concretoVolumes = rec.concretoVolumes;
+      rec.fase1A.concreto = {
+        totalConcreto21M3: rec.concretoVolumes.totalConcreto21M3,
+        totalConcretoCiclopeoM3: rec.concretoVolumes.totalConcretoCiclopeoM3,
+        totalConcretoGlobalM3: rec.concretoVolumes.totalConcretoGlobalM3,
+        sacosCemento: rec.concretoVolumes.sacosCemento,
+        dosificacionGlobal: rec.concretoVolumes.dosificacionGlobal,
+        elementos: rec.concretoVolumes.elementos
+      };
+    }
     this.renderConcreteTable(rec.concretoVolumes, document.getElementById("concreteVolumesContainer"), rec.fase1A, rec.datos?.despieceExtraido);
 
-    const kpiCuantia = document.getElementById("kpiCuantiaVal");
-    if (kpiCuantia) kpiCuantia.innerText = `${t.totales.cuantiaKgM} kg/m`;
-    const kpiCuantiaSub = document.getElementById("kpiCuantiaSub");
-    if (kpiCuantiaSub) {
-      kpiCuantiaSub.innerHTML = t.totales.cuantiaSuperavitKgM >= 0 
-        ? `<span class="kpi-tag-good">&#9650; +${t.totales.cuantiaSuperavitKgM} kg/m vs Referencia Técnica (26.25)</span>`
-        : `<span style="color:var(--status-danger)">&#9660; Déficit de ${Math.abs(t.totales.cuantiaSuperavitKgM)} kg/m</span>`;
+    if (rec.modalidad === "RECURSOS" && typeof PresupuestoEngine !== "undefined") {
+      PresupuestoEngine.auditarCoherencia(rec);
+      const container1C = document.getElementById("presupuestoAuditContainer");
+      if (container1C) PresupuestoEngine.renderPresupuestoTab(rec, container1C);
+    }
+
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
     }
   },
 
@@ -278,10 +404,30 @@ const StructuralEngine = {
       this.recalculateStandardTemplate(t);
 
       rec.concretoVolumes = this.calculateConcreteVolumes(newL, { pesoTotalKg: t.totales.pesoTotalGlobalKg });
+      if (rec.fase1A) {
+        rec.fase1A.concretoVolumes = rec.concretoVolumes;
+        rec.fase1A.concreto = {
+          totalConcreto21M3: rec.concretoVolumes.totalConcreto21M3,
+          totalConcretoCiclopeoM3: rec.concretoVolumes.totalConcretoCiclopeoM3,
+          totalConcretoGlobalM3: rec.concretoVolumes.totalConcretoGlobalM3,
+          sacosCemento: rec.concretoVolumes.sacosCemento,
+          dosificacionGlobal: rec.concretoVolumes.dosificacionGlobal,
+          elementos: rec.concretoVolumes.elementos
+        };
+      }
       this.renderConcreteTable(rec.concretoVolumes, document.getElementById("concreteVolumesContainer"), rec.fase1A, rec.datos?.despieceExtraido);
+
+      if (rec.modalidad === "RECURSOS" && typeof PresupuestoEngine !== "undefined") {
+        PresupuestoEngine.auditarCoherencia(rec);
+        const container1C = document.getElementById("presupuestoAuditContainer");
+        if (container1C) PresupuestoEngine.renderPresupuestoTab(rec, container1C);
+      }
 
       const kpiTotal = document.getElementById("kpiTotalEvaluado");
       if (kpiTotal) kpiTotal.innerText = `${newL} m`;
+      if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+        App.actualizarKPIsEjecutivos(projectId);
+      }
       const calloutCuantia = document.getElementById("template_callout_cuantia");
       if (calloutCuantia) {
         const tag = t.totales.cuantiaSuperavitKgM >= 0 ? `(✓ +${t.totales.cuantiaSuperavitKgM} kg/m)` : `(⚠️ Déficit ${t.totales.cuantiaSuperavitKgM} kg/m)`;
@@ -303,18 +449,18 @@ const StructuralEngine = {
    */
   getDefaultStandardRows() {
     const defaultElements = [
-      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 6.00, obs: "Empalmes escalonados" },
-      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0.80, obs: "Separación cada 0.20 m" },
-      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0.40, obs: "Longitud empalme según norma" },
-      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 4.20, obs: "2 barras superiores corridas" },
-      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 4.20, obs: "2 barras inferiores corridas" },
-      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0.85, obs: "Estribos cerrados c/ 0.20 m" },
-      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 6.00, obs: "3 barras longitudinales" },
-      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0.80, obs: "Flejes en U cada 0.25 m" },
-      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 6.00, obs: "1 barra superior corrida" },
-      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0.45, obs: "Ganchos de anclaje cada 0.30 m" },
-      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 1.40, obs: "Malla de refuerzo en extremos" },
-      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 4.20, obs: "Malla transversal en extremos" }
+      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Empalmes escalonados" },
+      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Separación cada 0.20 m" },
+      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Longitud empalme según norma" },
+      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras superiores corridas" },
+      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras inferiores corridas" },
+      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Estribos cerrados c/ 0.20 m" },
+      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "3 barras longitudinales" },
+      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Flejes en U cada 0.25 m" },
+      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "1 barra superior corrida" },
+      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0, obs: "Ganchos de anclaje cada 0.30 m" },
+      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla de refuerzo en extremos" },
+      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla transversal en extremos" }
     ];
 
     return defaultElements.map(d => ({
@@ -438,9 +584,32 @@ const StructuralEngine = {
     const tot = template.totales || { pesoTotalGlobalKg: 0, totalVarillas6m: 0, cuantiaKgM: 0, cuantiaSuperavitKgM: 0 };
 
     // 1. Alerta de formato con estilo institucional del dashboard
+    const tieneDoc = (d.tieneDocumento !== false && !!d.archivoNombre && (project.archivosFiles ? !!project.archivosFiles[3] : true));
     const isStd = template.isStandardTemplate;
-    const statusBanner = isStd
-      ? `<div class="template-status-banner status-standard">
+    let statusBanner = "";
+
+    if (!tieneDoc) {
+      statusBanner = `
+        <div class="template-status-banner" style="background:#FEF2F2;border:1.5px solid #EF4444;border-left:5px solid #DC2626;padding:16px 20px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;box-shadow:var(--shadow-sm);">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="font-size:24px;color:#DC2626;font-weight:900;">✕</div>
+            <div>
+              <div style="font-weight:800;color:#991B1B;font-size:14px;margin-bottom:2px;">Documento de Despiece de Acero (Ítem 3) NO APORTADO</div>
+              <div style="font-size:12px;color:#7F1D1D;line-height:1.4;">
+                En la carpeta municipal no se encontró ningún archivo de despiece, planilla de acero o figuración. La cuantía de acero no se puede certificar sin el documento.
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button class="btn-primary" style="padding:6px 14px;font-size:12px;background:#DC2626;border-color:#DC2626;cursor:pointer;" onclick="App.subirSubsanacionItem(3, '${projectId}')" title="Cargar archivo de Despiece de Acero (Ítem 3)">
+              📁 Aportar Despiece de Acero
+            </button>
+          </div>
+        </div>
+      `;
+    } else if (isStd) {
+      statusBanner = `
+        <div class="template-status-banner status-standard">
           <div style="display:flex;align-items:center;gap:12px;">
             <div class="format-badge-icon standard">✓</div>
             <div>
@@ -449,11 +618,14 @@ const StructuralEngine = {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre || 'Plantilla_Estandar.xlsx')}</span>
-            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="document.getElementById('item3FileInput').click()" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
+            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre)}</span>
+            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="App.subirSubsanacionItem(3, '${projectId}')" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
           </div>
-        </div>`
-      : `<div class="template-status-banner status-legacy">
+        </div>
+      `;
+    } else {
+      statusBanner = `
+        <div class="template-status-banner status-legacy">
           <div style="display:flex;align-items:center;gap:12px;">
             <div class="format-badge-icon legacy">⚠️</div>
             <div>
@@ -462,10 +634,12 @@ const StructuralEngine = {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre || 'Despiece_Acero.pdf')}</span>
-            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="document.getElementById('item3FileInput').click()" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
+            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre)}</span>
+            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="App.subirSubsanacionItem(3, '${projectId}')" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
           </div>
-        </div>`;
+        </div>
+      `;
+    }
 
     // 2. Parámetros clave del proyecto (Únicamente los 3 datos requeridos)
     const keyParamsHtml = `
@@ -512,7 +686,7 @@ const StructuralEngine = {
             </div>
             <div class="steel-diam-body">
               <div class="diam-weight font-mono" style="color:${diamColor};">
-                ${(c.pesoTotalKg || 0).toLocaleString('es-CO', {minimumFractionDigits: 1})} <span class="unit">kg</span>
+                ${(c.pesoTotalKg || 0).toLocaleString('es-CO', { minimumFractionDigits: 1 })} <span class="unit">kg</span>
               </div>
               <div class="diam-varillas font-mono">
                 <b>${(c.varillas6m || 0).toLocaleString('es-CO')}</b> <span style="font-size:11px;color:var(--text-muted);">varillas (6 m)</span>
@@ -546,7 +720,7 @@ const StructuralEngine = {
           <div class="steel-total-metrics">
             <div class="steel-metric-main">
               <div class="steel-metric-number font-mono">
-                ${(tot.pesoTotalGlobalKg || 0).toLocaleString('es-CO', {minimumFractionDigits: 1})} <span class="unit">kg</span>
+                ${(tot.pesoTotalGlobalKg || 0).toLocaleString('es-CO', { minimumFractionDigits: 1 })} <span class="unit">kg</span>
               </div>
               <div class="steel-metric-sub font-mono">
                 ${((tot.pesoTotalGlobalKg || 0) / 1000).toFixed(2)} toneladas de acero figurado
@@ -560,7 +734,7 @@ const StructuralEngine = {
               </div>
               <div class="metric-row">
                 <span class="metric-lbl">Longitud Total Varillaje:</span>
-                <span class="metric-val font-mono">${(sub.longitudTotalM || 0).toLocaleString('es-CO', {minimumFractionDigits: 1})} m</span>
+                <span class="metric-val font-mono">${(sub.longitudTotalM || 0).toLocaleString('es-CO', { minimumFractionDigits: 1 })} m</span>
               </div>
               <div class="metric-row">
                 <span class="metric-lbl">Referencia Departamental:</span>
@@ -604,10 +778,10 @@ const StructuralEngine = {
             </span>
           </td>
           <td class="font-mono" style="text-align:right;font-size:12px;">${(parseFloat(r.pesoLin) || 0.56).toFixed(3)}</td>
-          <td class="font-mono" style="text-align:center;font-size:12px;">${(parseFloat(r.corte) || 0).toFixed(2)} m</td>
+          <td class="font-mono" style="text-align:center;font-size:12px;">${(r.corte !== undefined && r.corte !== null && parseFloat(r.corte) > 0) ? `${parseFloat(r.corte).toFixed(2)} m` : ((r.corte === 0 || r.corte === "0") ? "0" : "-")}</td>
           <td class="font-mono font-bold" style="text-align:center;font-size:12px;">${(parseInt(r.piezas) || 0).toLocaleString('es-CO')}</td>
-          <td class="font-mono" style="text-align:right;font-size:12px;">${(r.longTotalM || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})} m</td>
-          <td class="font-mono font-bold" style="text-align:right;font-size:12px;color:var(--color-primary);">${(r.pesoTotalKg || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})} kg</td>
+          <td class="font-mono" style="text-align:right;font-size:12px;">${(r.longTotalM || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })} m</td>
+          <td class="font-mono font-bold" style="text-align:right;font-size:12px;color:var(--color-primary);">${(r.pesoTotalKg || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })} kg</td>
           <td class="font-mono font-bold" style="text-align:center;font-size:12px;">${r.varillas6m || 0}</td>
         </tr>
       `;
@@ -653,8 +827,8 @@ const StructuralEngine = {
               <!-- TOTAL CANTIDADES NOMINALES -->
               <tr class="subtotal-row">
                 <td colspan="6" style="text-align:right;letter-spacing:0.3px;">TOTAL CANTIDADES NOMINALES:</td>
-                <td style="text-align:right;" class="font-mono font-bold">${(sub.longitudTotalM || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})} m</td>
-                <td style="text-align:right;color:#00412E;" class="font-mono font-bold">${(sub.pesoTotalKg || 0).toLocaleString('es-CO', {minimumFractionDigits: 2})} kg</td>
+                <td style="text-align:right;" class="font-mono font-bold">${(sub.longitudTotalM || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })} m</td>
+                <td style="text-align:right;color:#00412E;" class="font-mono font-bold">${(sub.pesoTotalKg || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })} kg</td>
                 <td style="text-align:center;" class="font-mono font-bold">${(sub.varillas6m || 0).toLocaleString('es-CO')} und</td>
               </tr>
             </tbody>
@@ -672,7 +846,7 @@ const StructuralEngine = {
       container.innerHTML = `
         <div style="text-align:center;padding:36px 20px;color:var(--text-muted);background:var(--color-bg-alt);border-radius:8px;">
           <div style="font-weight:800;font-size:15px;margin-bottom:6px;color:var(--text-muted);">ℹ️ Memoria de Volúmenes en Espera</div>
-          <div style="font-size:13px;max-width:540px;margin:0 auto;">Cargue una carpeta municipal para visualizar los volúmenes de concreto simple, concreto ciclópeo y sacos de cemento consignados en el documento o calculados para la longitud de la vía.</div>
+          <div style="font-size:13px;max-width:540px;margin:0 auto;">Cargue una carpeta municipal para visualizar los volúmenes de concreto simple, concreto ciclópeo y sacos de cemento consignados en la plantilla oficial.</div>
         </div>
       `;
       const statConc = document.getElementById("statConcreteTotal");
@@ -688,29 +862,36 @@ const StructuralEngine = {
     const concMem = (despieceExtraido && despieceExtraido.concretoYCemento) ? despieceExtraido.concretoYCemento : null;
     const isDeclared = concMem && concMem.consignadoEnDocumento;
 
-    const valConc21 = isDeclared ? concMem.resumen.concreto21Mpa : `${cv.totalConcreto21M3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³`;
-    const valConcCicl = isDeclared ? concMem.resumen.concretoCiclopeo : `${cv.totalConcretoCiclopeoM3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³`;
-    const valConcTot = isDeclared ? concMem.resumen.concretoTotal : `${cv.totalConcretoGlobalM3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³`;
+    const valConc21 = isDeclared ? concMem.resumen.concreto21Mpa : `${cv.totalConcreto21M3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³`;
+    const valConcCicl = isDeclared ? concMem.resumen.concretoCiclopeo : `${cv.totalConcretoCiclopeoM3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³`;
+    const valConcTot = isDeclared ? concMem.resumen.concretoTotal : `${cv.totalConcretoGlobalM3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³`;
     const valSacos = isDeclared ? concMem.resumen.cementoBultos : `${cv.sacosCemento.toLocaleString('es-CO')} sacos`;
+
+    const numDosi = cv.dosificacionGlobal || (cv.totalConcretoGlobalM3 > 0 ? (cv.sacosCemento / cv.totalConcretoGlobalM3) : 7.20);
+    const valDosi = (concMem && concMem.resumen && concMem.resumen.dosificacionCemento)
+      ? concMem.resumen.dosificacionCemento
+      : `${numDosi.toFixed(2)} sacos / m³`;
 
     const statConc = document.getElementById("statConcreteTotal");
     if (statConc) statConc.innerText = valConcTot;
     const statCem = document.getElementById("statCementTotal");
     if (statCem) statCem.innerText = valSacos;
+    const statDosi = document.getElementById("statDosificacionTotal");
+    if (statDosi) statDosi.innerText = valDosi;
 
-    // 4 Tarjetas KPI superiores (Sin proporciones obsoletas, sin piedra rajón y sin acero de refuerzo)
+    // 5 Tarjetas KPI superiores alineadas a la Plantilla Oficial de la Gobernación
     const kpisHtml = `
-      <div class="concrete-kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+      <div class="concrete-kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));">
         <div class="concrete-kpi-card" style="border-top:3px solid #0284C7;">
           <div class="concrete-kpi-label">Concreto 21 MPa (Simple)</div>
           <div class="concrete-kpi-val" style="color:#0284C7">${valConc21}</div>
-          <div class="concrete-kpi-sub">Huellas + Cunetas + Riostras + Transición</div>
+          <div class="concrete-kpi-sub">Rieles + Riostras + Cunetas + Transición</div>
         </div>
 
         <div class="concrete-kpi-card" style="border-top:3px solid #D97706;">
           <div class="concrete-kpi-label">Concreto Ciclópeo</div>
           <div class="concrete-kpi-val" style="color:#D97706">${valConcCicl}</div>
-          <div class="concrete-kpi-sub">Franja central / Piedra pegada</div>
+          <div class="concrete-kpi-sub">Entrerriel / Franja central</div>
         </div>
 
         <div class="concrete-kpi-card" style="border-top:3px solid #00412E;">
@@ -724,52 +905,95 @@ const StructuralEngine = {
           <div class="concrete-kpi-val" style="color:#059669">${valSacos}</div>
           <div class="concrete-kpi-sub">${isDeclared ? 'Consignado en Documento' : '~7.2 sacos por metro lineal'}</div>
         </div>
+
+        <div class="concrete-kpi-card" style="border-top:3px solid #6366F1;">
+          <div class="concrete-kpi-label">Dosificación Cemento</div>
+          <div class="concrete-kpi-val" style="color:#6366F1">${valDosi}</div>
+          <div class="concrete-kpi-sub">7.5 sacos/m³ (21 MPa) · 4.5 sacos/m³ (Ciclópeo)</div>
+        </div>
       </div>
     `;
 
-    // 6 detailed element rows (Sin proporciones obsoletas, sin piedra rajón y sin acero de refuerzo)
+    // Componentes estructurales 100% alineados con la Plantilla Oficial de la Gobernación
+    const elemData = cv.elementos || {};
     const rows = [
       {
-        componente: "Losa de Rieles / Huellas (2 rieles)",
-        especificacion: "Concreto f'c = 21 MPa (210 kg/cm²)",
-        dimensiones: `2 × 0.90 m × 0.15 m × ${L} m`,
-        volumenM3: cv.huellasM3,
-        cementoEst: Math.round(cv.huellasM3 * 7.5)
+        componente: "RIELES",
+        especificacion: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        cantidad: elemData.rieles?.cantidad || "2",
+        anchoM: (elemData.rieles?.anchoM || 0.90).toFixed(2),
+        espesorAltoM: (elemData.rieles?.espesorAltoM || 0.15).toFixed(2),
+        longitudM: (elemData.rieles?.longitudM || L).toFixed(2),
+        areaSeccionM2: "0.135",
+        dosificacion: "7.50 sacos / m³",
+        volumen21M3: elemData.rieles?.volumenSimple21M3 !== undefined ? elemData.rieles.volumenSimple21M3 : cv.huellasM3,
+        volumenCicM3: 0,
+        cementoEst: Math.round((elemData.rieles?.volumenSimple21M3 !== undefined ? elemData.rieles.volumenSimple21M3 : cv.huellasM3) * 7.5)
       },
       {
-        componente: "Franja Central (Piedra Pegada / Ciclópeo)",
-        especificacion: "Concreto Ciclópeo (f'c = 21 MPa con piedra)",
-        dimensiones: `0.90 m × 0.15 m × ${L} m`,
-        volumenM3: cv.ciclopeoM3,
-        cementoEst: Math.round(cv.ciclopeoM3 * 4.5)
+        componente: "ENTRERRIEL",
+        especificacion: "Concreto Ciclópeo (f'c = 21 MPa con piedra pegada)",
+        cantidad: elemData.entrerriel?.cantidad || "1",
+        anchoM: (elemData.entrerriel?.anchoM || 0.90).toFixed(2),
+        espesorAltoM: (elemData.entrerriel?.espesorAltoM || 0.15).toFixed(2),
+        longitudM: (elemData.entrerriel?.longitudM || L).toFixed(2),
+        areaSeccionM2: "0.135",
+        dosificacion: "4.50 sacos / m³",
+        volumen21M3: 0,
+        volumenCicM3: elemData.entrerriel?.volumenCiclopeoM3 !== undefined ? elemData.entrerriel.volumenCiclopeoM3 : cv.ciclopeoM3,
+        cementoEst: Math.round((elemData.entrerriel?.volumenCiclopeoM3 !== undefined ? elemData.entrerriel.volumenCiclopeoM3 : cv.ciclopeoM3) * 4.5)
       },
       {
-        componente: "Bermas - Cunetas Laterales (2 bermas)",
-        especificacion: "Concreto f'c = 21 MPa (210 kg/cm²)",
-        dimensiones: `2 × 0.70 m × 0.09 m × ${L} m`,
-        volumenM3: cv.cunetasM3,
-        cementoEst: Math.round(cv.cunetasM3 * 7.5)
+        componente: "SOBREANCHO (Opcional)",
+        especificacion: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        cantidad: elemData.sobreancho?.cantidad || "Paramétrico",
+        anchoM: (elemData.sobreancho?.anchoM || 0.20).toFixed(2),
+        espesorAltoM: (elemData.sobreancho?.espesorAltoM || 0.15).toFixed(2),
+        longitudM: (elemData.sobreancho?.longitudM || L).toFixed(2),
+        areaSeccionM2: "0.030",
+        dosificacion: "7.50 sacos / m³",
+        volumen21M3: elemData.sobreancho?.volumenSimple21M3 !== undefined ? elemData.sobreancho.volumenSimple21M3 : (cv.sobreanchoM3 || 0),
+        volumenCicM3: 0,
+        cementoEst: Math.round((elemData.sobreancho?.volumenSimple21M3 !== undefined ? elemData.sobreancho.volumenSimple21M3 : (cv.sobreanchoM3 || 0)) * 7.5)
       },
       {
-        componente: `Vigas Riostras Transversales (${cv.numRiostras} unidades c/ 3m)`,
-        especificacion: "Concreto f'c = 21 MPa (210 kg/cm²)",
-        dimensiones: `${cv.numRiostras} un × (4.30 m × 0.25 m × 0.20 m)`,
-        volumenM3: cv.riostrasM3,
-        cementoEst: Math.round(cv.riostrasM3 * 7.5)
+        componente: "VIGAS RIOSTRAS",
+        especificacion: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        cantidad: elemData.riostras?.cantidad || `${cv.numRiostras || (L > 0 ? (Math.floor(L / 3.0) + 1) : 0)} un`,
+        anchoM: (elemData.riostras?.anchoM || 0.25).toFixed(2),
+        espesorAltoM: (elemData.riostras?.espesorAltoM || 0.20).toFixed(2),
+        longitudM: "4.30",
+        areaSeccionM2: "0.050",
+        dosificacion: "7.50 sacos / m³",
+        volumen21M3: elemData.riostras?.volumenSimple21M3 !== undefined ? elemData.riostras.volumenSimple21M3 : cv.riostrasM3,
+        volumenCicM3: 0,
+        cementoEst: Math.round((elemData.riostras?.volumenSimple21M3 !== undefined ? elemData.riostras.volumenSimple21M3 : cv.riostrasM3) * 7.5)
       },
       {
-        componente: "Sobreancho en Curvas y Bordillos",
-        especificacion: "Concreto f'c = 21 MPa (210 kg/cm²)",
-        dimensiones: `Estimación paramétrica (${L} m × 0.03 m³/m)`,
-        volumenM3: cv.sobreanchoM3 || 0,
-        cementoEst: Math.round((cv.sobreanchoM3 || 0) * 7.5)
+        componente: "CUNETAS Y BORDILLOS",
+        especificacion: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        cantidad: elemData.cunetas?.cantidad || "2",
+        anchoM: (elemData.cunetas?.anchoM || 0.70).toFixed(2),
+        espesorAltoM: (elemData.cunetas?.espesorAltoM || 0.09).toFixed(2),
+        longitudM: (elemData.cunetas?.longitudM || L).toFixed(2),
+        areaSeccionM2: ((elemData.cunetas?.areaSeccionM2 !== undefined ? elemData.cunetas.areaSeccionM2 : ((elemData.cunetas?.anchoM || 0.70) * (elemData.cunetas?.espesorAltoM || 0.09)))).toFixed(4),
+        dosificacion: "7.50 sacos / m³",
+        volumen21M3: elemData.cunetas?.volumenSimple21M3 !== undefined ? elemData.cunetas.volumenSimple21M3 : cv.cunetasM3,
+        volumenCicM3: 0,
+        cementoEst: Math.round((elemData.cunetas?.volumenSimple21M3 !== undefined ? elemData.cunetas.volumenSimple21M3 : cv.cunetasM3) * 7.5)
       },
       {
-        componente: "Losa de Transición (2 losas en extremos)",
-        especificacion: "Concreto f'c = 21 MPa reforzado",
-        dimensiones: `2 losas × (1.50 m × 4.30 m × 0.15 m)`,
-        volumenM3: cv.transicionM3 || 0,
-        cementoEst: Math.round((cv.transicionM3 || 0) * 7.5)
+        componente: "LOSA DE TRANSICIÓN (Opcional)",
+        especificacion: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+        cantidad: elemData.transicion?.cantidad || "2",
+        anchoM: (elemData.transicion?.anchoM || 4.30).toFixed(2),
+        espesorAltoM: (elemData.transicion?.espesorAltoM || 0.15).toFixed(2),
+        longitudM: "1.50",
+        areaSeccionM2: "0.645",
+        dosificacion: "7.50 sacos / m³",
+        volumen21M3: elemData.transicion?.volumenSimple21M3 !== undefined ? elemData.transicion.volumenSimple21M3 : (cv.transicionM3 || 0),
+        volumenCicM3: 0,
+        cementoEst: Math.round((elemData.transicion?.volumenSimple21M3 !== undefined ? elemData.transicion.volumenSimple21M3 : (cv.transicionM3 || 0)) * 7.5)
       }
     ];
 
@@ -778,11 +1002,17 @@ const StructuralEngine = {
         <table class="data-table">
           <thead>
             <tr>
-              <th>Componente Estructural</th>
-              <th>Especificación de Mezcla</th>
-              <th>Dimensiones / Parámetro Estructural</th>
-              <th>Volumen Estimado (m³)</th>
-              <th>Sacos Cemento (50kg)</th>
+              <th style="min-width:170px;">Elemento Estructural</th>
+              <th style="min-width:160px;">Tipo de Concreto</th>
+              <th style="text-align:center;">Cantidad</th>
+              <th style="text-align:right;">Ancho (m)</th>
+              <th style="text-align:right;">Espesor / Alto (m)</th>
+              <th style="text-align:right;">Longitud (m)</th>
+              <th style="text-align:right;">Área Sección (m²)</th>
+              <th style="text-align:right;">Concreto Simple 21 MPa (m³)</th>
+              <th style="text-align:right;">Concreto Ciclópeo (m³)</th>
+              <th style="text-align:right;">Dosificación (sacos / m³)</th>
+              <th style="text-align:right;">Total Cemento (Sacos 50kg)</th>
             </tr>
           </thead>
           <tbody>
@@ -793,28 +1023,40 @@ const StructuralEngine = {
         <tr>
           <td><strong>${r.componente}</strong></td>
           <td><span style="font-size:12px;color:var(--text-muted)">${r.especificacion}</span></td>
-          <td class="font-mono" style="font-size:12px">${r.dimensiones}</td>
-          <td class="font-mono font-bold" style="color:var(--color-primary)">${r.volumenM3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³</td>
-          <td class="font-mono">${r.cementoEst.toLocaleString('es-CO')} sacos</td>
+          <td style="text-align:center;"><span class="dim-pill" style="font-size:11px;font-weight:700;">${r.cantidad}</span></td>
+          <td class="font-mono" style="text-align:right;font-size:12px">${r.anchoM}</td>
+          <td class="font-mono" style="text-align:right;font-size:12px">${r.espesorAltoM}</td>
+          <td class="font-mono" style="text-align:right;font-size:12px">${r.longitudM}</td>
+          <td class="font-mono" style="text-align:right;font-size:12px;color:var(--color-primary);font-weight:700;">${r.areaSeccionM2}</td>
+          <td class="font-mono font-bold" style="text-align:right;color:#0284C7">${r.volumen21M3 > 0 ? r.volumen21M3.toLocaleString('es-CO', { minimumFractionDigits: 2 }) + ' m³' : '-'}</td>
+          <td class="font-mono font-bold" style="text-align:right;color:#D97706">${r.volumenCicM3 > 0 ? r.volumenCicM3.toLocaleString('es-CO', { minimumFractionDigits: 2 }) + ' m³' : '-'}</td>
+          <td class="font-mono font-bold" style="text-align:right;color:#6366F1;">${r.dosificacion}</td>
+          <td class="font-mono" style="text-align:right;">${r.cementoEst.toLocaleString('es-CO')} sacos</td>
         </tr>
       `;
     });
 
     tableHtml += `
             <tr style="background:var(--color-bg-alt);font-weight:800;border-top:2px solid var(--border-color);">
-              <td colspan="3">SUBTOTAL CONCRETO ESTRUCTURAL 21 MPa (Huellas + Cunetas + Riostras + Transición)</td>
-              <td class="font-mono font-bold" style="color:#0284C7">${cv.totalConcreto21M3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³</td>
-              <td class="font-mono">${Math.round(cv.totalConcreto21M3 * 7.5).toLocaleString('es-CO')} sacos</td>
+              <td colspan="7">SUBTOTAL CONCRETO SIMPLE 21 MPa (RIELES + SOBREANCHO + RIOSTRAS + CUNETAS + TRANSICIÓN)</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#0284C7">${cv.totalConcreto21M3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³</td>
+              <td class="font-mono" style="text-align:right;color:var(--text-muted);">-</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#6366F1;">7.50 sacos / m³</td>
+              <td class="font-mono" style="text-align:right;">${Math.round(cv.totalConcreto21M3 * 7.5).toLocaleString('es-CO')} sacos</td>
             </tr>
             <tr style="background:var(--color-bg-alt);font-weight:800;">
-              <td colspan="3">SUBTOTAL CONCRETO CICLÓPEO CENTRAL (Piedra Pegada f'c 21 MPa)</td>
-              <td class="font-mono font-bold" style="color:#D97706">${cv.totalConcretoCiclopeoM3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³</td>
-              <td class="font-mono">${Math.round(cv.ciclopeoM3 * 4.5).toLocaleString('es-CO')} sacos</td>
+              <td colspan="7">SUBTOTAL CONCRETO CICLÓPEO (ENTRERRIEL)</td>
+              <td class="font-mono" style="text-align:right;color:var(--text-muted);">-</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#D97706">${cv.totalConcretoCiclopeoM3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#6366F1;">4.50 sacos / m³</td>
+              <td class="font-mono" style="text-align:right;">${Math.round(cv.totalConcretoCiclopeoM3 * 4.5).toLocaleString('es-CO')} sacos</td>
             </tr>
             <tr style="background:rgba(0,65,46,0.08);font-weight:900;font-size:13px;border-top:2px solid #00412E;">
-              <td colspan="3" style="color:#00412E;">TOTAL GLOBAL CONCRETOS PROYECTO (${L} m)</td>
-              <td class="font-mono font-bold" style="color:#00412E;font-size:15px;">${cv.totalConcretoGlobalM3.toLocaleString('es-CO', {minimumFractionDigits: 2})} m³</td>
-              <td class="font-mono font-bold" style="color:#00412E;font-size:15px;">${cv.sacosCemento.toLocaleString('es-CO')} sacos</td>
+              <td colspan="7" style="color:#00412E;">TOTAL GENERAL CONCRETOS Y CEMENTO (${L} m)</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#0284C7;font-size:13px;">${cv.totalConcreto21M3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#D97706;font-size:13px;">${cv.totalConcretoCiclopeoM3.toLocaleString('es-CO', { minimumFractionDigits: 2 })} m³</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#6366F1;font-size:13px;">${numDosi.toFixed(2)} sacos / m³</td>
+              <td class="font-mono font-bold" style="text-align:right;color:#00412E;font-size:14px;">${cv.sacosCemento.toLocaleString('es-CO')} sacos</td>
             </tr>
           </tbody>
         </table>
@@ -823,12 +1065,11 @@ const StructuralEngine = {
 
     container.innerHTML = kpisHtml + tableHtml;
   },
-
   auditProject(project) {
     const standards = SIPRO_DATA.normativeStandards;
     const despiece = project.despieceExtraido || project.despieceAcero || { marcas: [], pesoTotalDeclaradoKg: 0, cuantiaKgM: 0 };
     const marcas = despiece.marcas || [];
-    
+
     let alerts = [];
 
     // Chequeo de anomalías de hoja de cálculo detectadas en el PDF (informativo)
@@ -852,19 +1093,34 @@ const StructuralEngine = {
       criterioIncumplido: "-"
     }));
 
-    const concretoVolumes = (project.despieceAcero && project.despieceAcero.concretoVolumes) 
-      ? project.despieceAcero.concretoVolumes 
+    const concretoVolumes = (project.despieceAcero && project.despieceAcero.concretoVolumes)
+      ? project.despieceAcero.concretoVolumes
       : this.calculateConcreteVolumes(lengthM, { pesoTotalKg: totalCalculatedWeightKg });
     project.concretoVolumes = concretoVolumes;
 
-    // En esta fase de extracción pura, Fase 1A es no bloqueante
+    const tieneDoc = despiece.tieneDocumento !== false && (!!despiece.archivoNombre || (project.archivosFiles && !!project.archivosFiles[3]));
+    if (!tieneDoc) {
+      alerts.push({
+        criterio: "Documento de Despiece de Acero (Ítem 3)",
+        observacion: "No se aportó el documento de despiece de acero en la carpeta municipal.",
+        accion_requerida: "Aportar el documento de despiece de acero (Ítem 3) en formato Excel o PDF."
+      });
+    }
+
+    const cumpleCuantia = tieneDoc && (realCuantiaKgM >= minCuantia);
+
+    const auditPesoKg = despiece.pesoTotalDeclaradoKg || totalCalculatedWeightKg;
     return {
       fase: "1A_ACERO",
-      aprobado: true,
+      aprobado: tieneDoc,
+      cuantiaConforme: cumpleCuantia,
+      cumpleCuantia: cumpleCuantia,
       normaAplicada: standards.normaBase,
+      longitudTramo: lengthM,
       longitudIntervencionM: lengthM,
       pesoTotalCalculadoKg: totalCalculatedWeightKg,
-      pesoTotalDeclaradoKg: despiece.pesoTotalDeclaradoKg || totalCalculatedWeightKg,
+      pesoTotalDeclaradoKg: auditPesoKg,
+      pesoTotalKg: auditPesoKg,
       diferenciaPesoPct: 0,
       cuantiaRealKgM: realCuantiaKgM,
       cuantiaNormativaMinKgM: minCuantia,
@@ -874,8 +1130,29 @@ const StructuralEngine = {
       marcasCumplen: auditedMarks.length,
       marcasNoCumplen: 0,
       concretoVolumes: concretoVolumes,
+      // ÚNICA FUENTE DE VERDAD (Single Source of Truth) para Fase 1C y reportes
+      acero: {
+        pesoTotalKg: auditPesoKg,
+        pesoDeclaradoKg: auditPesoKg,
+        pesoCalculadoKg: totalCalculatedWeightKg,
+        cuantiaRealKgM: realCuantiaKgM,
+        subtotalesPorElemento: (despiece.standardTemplate && despiece.standardTemplate.subtotalesPorElemento) || {},
+        subtotalesPorDiametro: (despiece.standardTemplate && despiece.standardTemplate.subtotalesPorDiametro) || {}
+      },
+      concreto: {
+        totalConcreto21M3: concretoVolumes.totalConcreto21M3,
+        totalConcretoCiclopeoM3: concretoVolumes.totalConcretoCiclopeoM3,
+        totalConcretoGlobalM3: concretoVolumes.totalConcretoGlobalM3,
+        sacosCemento: concretoVolumes.sacosCemento,
+        dosificacionGlobal: concretoVolumes.dosificacionGlobal,
+        elementos: concretoVolumes.elementos || {}
+      },
       copniaOk: true,
-      hallazgosCriticos: [],
+      hallazgosCriticos: tieneDoc ? [] : [{
+        criterio: "Ítem 3: Despiece de Acero",
+        observacion: "Documento de despiece de acero no aportado",
+        accion_requerida: "Aportar el despiece de acero conforme a los criterios técnicos"
+      }],
       alertas: alerts
     };
   },

@@ -11,6 +11,37 @@ const ReportsEngine = {
   /**
    * Obtiene o inicializa el estado editable de la Fase 3 aislado por proyecto
    */
+  /**
+   * Genera o normaliza la clave única estable por requisito (itemKey)
+   */
+  toItemKey(id) {
+    if (!id) return "";
+    const s = String(id).trim();
+    const lower = s.toLowerCase();
+    if (lower === "fase_1a_acero" || s === "FASE_1A_ACERO") return "FASE_1A_ACERO";
+    if (lower === "fase_1b_espacial" || s === "FASE_1B_GEO") return "FASE_1B_GEO";
+    if (lower === "fase_1c_presupuesto" || s === "FASE_1C_PTO") return "FASE_1C_PTO";
+    const m1 = lower.match(/^item_(\d+)$/);
+    if (m1) return `FASE_2_ITEM_${m1[1]}`;
+    const m2 = s.match(/^FASE_2_ITEM_(\d+)$/i);
+    if (m2) return `FASE_2_ITEM_${m2[1]}`;
+    return s;
+  },
+
+  /**
+   * Obtiene la edición realizada por el usuario para un requisito buscando bajo clave canónica o legacy
+   */
+  getUserEdit(fase3State, id) {
+    if (!fase3State) return null;
+    const itemKey = this.toItemKey(id);
+    const mObs = fase3State.matrizObservaciones;
+    const oEdit = fase3State.observacionesEditadas;
+    if (mObs && mObs[itemKey]) return mObs[itemKey];
+    if (oEdit && oEdit[itemKey]) return oEdit[itemKey];
+    if (oEdit && oEdit[id]) return oEdit[id];
+    return null;
+  },
+
   getFase3State(projectId) {
     if (!projectId) {
       projectId = App.currentProjectId || (App.currentProject && App.currentProject.id);
@@ -21,10 +52,12 @@ const ReportsEngine = {
 
     const rec = window.proyectosAuditados[projectId];
     rec.fase3 = rec.fase3 || {
+      matrizObservaciones: {},
       observacionesEditadas: {},
       hallazgosManuales: [],
       conclusionesConcepto: ""
     };
+    rec.fase3.matrizObservaciones = rec.fase3.matrizObservaciones || rec.fase3.observacionesEditadas || {};
 
     // Sincronizar espejo en SIPRO_DATA.expedientesMap y rec.datos
     if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[projectId]) {
@@ -54,19 +87,76 @@ const ReportsEngine = {
 
     // 1. COMPUERTA 1A: CONTROL ESTRUCTURAL DE ACERO
     if (audit1A) {
-      const fid = "fase_1a_acero";
-      const isApproved = audit1A.aprobado;
-      const defaultStatus = isApproved ? "Conforme" : "No Aceptado / Por Subsanar";
-      const defaultMotivo = isApproved
-        ? `Cuantía de acero ${audit1A.cuantiaRealKgM} kg/m cumple el estándar técnico departamental mínimo de 26.25 kg/m.`
-        : `Cuantía calculada (${audit1A.cuantiaRealKgM || 0} kg/m) inferior al mínimo de 26.25 kg/m exigido por el criterio técnico departamental (Déficit de ${audit1A.cuantiaSuperavitKgM || 0} kg/m). Marcas conformes: ${audit1A.marcasCumplen || 0}/${audit1A.totalMarcas || 0}.`;
+      const fid = "FASE_1A_ACERO";
+      const hasDoc = audit1A.tieneDoc !== false && (
+        (audit1A.pesoTotalKg && audit1A.pesoTotalKg > 0) ||
+        (audit1A.pesoTotalDeclaradoKg && audit1A.pesoTotalDeclaradoKg > 0) ||
+        (audit1A.pesoTotalCalculadoKg && audit1A.pesoTotalCalculadoKg > 0) ||
+        (audit1A.archivoNombre && String(audit1A.archivoNombre).trim().length > 0) ||
+        (rec && rec.archivosFileMap && (rec.archivosFileMap[3] || rec.archivosFileMap["3"])) ||
+        (project && project.archivosFiles && (project.archivosFiles[3] || project.archivosFiles["3"]))
+      );
+      const isApproved = Boolean(hasDoc && audit1A.cuantiaConforme);
+      const defaultStatus = isApproved ? "Conforme" : (!hasDoc ? "Faltante" : "No Aceptado / Por Subsanar");
+      let defaultMotivo = "";
 
-      const userEdit = fase3State.observacionesEditadas[fid];
+      if (!hasDoc) {
+        defaultMotivo = "• Documento faltante: No se aportó archivo de despiece de acero y memoria de concreto.";
+      } else if (isApproved) {
+        const subItem3 = (rec && rec.historialSubsanaciones && rec.historialSubsanaciones.find(h => h.itemId === 3 || h.itemId === "3")) ||
+                         (audit1A.subsanado && { fileName: audit1A.archivoNombre });
+        const fileName = (subItem3 && subItem3.fileName) || audit1A.archivoNombre || (rec && rec.archivosFileMap && rec.archivosFileMap[3] && rec.archivosFileMap[3].name) || "";
+        if (fileName && (subItem3 || audit1A.subsanado)) {
+          defaultMotivo = `✓ SUBSANADO: Cuantía actualizada a ${Number(audit1A.cuantiaRealKgM || 0).toFixed(2)} kg/m (${fileName}).`;
+        } else {
+          defaultMotivo = `Cuantía de acero ${Number(audit1A.cuantiaRealKgM || 0).toFixed(2)} kg/m cumple el estándar técnico departamental mínimo de 26.25 kg/m.`;
+        }
+      } else {
+        const header = "Ajustar despiece y memorias de cálculo (Fase 1A):";
+        const cReal = Number(audit1A.cuantiaRealKgM || 0).toFixed(2);
+        const diffNum = 26.25 - (audit1A.cuantiaRealKgM || 0);
+        const cFaltante = Math.abs(Number(audit1A.cuantiaSuperavitKgM !== undefined ? audit1A.cuantiaSuperavitKgM : diffNum)).toFixed(2);
+        const pTotal = Number(audit1A.pesoTotalKg || audit1A.pesoTotalDeclaradoKg || audit1A.pesoTotalCalculadoKg || 0).toLocaleString('es-CO');
+        const lTramo = Number(audit1A.longitudTramo || audit1A.longitudIntervencionM || (project && project.longitudM) || 0).toLocaleString('es-CO');
+
+        const lineaCuantia = `• Cuantía de Acero: ⚠️ DÉFICIT: ${cReal} kg/m reportados vs. 26.25 kg/m exigidos (Faltante: -${cFaltante} kg/m | Peso total: ${pTotal} kg en ${lTramo} m).`;
+
+        const numDosi = (audit1A.concreto && audit1A.concreto.dosificacionGlobal) ||
+                        (rec && rec.concretoVolumes && rec.concretoVolumes.dosificacionGlobal) ||
+                        (audit1A.concretoVolumes && audit1A.concretoVolumes.dosificacionGlobal) ||
+                        7.20;
+        const lineaCemento = `• Dosificación Cemento: ⚠️ ${Number(numDosi).toFixed(2)} sacos/m³ reportados (Verificar contra estándar de plantilla).`;
+
+        const lineas1A = [lineaCuantia, lineaCemento];
+        defaultMotivo = header + "\n" + [...new Set(lineas1A)].join("\n");
+      }
+
+      const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, "fase_1a_acero");
       const status = userEdit?.estado || defaultStatus;
-      const motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      let motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+
+      // Si el motivo almacenado previamente contiene el texto antiguo o líneas duplicadas, migrar
+      if (typeof motivo === "string") {
+        if (motivo.includes("inferior al mínimo de 26.25 kg/m exigido por el criterio técnico departamental") || motivo.includes("Marcas conformes:")) {
+          motivo = defaultMotivo;
+          if (userEdit && typeof userEdit === "object") {
+            userEdit.motivo = defaultMotivo;
+          }
+        } else {
+          const rawLines = motivo.split("\n");
+          const dedupedLines = [...new Set(rawLines)];
+          if (dedupedLines.length < rawLines.length) {
+            motivo = dedupedLines.join("\n");
+            if (userEdit && typeof userEdit === "object") {
+              userEdit.motivo = motivo;
+            }
+          }
+        }
+      }
 
       const obj = {
         id: fid,
+        itemKey: fid,
         fase: "Fase 1A",
         titulo: "Control Estructural de Acero Mínimo",
         norma: "Criterio Técnico Departamental (26.25 kg/m)",
@@ -82,25 +172,113 @@ const ReportsEngine = {
       }
     }
 
-    // 2. COMPUERTA 1B: CONTRASTE ESPACIAL Y ALINEACIÓN VIAL
+    // 2. COMPUERTA 1B: CONTRASTE ESPACIAL Y ALINEACIÓN VIAL (Cifras exactas calculadas)
     if (audit1B) {
-      const fid = "fase_1b_espacial";
+      const fid = "FASE_1B_GEO";
       const isApproved = audit1B.aprobado;
       const defaultStatus = isApproved ? "Conforme" : "No Aceptado / Por Subsanar";
-      let defaultMotivo = isApproved
-        ? `Trazados georreferenciados conformes con 100% de coincidencia y alineación con la red vial departamental (tolerancia de 10 m).`
-        : `Desfase espacial o coincidencia (${audit1B.coberturaBufferPct || 0}%) fuera del corredor vial terciario autorizado (tolerancia de 10 m).`;
+      let defaultMotivo = "";
 
-      if (audit1B.alertaComprimido) {
+      if (isApproved) {
+        defaultMotivo = `Trazados georreferenciados conformes con 100% de coincidencia y alineación con la red vial departamental (tolerancia de 10 m).`;
+      } else if (audit1B.tieneKMZ === false || audit1B.tieneGeorreferenciacionValida === false) {
+        defaultMotivo = "Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem 24): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.";
+      } else if (audit1B.alertaComprimido) {
         defaultMotivo = audit1B.alertaComprimido;
+      } else {
+        const fallas = [];
+        const header = "Ajustar georreferenciación a la Red Vial oficial (tolerancia máx. 10 m):";
+
+        // Detalle exacto por Tramos / Trazados (sin agrupar ni omitir ninguno)
+        const tramos = audit1B.tramos || [];
+        const tramosFallidos = tramos.filter(t => {
+          return t.cumple === false || 
+                 t.cumpleParcial === true || 
+                 (t.distanciaEjeM !== undefined && t.distanciaEjeM > 10) || 
+                 (t.pctFueraVia !== undefined && t.pctFueraVia > 0) ||
+                 (t.longitudFueraViaM !== undefined && t.longitudFueraViaM > 0);
+        });
+
+        if (tramosFallidos.length > 0) {
+          tramosFallidos.forEach((t, idx) => {
+            const nom = (t.nombrePlacemark && String(t.nombrePlacemark).trim()) || 
+                        (t.idTramo && String(t.idTramo).trim()) || 
+                        `Tramo ${idx + 1}`;
+            const totM = Number(t.totalTrackLengthM || t.longitudM || 0);
+            const fueraNum = Number(t.longitudFueraViaM !== undefined ? t.longitudFueraViaM : (t.subAnalysis?.longitudFueraViaM !== undefined ? t.subAnalysis.longitudFueraViaM : (t.cumple ? 0 : totM)));
+            const enViaNum = Number(t.longitudEnViaM !== undefined ? t.longitudEnViaM : (t.subAnalysis?.longitudEnViaM !== undefined ? t.subAnalysis.longitudEnViaM : Math.max(0, totM - fueraNum)));
+            const pctEnViaNum = Number(t.pctEnVia !== undefined ? t.pctEnVia : (t.subAnalysis?.pctEnVia !== undefined ? t.subAnalysis.pctEnVia : (totM > 0 ? (enViaNum / totM) * 100 : 0)));
+            const maxDev = Number(t.distanciaEjeM !== undefined ? t.distanciaEjeM : (t.distanciaMetros !== undefined ? t.distanciaMetros : (t.distM || 0)));
+            const codVia = t.codigoViaGeoJSON || t.codigoViaDeclarado || "la red vial";
+
+            const isParcial = t.cumpleParcial === true || (enViaNum > 0.5 && fueraNum > 0.5 && pctEnViaNum > 0.5 && pctEnViaNum < 99.5);
+
+            if (isParcial) {
+              fallas.push(`• ${nom}: ⚠️ PARCIAL: ${enViaNum.toFixed(1)} m en vía (${pctEnViaNum.toFixed(1)}%) / ${fueraNum.toFixed(1)} m fuera (Vía ${codVia}).`);
+            } else {
+              const fueraFinal = (fueraNum > 0 ? fueraNum : totM).toFixed(1);
+              fallas.push(`• ${nom}: ✕ FUERA DE VÍA: ${fueraFinal} m fuera del corredor (desfase máx. ${maxDev.toFixed(1)} m de ${codVia}).`);
+            }
+          });
+        }
+
+        // Detalle exacto por Puntos de referencia (excluyendo puntosContraste para no duplicar tramos)
+        const puntos = (audit1B.puntos && audit1B.puntos !== audit1B.puntosContraste)
+          ? audit1B.puntos
+          : (audit1B.puntosInspeccion || []);
+        const puntosFallidos = puntos.filter(p => {
+          const dist = p.distanciaEjeM !== undefined ? p.distanciaEjeM : (p.distanciaMetros !== undefined ? p.distanciaMetros : (p.distM !== undefined ? p.distM : 0));
+          return dist > 10 || p.cumple === false;
+        });
+
+        if (puntosFallidos.length > 0) {
+          puntosFallidos.forEach((p, pIdx) => {
+            const nom = (p.nombrePlacemark && String(p.nombrePlacemark).trim()) || 
+                        (p.sector && String(p.sector).trim()) || 
+                        (p.idPunto && String(p.idPunto).trim()) || 
+                        `Punto ${pIdx + 1}`;
+            const dist = Number(p.distanciaEjeM !== undefined ? p.distanciaEjeM : (p.distanciaMetros !== undefined ? p.distanciaMetros : (p.distM || 0))).toFixed(1);
+            const codVia = p.codigoViaGeoJSON || p.codGeoJSON || p.codigoViaDeclarado || "la red vial";
+            fallas.push(`• ${nom}: ✕ FUERA DE VÍA: Desfasado a ${dist} m del eje vial (${codVia}).`);
+          });
+        }
+
+        // 3. Deduplicación de líneas idénticas al construir el texto de la Fase 3
+        const lineasUnicas = [...new Set(fallas)];
+
+        if (lineasUnicas.length > 0) {
+          defaultMotivo = `${header}\n${lineasUnicas.join("\n")}`;
+        } else {
+          defaultMotivo = `${header}\n• Desfase espacial: Coincidencia (${audit1B.coberturaBufferPct || 0}%) fuera del corredor vial terciario autorizado (tolerancia de 10 m).`;
+        }
       }
 
-      const userEdit = fase3State.observacionesEditadas[fid];
+      const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, "fase_1b_espacial");
       const status = userEdit?.estado || defaultStatus;
-      const motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      let motivo = userEdit?.motivo !== undefined ? userEdit.motivo : (typeof userEdit === "string" ? userEdit : defaultMotivo);
+
+      // Si el motivo almacenado previamente contiene el texto antiguo o líneas duplicadas, deduplicar
+      if (typeof motivo === "string") {
+        if (motivo.includes("Desfase en trazado [") || motivo.includes("Desfase en puntos de referencia:")) {
+          motivo = defaultMotivo;
+          if (userEdit && typeof userEdit === "object") {
+            userEdit.motivo = defaultMotivo;
+          }
+        } else {
+          const rawLines = motivo.split("\n");
+          const dedupedLines = [...new Set(rawLines)];
+          if (dedupedLines.length < rawLines.length) {
+            motivo = dedupedLines.join("\n");
+            if (userEdit && typeof userEdit === "object") {
+              userEdit.motivo = motivo;
+            }
+          }
+        }
+      }
 
       const obj = {
         id: fid,
+        itemKey: fid,
         fase: "Fase 1B",
         titulo: "Georreferenciación y Contraste Espacial de Trazados (Alineación con la Red Vial)",
         norma: "Red Terciaria Departamental (Tolerancia 10 m)",
@@ -116,29 +294,149 @@ const ReportsEngine = {
       }
     }
 
-    // 3. COMPUERTA 2: LISTA DE 27 ÍTEMS DOCUMENTALES
-    const items27 = (audit2 && audit2.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
+    // 2.5 COMPUERTA 1C: COHERENCIA PRESUPUESTO (si modalidad === 'RECURSOS')
+    if (rec && rec.modalidad === "RECURSOS") {
+      const fid = "FASE_1C_PTO";
+      const f1c = rec.fase1C;
+      const isApproved = f1c ? f1c.aprobado === true : false;
+      const defaultStatus = isApproved ? "Conforme" : "No Aceptado / Por Subsanar";
+      let defaultMotivo = "";
+
+      if (isApproved) {
+        defaultMotivo = `Presupuesto oficial coherente con el despiece y especificaciones dentro de la tolerancia de ±${(f1c && f1c.toleranciaPct) || 5}%.`;
+      } else {
+        const header = "Corregir discrepancias entre Presupuesto y Despiece (Fase 1C):";
+        const lineas = [];
+
+        if (!f1c || !f1c.presupuestoData) {
+          lineas.push("• Documento faltante: Archivo de Presupuesto Oficial no aportado en formato de hoja de cálculo válido (.xlsx / .xls) o sin partidas evaluables.");
+        } else {
+          if (f1c.presupuestoData.hojaPresupuestoEncontrada === false) {
+            lineas.push("• Hoja no encontrada: El archivo Excel de presupuesto no contiene la pestaña obligatoria 'PRESUPUESTO'.");
+          }
+
+          // Objeto del proyecto (si no coincide)
+          if (f1c.presupuestoData.esPlacaHuella === false) {
+            const textoObj = f1c.presupuestoData.objetoProyecto || "No identificado o sin mención a Placa Huella";
+            lineas.push(`• Objeto del Presupuesto: ✕ NO CORRESPONDE A PLACA HUELLA (Registrado: \"${textoObj}\").`);
+          }
+
+          if (f1c.comparacion && f1c.comparacion.length > 0) {
+            const discrepantes = f1c.comparacion.filter(c => !c.coherente);
+            discrepantes.forEach(c => {
+              const vDesp = Number(c.cantDespiece) || 0;
+              const vPres = Number(c.cantPresupuesto) || 0;
+              const deltaVal = c.delta !== undefined ? c.delta : (vPres - vDesp);
+              const sign = deltaVal > 0 ? "+" : (deltaVal < 0 ? "-" : "");
+              const deltaFmt = `${sign}${Math.abs(deltaVal).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              const vDespFmt = vDesp.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const vPresFmt = vPres.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const pctFmt = Number(c.pct || 0).toFixed(2);
+
+              if (c.id === "longitud_placa_huella") {
+                lineas.push(`• Longitud Placa Huella: ⚠️ DISCREPANCIA: Despiece = ${vDespFmt} m vs. Presupuesto = ${vPresFmt} m (Diferencia: ${deltaFmt} m / ${pctFmt}%).`);
+              } else if (c.id === "acero_refuerzo") {
+                lineas.push(`• Acero de Refuerzo: ⚠️ DISCREPANCIA: Despiece = ${vDespFmt} kg vs. Presupuesto = ${vPresFmt} kg (Diferencia: ${deltaFmt} kg / ${pctFmt}%).`);
+              } else if (c.id === "concreto_simple") {
+                lineas.push(`• Concreto 21 MPa: ⚠️ DISCREPANCIA: Despiece = ${vDespFmt} m³ vs. Presupuesto = ${vPresFmt} m³ (Diferencia: ${deltaFmt} m³ / ${pctFmt}%).`);
+              } else if (c.id === "concreto_ciclopeo") {
+                lineas.push(`• Concreto Ciclópeo: ⚠️ DISCREPANCIA: Despiece = ${vDespFmt} m³ vs. Presupuesto = ${vPresFmt} m³ (Diferencia: ${deltaFmt} m³ / ${pctFmt}%).`);
+              } else {
+                lineas.push(`• ${c.item}: ⚠️ DISCREPANCIA: Despiece = ${vDespFmt} ${c.unidad} vs. Presupuesto = ${vPresFmt} ${c.unidad} (Diferencia: ${deltaFmt} ${c.unidad} / ${pctFmt}%).`);
+              }
+            });
+          } else if (f1c.hallazgos && f1c.hallazgos.length > 0) {
+            f1c.hallazgos.forEach(h => {
+              if (h.id === "objeto_no_placa_huella") {
+                // Ya cubierto arriba si existía
+              } else {
+                lineas.push(`• ${h.item || 'Partida'}: ⚠️ DISCREPANCIA: ${h.motivo}`);
+              }
+            });
+          }
+        }
+
+        const lineasDedup = [...new Set(lineas)];
+        if (lineasDedup.length > 0) {
+          defaultMotivo = header + "\n" + lineasDedup.join("\n");
+        } else {
+          defaultMotivo = header + "\n• Incoherencia detectada entre las cantidades del Presupuesto Oficial y las Memorias/Despiece de obra.";
+        }
+      }
+
+      const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, "fase_1c_presupuesto");
+      const status = userEdit?.estado || defaultStatus;
+      let motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+
+      // Si el motivo guardado previamente contiene el texto antiguo sin viñetas, migrar al nuevo formato estructurado
+      if (typeof motivo === "string") {
+        if (motivo.includes("Incoherencia Presupuestal (Fase 1C):") || motivo.includes("en presupuesto =") || motivo.includes("Incoherencia entre cantidades del Presupuesto Oficial")) {
+          motivo = defaultMotivo;
+          if (userEdit && typeof userEdit === "object") {
+            userEdit.motivo = defaultMotivo;
+          }
+        } else {
+          const rawLines = motivo.split("\n");
+          const dedupedLines = [...new Set(rawLines)];
+          if (dedupedLines.length < rawLines.length) {
+            motivo = dedupedLines.join("\n");
+            if (userEdit && typeof userEdit === "object") {
+              userEdit.motivo = motivo;
+            }
+          }
+        }
+      }
+
+      const obj = {
+        id: fid,
+        itemKey: fid,
+        fase: "Fase 1C",
+        titulo: "Coherencia de Cantidades en Presupuesto Oficial",
+        norma: `Cruce Presupuesto vs. Despiece (Tolerancia ±${(f1c && f1c.toleranciaPct) || 5}%)`,
+        estado: status,
+        motivo: motivo,
+        isManual: false
+      };
+
+      if (status === "Conforme") {
+        compliantItems.push(obj);
+      } else {
+        findings.push(obj);
+      }
+    }
+
+    // 3. COMPUERTA 2: LISTA DE REQUISITOS DOCUMENTALES
+    const items27 = (audit2 && audit2.items) || (rec && rec.fase2 && rec.fase2.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
     items27.forEach((it) => {
-      const fid = `item_${it.num || it.id}`;
+      const num = it.num || it.id;
+      const fid = `FASE_2_ITEM_${num}`;
+      const legacyFid = `item_${num}`;
       const defaultStatus = it.conforme ? "Conforme" : (it.vencido ? "Vencido" : (it.faltante ? "Faltante" : "No Aceptado / Por Subsanar"));
       let defaultMotivo = "";
       if (it.conforme) {
         defaultMotivo = `Documento aportado (${it.archivoDetectado || "vigente"}) y conforme con la regla normativa.`;
       } else if (it.faltante || !it.archivoDetectado) {
-        defaultMotivo = "Documento no aportado en la carpeta del expediente municipal.";
+        if (num === 24 || it.id === 24 || it.num === 24) {
+          defaultMotivo = "Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem 24): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.";
+        } else if (num === 3 || it.id === 3 || it.num === 3) {
+          defaultMotivo = "• Documento faltante: No se aportó archivo de despiece de acero y memoria de concreto.";
+        } else {
+          defaultMotivo = "Documento no aportado en la carpeta del expediente municipal.";
+        }
       } else if (it.vencido) {
         defaultMotivo = "Documento detectado pero con fecha vencida o fuera de vigencia legal.";
       } else {
         defaultMotivo = it.observacion || "Documento no aceptado conforme a las especificaciones.";
       }
 
-      const userEdit = fase3State.observacionesEditadas[fid];
+      const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, legacyFid);
       const status = userEdit?.estado || defaultStatus;
       const motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
 
       const obj = {
         id: fid,
-        fase: `Fase 2 - Ítem ${it.num}`,
+        itemKey: fid,
+        fase: `Fase 2 - Ítem ${num}`,
         titulo: `${it.title}`,
         norma: it.rule || "Requisito Documental",
         entidad: it.entity,
@@ -159,6 +457,7 @@ const ReportsEngine = {
     (fase3State.hallazgosManuales || []).forEach((m) => {
       const obj = {
         id: m.id,
+        itemKey: m.id,
         fase: "Revisión Manual",
         titulo: m.titulo || "Observación / Requisito Adicional",
         norma: "Criterio Técnico del Revisor",
@@ -182,33 +481,99 @@ const ReportsEngine = {
   updateFindingStatus(id, newStatus) {
     const projectId = App.currentProjectId;
     const state = this.getFase3State(projectId);
+    const itemKey = this.toItemKey(id);
+
+    state.matrizObservaciones = state.matrizObservaciones || {};
+    state.observacionesEditadas = state.observacionesEditadas || {};
 
     // Si es manual
     const manual = (state.hallazgosManuales || []).find(m => m.id === id);
     if (manual) {
       manual.estado = newStatus;
     } else {
-      state.observacionesEditadas[id] = state.observacionesEditadas[id] || {};
-      state.observacionesEditadas[id].estado = newStatus;
+      state.matrizObservaciones[itemKey] = state.matrizObservaciones[itemKey] || {};
+      state.matrizObservaciones[itemKey].estado = newStatus;
+
+      state.observacionesEditadas[itemKey] = state.matrizObservaciones[itemKey];
+      state.observacionesEditadas[id] = state.matrizObservaciones[itemKey];
+    }
+
+    // Actualizar en tiempo real expedientesMap[proyectoId].fase3.matrizObservaciones
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    if (expedientesMap[projectId]) {
+      expedientesMap[projectId].fase3 = expedientesMap[projectId].fase3 || {};
+      expedientesMap[projectId].fase3.matrizObservaciones = state.matrizObservaciones;
+      expedientesMap[projectId].fase3.observacionesEditadas = state.observacionesEditadas;
+    }
+
+    if (window.App && typeof App.saveAuditProgress === "function") {
+      App.saveAuditProgress(true);
     }
 
     this.renderOfficialReport(App.currentProject, App.auditGlobal, document.getElementById("officialReportContainer"));
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
+    }
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
+    }
+  },
+
+  /**
+   * Auto-ajusta la altura del textarea dinámicamente y sincroniza el contenedor de impresión
+   */
+  autoResizeTextarea(el) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.max(el.scrollHeight, 38) + "px";
+    if (el.id && el.id.startsWith("motivo_")) {
+      const findingId = el.id.replace("motivo_", "");
+      const printEl = document.getElementById("print_motivo_" + findingId);
+      if (printEl) {
+        printEl.textContent = el.value || "";
+      }
+    }
   },
 
   /**
    * Actualiza el motivo/detalle editable de un hallazgo (sin re-render para no perder el foco)
    */
   updateFindingMotivo(id, newMotivo) {
+    const printEl = document.getElementById("print_motivo_" + id);
+    if (printEl) printEl.textContent = newMotivo;
     const projectId = App.currentProjectId;
     const state = this.getFase3State(projectId);
+    const itemKey = this.toItemKey(id);
+
+    state.matrizObservaciones = state.matrizObservaciones || {};
+    state.observacionesEditadas = state.observacionesEditadas || {};
 
     const manual = (state.hallazgosManuales || []).find(m => m.id === id);
     if (manual) {
       manual.motivo = newMotivo;
     } else {
-      state.observacionesEditadas[id] = state.observacionesEditadas[id] || {};
-      state.observacionesEditadas[id].motivo = newMotivo;
+      state.matrizObservaciones[itemKey] = state.matrizObservaciones[itemKey] || {};
+      state.matrizObservaciones[itemKey].motivo = newMotivo;
+
+      state.observacionesEditadas[itemKey] = state.matrizObservaciones[itemKey];
+      state.observacionesEditadas[id] = state.matrizObservaciones[itemKey];
     }
+
+    // Actualizar en tiempo real expedientesMap[proyectoId].fase3.matrizObservaciones
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    if (expedientesMap[projectId]) {
+      expedientesMap[projectId].fase3 = expedientesMap[projectId].fase3 || {};
+      expedientesMap[projectId].fase3.matrizObservaciones = state.matrizObservaciones;
+      expedientesMap[projectId].fase3.observacionesEditadas = state.observacionesEditadas;
+    }
+
+    // Debounce save to localStorage/json
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => {
+      if (window.App && typeof App.saveAuditProgress === "function") {
+        App.saveAuditProgress(true);
+      }
+    }, 600);
   },
 
   /**
@@ -244,6 +609,12 @@ const ReportsEngine = {
     });
 
     this.renderOfficialReport(App.currentProject, App.auditGlobal, document.getElementById("officialReportContainer"));
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
+    }
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
+    }
 
     setTimeout(() => {
       const textarea = document.getElementById(`motivo_${newId}`);
@@ -259,6 +630,12 @@ const ReportsEngine = {
     const state = this.getFase3State(projectId);
     state.hallazgosManuales = (state.hallazgosManuales || []).filter(m => m.id !== id);
     this.renderOfficialReport(App.currentProject, App.auditGlobal, document.getElementById("officialReportContainer"));
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
+    }
+    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
+      App.actualizarKPIsEjecutivos(projectId);
+    }
   },
 
   /**
@@ -381,16 +758,17 @@ const ReportsEngine = {
         : `Con base en la revisión técnico-documental efectuada bajo los Criterios Técnicos Departamentales de Pavimentos con Placa-huella, la Dirección de Infraestructura Física y Apoyo Territorial emite REQUERIMIENTO DE SUBSANACIÓN TÉCNICA. El municipio de ${project.municipio} deberá subsanar las observaciones y aportar los requisitos no conformes detallados en el presente informe previo a la emisión del concepto favorable de priorización.`;
     }
 
-    const alcalde = project.alcalde || { nombre: `Alcalde Municipal de ${project.municipio || 'Municipio'}`, cedula: "S/N" };
-    const ing = project.ingenieroProyectista || { nombre: "Ingeniero Civil Proyectista", matricula: "COPNIA" };
+    const isRecursos = project.modalidad === "RECURSOS" || (recF2 && recF2.modalidad === "RECURSOS");
+    const alcaldeNombre = (project.alcalde && project.alcalde.nombre) || (recF2 && recF2.datos && recF2.datos.alcalde && recF2.datos.alcalde.nombre) || `Alcalde Municipal de ${project.municipio || 'Municipio'}`;
+    const secretarioNombre = (project.secretarioPlaneacion && project.secretarioPlaneacion.nombre) || (recF2 && recF2.datos && recF2.datos.secretarioPlaneacion && recF2.datos.secretarioPlaneacion.nombre) || "Secretaría de Planeación y Obras Públicas";
 
     const html = `
       <div class="formal-sheet">
         
-        <!-- ENCABEZADO INSTITUCIONAL OFICIAL -->
-        <div class="sheet-header">
+        <!-- BLOQUE 1 — CABECERA INSTITUCIONAL OFICIAL (NO IMPRIMIR) -->
+        <div class="sheet-header no-print">
           <div class="gov-official-logo">
-            <img src="Inspo/Logo.png" alt="Gobernación de Antioquia" style="height:78px;max-height:85px;width:auto;object-fit:contain" onerror="this.src='assets/Logo.png'">
+            <img src="assets/Logo.png" alt="Gobernación de Antioquia" style="height:78px;max-height:85px;width:auto;object-fit:contain">
             <div class="gov-official-title" style="margin-left:12px">
               <span class="gov-name" style="font-size:16px;font-weight:900;letter-spacing:0.5px;">GOBERNACIÓN DE ANTIOQUIA</span>
               <span class="gov-dept" style="font-size:12.5px;font-weight:800;color:var(--color-primary-dark);line-height:1.3;margin-top:2px;">Secretaría de Infraestructura Física - Dirección de Infraestructura Física y Apoyo Territorial</span>
@@ -406,46 +784,55 @@ const ReportsEngine = {
           </div>
         </div>
 
-        <!-- TÍTULO DEL INFORME TÉCNICO -->
-        <div style="text-align: center; margin-bottom: 22px;">
-          <div class="official-seal-stamp ${isFavorable ? 'seal-favorable' : 'seal-subsanacion'}" style="font-size:14px;">
+        <!-- TÍTULO DE LA FICHA TÉCNICA DE OBSERVACIONES (NO IMPRIMIR) -->
+        <div class="sheet-title-intro no-print" style="text-align: center; margin-bottom: 20px;">
+          <div class="official-seal-stamp ${isFavorable ? 'seal-favorable' : 'seal-subsanacion'}" style="font-size:13.5px;">
             ${isFavorable 
-              ? '&#10003; INFORME TÉCNICO DE RESULTADOS DE REVISIÓN: CONCEPTO FAVORABLE' 
-              : '&#9888; INFORME TÉCNICO-DOCUMENTAL DE RESULTADOS DE REVISIÓN Y SUBSANACIÓN'}
+              ? '&#10003; FICHA OFICIAL DE REVISIÓN: CONCEPTO TÉCNICO FAVORABLE' 
+              : '&#9888; FICHA OFICIAL DE OBSERVACIONES Y REQUERIMIENTO DE SUBSANACIÓN'}
           </div>
-          <p style="font-size:12.5px;color:var(--text-muted);max-width:780px;margin:0 auto;line-height:1.5;">
+          <p style="font-size:12px;color:var(--text-muted);max-width:780px;margin:0 auto;line-height:1.45;">
             Evaluación técnica integral del proyecto bajo los <b>Criterios Técnicos de Pavimentos con Placa-huella</b>. 
-            Este documento consolida los hallazgos de compuertas estructurales, geográficas y documentales con carácter vinculante.
+            Consolida los hallazgos de compuertas estructurales, trazados espaciales, coherencia presupuestal y requisitos documentales.
           </p>
         </div>
 
-        <!-- TABLA DE IDENTIFICACIÓN GENERAL DEL EXPEDIENTE -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:18px;margin-bottom:26px">
-          <div style="background:var(--color-bg-alt);padding:16px;border-radius:var(--radius-md);border:1px solid var(--border-subtle)">
-            <h5 style="font-size:11.5px;font-weight:800;color:var(--color-primary);text-transform:uppercase;margin-bottom:8px">Identificación Territorial del Proyecto</h5>
-            <table style="width:100%;font-size:12px;line-height:1.75">
-              <tr><td style="color:var(--text-muted);width:35%">Municipio:</td><td><b>${project.municipio}</b> (${project.subregion || 'Antioquia'})</td></tr>
-              <tr><td style="color:var(--text-muted)">Vereda / Sector:</td><td>${project.nombreTramo || project.nombreExpediente || 'No especificado'}</td></tr>
-              <tr><td style="color:var(--text-muted)">Código Vía Terciaria:</td><td><b class="font-mono">${project.codigoVial || 'En cotejo'}</b></td></tr>
-              <tr><td style="color:var(--text-muted)">Alcalde(sa):</td><td>${alcalde.nombre || 'Alcalde Municipal'} (C.C. ${alcalde.cedula || 'S/N'})</td></tr>
-              <tr><td style="color:var(--text-muted)">Ing. Proyectista:</td><td>${ing.nombre || 'Ingeniero Proyectista'} (Mat. ${ing.matricula || 'COPNIA'})</td></tr>
-            </table>
-          </div>
-
-          <div style="background:var(--color-bg-alt);padding:16px;border-radius:var(--radius-md);border:1px solid var(--border-subtle)">
-            <h5 style="font-size:11.5px;font-weight:800;color:var(--color-primary);text-transform:uppercase;margin-bottom:8px">Métricas Técnicas Consolidadas</h5>
-            <table style="width:100%;font-size:12px;line-height:1.75">
-              <tr><td style="color:var(--text-muted);width:45%">Longitud Proyectada:</td><td><b>${project.longitudM || 0} metros lineales</b></td></tr>
-              <tr><td style="color:var(--text-muted)">Cuantía Acero Real:</td><td><b>${(auditGlobal && auditGlobal.audit1A && auditGlobal.audit1A.cuantiaRealKgM) || 0} kg/m</b> (Mín. Técnico: 26.25 kg/m)</td></tr>
-              <tr><td style="color:var(--text-muted)">Alineación con la Red Vial:</td><td><b>${(auditGlobal && auditGlobal.audit1B && auditGlobal.audit1B.coberturaBufferPct) || 0}%</b> (Tolerancia 10 m)</td></tr>
-              <tr><td style="color:var(--text-muted)">Presupuesto Total:</td><td><b>$ ${Number(project.presupuestoTotal || 0).toLocaleString("es-CO")} COP</b></td></tr>
-              <tr><td style="color:var(--text-muted)">Aporte Departamento:</td><td>$ ${Number(project.aporteDepto || 0).toLocaleString("es-CO")} COP</td></tr>
-            </table>
+        <!-- BLOQUE 1 — TARJETA LIMPIA DE IDENTIFICACIÓN TERRITORIAL DEL PROYECTO -->
+        <div class="sheet-territorial-card" style="background:var(--color-bg-alt);padding:18px 22px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);margin-bottom:24px;">
+          <h5 style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;margin:0 0 12px 0;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">
+            <span>📍</span> Identificación Territorial del Proyecto
+          </h5>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px 24px;font-size:12.5px;">
+            <div>
+              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Municipio y Subregión:</span>
+              <input type="text" class="print-input-text form-input" value="${project.municipio || 'Municipio'} (${project.subregion || 'Antioquia'})" onchange="ReportsEngine.updateProjectField('municipioSubregion', this.value)" style="font-weight:800;padding:4px 8px;font-size:12px;margin-top:2px;">
+            </div>
+            <div>
+              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Nombre del Proyecto y Modalidad:</span>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:2px;">
+                <input type="text" class="print-input-text form-input" value="${project.nombreExpediente || project.nombreTramo || 'Proyecto Placa Huella'}" onchange="ReportsEngine.updateProjectField('nombreExpediente', this.value)" style="font-weight:800;flex:1;padding:4px 8px;font-size:12px;">
+                <span class="badge-modalidad ${isRecursos ? 'recursos' : ''}" style="flex-shrink:0;">
+                  ${isRecursos ? '💰 RECURSOS' : '🧱 MATERIALES'}
+                </span>
+              </div>
+            </div>
+            <div>
+              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Código Vial y Longitud:</span>
+              <input type="text" class="print-input-text form-input" value="Vía: ${project.codigoVial || 'Terciaria'} — Longitud: ${project.longitudM || 0} metros lineales" onchange="ReportsEngine.updateProjectField('codigoVialLongitud', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;margin-top:2px;">
+            </div>
+            <div>
+              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Alcalde(sa) Municipal:</span>
+              <input type="text" class="print-input-text form-input" value="${alcaldeNombre}" placeholder="Nombre del Alcalde(sa) Municipal" onchange="ReportsEngine.updateProjectField('alcalde', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;margin-top:2px;">
+            </div>
+            <div style="grid-column: 1 / -1;">
+              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Secretario(a) de Planeación / Obras Públicas Municipal:</span>
+              <input type="text" class="print-input-text form-input" value="${secretarioNombre}" placeholder="Nombre del Secretario(a) de Planeación / Obras Públicas" onchange="ReportsEngine.updateProjectField('secretario', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;margin-top:2px;">
+            </div>
           </div>
         </div>
 
         <!-- SECCIÓN 1 (PRIORITARIA): MATRIZ DE DOCUMENTOS Y REQUISITOS FALTANTES / NO ACEPTADOS -->
-        <div style="margin-bottom: 28px;">
+        <div class="sheet-matriz-faltantes" style="margin-bottom: 28px;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
             <div>
               <h4 style="font-size:14px;font-weight:900;color:var(--status-danger);display:flex;align-items:center;gap:8px;">
@@ -499,7 +886,8 @@ const ReportsEngine = {
                         </select>
                       </td>
                       <td>
-                        <textarea id="motivo_${f.id}" class="report-textarea" rows="2" placeholder="Escriba el motivo técnico detallado de no aceptación o la acción requerida para subsanar..." oninput="ReportsEngine.updateFindingMotivo('${f.id}', this.value)">${f.motivo || ''}</textarea>
+                        <textarea id="motivo_${f.id}" class="report-textarea" rows="2" placeholder="Escriba el motivo técnico detallado de no aceptación o la acción requerida para subsanar..." oninput="ReportsEngine.autoResizeTextarea(this); ReportsEngine.updateFindingMotivo('${f.id}', this.value);">${this.escapeHtml(f.motivo || '')}</textarea>
+                        <div class="print-observation-text" id="print_motivo_${f.id}">${this.escapeHtml(f.motivo || '')}</div>
                       </td>
                       <td style="text-align:center;">
                         ${f.isManual ? `
@@ -514,8 +902,8 @@ const ReportsEngine = {
           `}
         </div>
 
-        <!-- SECCIÓN 2: RESUMEN DE ÍTEMS CONFORMES Y CONCEPTO TÉCNICO EDITABLE -->
-        <div style="margin-bottom: 24px;">
+        <!-- SECCIÓN 2: RESUMEN DE ÍTEMS CONFORMES Y CONCEPTO TÉCNICO EDITABLE (NO IMPRIMIR EN FICHA DE OBSERVACIONES) -->
+        <div class="report-section-conformes no-print" style="margin-bottom: 24px;">
           <div style="margin-bottom: 12px;">
             <h4 style="font-size:14px;font-weight:900;color:var(--color-primary);display:flex;align-items:center;gap:8px;">
               <span>✅</span> Sección 2: Requisitos Conformes y Concepto Departamental
@@ -553,7 +941,7 @@ const ReportsEngine = {
         </div>
 
         <!-- FIRMAS OFICIALES -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:32px;margin-top:40px;padding-top:28px;border-top:1px solid var(--border-subtle);">
+        <div class="no-print signatures-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:32px;margin-top:40px;padding-top:28px;border-top:1px solid var(--border-subtle);">
           <div style="text-align:center;">
             <div style="border-bottom:1px solid #777;height:40px;margin-bottom:8px;"></div>
             <div style="font-size:12px;font-weight:800;color:var(--text-main);">Profesional de Apoyo a la Supervisión</div>
@@ -572,209 +960,201 @@ const ReportsEngine = {
     `;
 
     container.innerHTML = html;
+
+    // Auto-ajustar alturas y espejos de impresión para observaciones
+    setTimeout(() => {
+      const tas = container.querySelectorAll(".report-textarea");
+      tas.forEach(t => this.autoResizeTextarea(t));
+    }, 50);
+  },
+
+  escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   },
 
   /**
-   * Genera el documento HTML completo e independiente del Informe Técnico
-   * con las 5 secciones obligatorias y diseño institucional formal limpio
+   * Genera el documento HTML para la ventana de impresión o exportación a PDF en Fase 3.
+   * Contiene ÚNICAMENTE dos elementos en el body:
+   * 1. El recuadro de Identificación Territorial del Proyecto.
+   * 2. La tabla de la Matriz de Requisitos y Documentos Faltantes / No Aceptados.
+   * Se omiten y borran por completo <header>, <footer>, banner superior, logos,
+   * títulos institucionales, fechas de generación, notas al pie, firmas o créditos.
    */
   generatePrintableReportHtml(project, auditGlobal) {
-    project = project || App.currentProject || {};
-    auditGlobal = auditGlobal || App.auditGlobal || {};
+    project = project || (window.App && App.currentProject) || {};
+    auditGlobal = auditGlobal || (window.App && App.auditGlobal) || {};
 
-    const projectId = project.id || App.currentProjectId;
+    const projectId = project.id || (window.App && App.currentProjectId);
     const fase3State = this.getFase3State(projectId);
-    const { findings, compliantItems } = this.collectAllFindings(project, auditGlobal);
+    const { findings } = this.collectAllFindings(project, auditGlobal);
 
-    // Conteo estricto y real de la Fase 2 (27 requisitos documentales de expedientesMap)
-    const recF2 = (window.proyectosAuditados && projectId) ? window.proyectosAuditados[projectId] : null;
-    const audit2Data = (recF2 && recF2.fase2) || (auditGlobal && auditGlobal.audit2) || {};
-    const items27List = (audit2Data && audit2Data.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
-    let f2Conformes = 0;
-    let f2Pendientes = 0;
-    items27List.forEach((it) => {
-      const fid = `item_${it.num || it.id}`;
-      const userEdit = fase3State.observacionesEditadas[fid];
-      const status = userEdit?.estado || (it.conforme ? "Conforme" : (it.vencido ? "Vencido" : (it.faltante ? "Faltante" : "No Aceptado / Por Subsanar")));
-      if (status === "Conforme") {
-        f2Conformes++;
-      } else {
-        f2Pendientes++;
+    const isRecursos = project.modalidad === "RECURSOS" || (project.datos && project.datos.modalidad === "RECURSOS");
+    const municipio = project.municipio || "Municipio";
+    const subregion = project.subregion || "Antioquia";
+    const municipioSubregion = `${municipio} (${subregion})`;
+
+    const nombreProyecto = (project.nombreExpediente || project.nombreTramo || "Proyecto Placa Huella");
+    const modalidadLabel = isRecursos ? "💰 RECURSOS" : "🧱 MATERIALES";
+    const codigoVial = project.codigoVial || "Terciaria";
+    const longitudM = (project.longitudM || 0).toLocaleString("es-CO");
+    const codigoVialLongitud = `Vía: ${codigoVial} — Longitud: ${longitudM} metros lineales`;
+
+    const alcaldeNombre = (project.alcalde && project.alcalde.nombre) || `Alcalde Municipal de ${municipio}`;
+    const secretarioNombre = (project.secretarioPlaneacion && project.secretarioPlaneacion.nombre) || "Secretario(a) de Planeación / Obras Públicas";
+
+    // Sincronizar observaciones con valores editados en vivo si están presentes en la pantalla
+    const processedFindings = findings.map(f => {
+      let estado = f.estado;
+      let motivo = f.motivo;
+      const userEdit = fase3State.observacionesEditadas && fase3State.observacionesEditadas[f.id];
+      if (userEdit) {
+        if (userEdit.estado) estado = userEdit.estado;
+        if (userEdit.motivo !== undefined) motivo = userEdit.motivo;
       }
+      const domTa = typeof document !== "undefined" ? document.getElementById("motivo_" + f.id) : null;
+      if (domTa && domTa.value) motivo = domTa.value;
+      return {
+        ...f,
+        estado: estado || "No Aceptado / Por Subsanar",
+        motivo: motivo || ""
+      };
     });
-    const isFavorable = findings.length === 0;
 
-    const alcalde = project.alcalde || { nombre: `Alcalde Municipal de ${project.municipio || 'Municipio'}`, cedula: "S/N" };
-    const ing = project.ingenieroProyectista || { nombre: "Ingeniero Civil Proyectista", matricula: "COPNIA" };
-    const fechaHoy = new Date().toLocaleDateString("es-CO", { year: 'numeric', month: 'long', day: 'numeric' });
-
-    const audit1A = (auditGlobal && auditGlobal.audit1A) || {};
-    const audit1B = (auditGlobal && auditGlobal.audit1B) || {};
-    const audit2 = (auditGlobal && auditGlobal.audit2) || {};
-
-    const cuantiaReal = audit1A.cuantiaRealKgM || (project.despieceAcero && project.despieceAcero.cuantiaCalculadaKgM) || 0;
-    const pesoAceroTotal = (audit1A.pesoTotalCalculadoKg || (project.despieceAcero && project.despieceAcero.pesoTotalKg) || 0).toLocaleString('es-CO');
-    const marcasOk = `${audit1A.marcasCumplen || 0}/${audit1A.totalMarcas || 0}`;
-
-    const geo = project.georreferenciacion || audit1B || {};
-    const totalTramos = (geo.tramos || []).length;
-    const totalPuntos = (geo.puntos || geo.puntosInspeccion || []).length;
-    const coberturaGIS = audit1B.coberturaBufferPct !== undefined ? audit1B.coberturaBufferPct : (geo.coberturaBufferPct || 0);
-    const longKml = (geo.longitudKmlM || project.longitudM || 0).toLocaleString('es-CO');
-
-    const conceptoTexto = fase3State.conclusionesConcepto || (
-      isFavorable
-        ? `Con base en la revisión integral de las compuertas técnicas y documentales bajo los Criterios Técnicos de Pavimentos con Placa-huella, la Dirección de Infraestructura Física y Apoyo Territorial emite CONCEPTO TÉCNICO FAVORABLE para la priorización y viabilidad de suscripción del Convenio Interadministrativo de Cofinanciación con el Municipio de ${project.municipio || 'Municipio'}.`
-        : `Con base en la revisión técnico-documental efectuada bajo los Criterios Técnicos Departamentales de Pavimentos con Placa-huella, la Dirección de Infraestructura Física y Apoyo Territorial emite REQUERIMIENTO DE SUBSANACIÓN TÉCNICA. El municipio de ${project.municipio || 'Municipio'} deberá subsanar las observaciones y aportar los requisitos no conformes detallados en el presente informe previo a la emisión del concepto favorable de priorización.`
-    );
+    const rowsHtml = processedFindings.length === 0 ? `
+      <tr>
+        <td colspan="3" style="text-align:center;padding:16px;color:#15803d;font-weight:700;border:1px solid #cbd5e1;">
+          ✓ No se registran requisitos faltantes ni observaciones pendientes de subsanación. El expediente cumple satisfactoriamente la totalidad de compuertas técnicas.
+        </td>
+      </tr>
+    ` : processedFindings.map(f => `
+      <tr>
+        <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
+          <div style="font-weight:800;color:#0f172a;font-size:11.5px;">${this.escapeHtml(f.titulo)}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px;">
+            <span style="background:rgba(0,0,0,0.05);padding:1px 5px;border-radius:3px;font-family:monospace;font-size:9.5px;">${this.escapeHtml(f.fase)}</span>
+            ${f.norma ? `<span style="margin-left:4px;">• ${this.escapeHtml(f.norma)}</span>` : ''}
+          </div>
+        </td>
+        <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
+          <span class="${f.estado === 'Conforme' ? 'badge-conforme' : 'badge-subsanar'}">${this.escapeHtml(f.estado)}</span>
+        </td>
+        <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
+          <div class="print-observation-text">${this.escapeHtml(f.motivo || 'Requisito pendiente de subsanación')}</div>
+        </td>
+      </tr>
+    `).join("");
 
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Informe Técnico - ${project.codigo || 'EXP-PH'} - ${project.municipio || 'Antioquia'}</title>
+  <title>Ficha de Observaciones - ${this.escapeHtml(project.codigo || 'EXP-PH')} - ${this.escapeHtml(project.municipio || 'Antioquia')}</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    @page {
+      size: letter;
+      margin: 0mm !important; /* Suprime encabezados y pies nativos del navegador */
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      margin: 0 !important;
+      padding: 12mm 14mm !important; /* Margen limpio interno en la hoja */
+      background: #FFFFFF !important;
       color: #1e293b;
-      background: #ffffff;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      font-size: 11px;
       line-height: 1.45;
-      padding: 32px 42px;
-      font-size: 11.5px;
     }
     @media print {
-      body { padding: 0; font-size: 10.5px; }
-      @page { size: letter portrait; margin: 15mm 12mm 15mm 12mm; }
-      .no-print { display: none !important; }
-      .page-break { page-break-before: always; }
-      tr { page-break-inside: avoid; }
+      html, body {
+        margin: 0 !important;
+        padding: 12mm 14mm !important;
+        background: #FFFFFF !important;
+      }
+      header, footer, .app-header, .app-footer, .sidebar, .no-print, .print-header, .print-footer {
+        display: none !important;
+      }
+      tr {
+        page-break-inside: avoid;
+      }
+      .data-table {
+        page-break-inside: auto;
+      }
     }
-    .header-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 2.5px solid #166534;
-      padding-bottom: 12px;
-      margin-bottom: 16px;
-    }
-    .header-logo-group {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-    .logo-img {
-      height: 68px;
-      width: auto;
-      object-fit: contain;
-    }
-    .gov-name {
-      font-size: 15px;
-      font-weight: 900;
-      color: #166534;
-      letter-spacing: 0.5px;
-    }
-    .gov-dept {
-      font-size: 11.5px;
-      font-weight: 700;
-      color: #334155;
-      margin-top: 2px;
-    }
-    .gov-prog {
-      font-size: 10.5px;
-      color: #64748b;
-      margin-top: 1px;
-    }
-    .header-badge-group {
-      text-align: right;
-    }
-    .doc-code {
-      font-family: monospace;
-      font-size: 14px;
-      font-weight: 900;
-      color: ${isFavorable ? '#15803d' : '#be123c'};
-    }
-    .status-badge {
-      display: inline-block;
-      margin-top: 4px;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 10.5px;
-      font-weight: 800;
-      background: ${isFavorable ? '#dcfce7' : '#ffe4e6'};
-      color: ${isFavorable ? '#166534' : '#be123c'};
-      border: 1px solid ${isFavorable ? '#bbf7d0' : '#fecdd3'};
-    }
-    .report-main-title {
-      text-align: center;
-      margin: 14px 0 16px 0;
-      padding: 8px 12px;
+    .sheet-territorial-card {
       background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-    }
-    .report-main-title h1 {
-      font-size: 13.5px;
-      font-weight: 900;
-      color: #0f172a;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .meta-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-      font-size: 11px;
-    }
-    .meta-table td {
-      padding: 5px 8px;
       border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
     }
-    .meta-table .lbl {
-      background: #f1f5f9;
-      font-weight: 700;
-      color: #475569;
-      width: 22%;
-    }
-    .section-title {
+    .sheet-territorial-title {
       font-size: 12px;
       font-weight: 800;
       color: #166534;
       text-transform: uppercase;
-      border-left: 4px solid #166534;
-      padding-left: 8px;
-      margin: 16px 0 8px 0;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    .kpi-grid {
+    .territorial-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-bottom: 16px;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 20px;
+      font-size: 11px;
     }
-    .kpi-box {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      padding: 8px 10px;
-      text-align: center;
+    .territorial-item-lbl {
+      color: #64748b;
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 2px;
     }
-    .kpi-val {
+    .territorial-item-val {
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .badge-modalidad {
+      display: inline-block;
+      font-size: 9.5px;
+      font-weight: 800;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #e2e8f0;
+      color: #334155;
+    }
+    .sheet-matriz-faltantes {
+      margin-bottom: 20px;
+    }
+    .sheet-matriz-title {
       font-size: 13px;
       font-weight: 900;
-      color: #0f172a;
-      margin-top: 2px;
+      color: #be123c;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
     }
-    .kpi-lbl {
-      font-size: 10px;
+    .sheet-matriz-subtitle {
+      font-size: 11px;
       color: #64748b;
-      text-transform: uppercase;
-      font-weight: 700;
+      margin-bottom: 10px;
     }
     .data-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 14px;
       font-size: 10.5px;
     }
     .data-table th {
@@ -782,17 +1162,17 @@ const ReportsEngine = {
       color: #334155;
       font-weight: 800;
       text-align: left;
-      padding: 6px 8px;
+      padding: 7px 9px;
       border: 1px solid #cbd5e1;
     }
     .data-table td {
-      padding: 6px 8px;
-      border: 1px solid #e2e8f0;
+      padding: 7px 9px;
+      border: 1px solid #cbd5e1;
       vertical-align: top;
     }
     .badge-subsanar {
       display: inline-block;
-      padding: 2px 6px;
+      padding: 2px 7px;
       border-radius: 4px;
       font-size: 9.5px;
       font-weight: 800;
@@ -803,7 +1183,7 @@ const ReportsEngine = {
     }
     .badge-conforme {
       display: inline-block;
-      padding: 2px 6px;
+      padding: 2px 7px;
       border-radius: 4px;
       font-size: 9.5px;
       font-weight: 800;
@@ -812,244 +1192,67 @@ const ReportsEngine = {
       border: 1px solid #bbf7d0;
       white-space: nowrap;
     }
-    .concept-box {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 12px 14px;
-      margin-bottom: 24px;
-      font-size: 11px;
-      line-height: 1.6;
-      color: #0f172a;
-    }
-    .signatures-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 40px;
-      margin-top: 36px;
-      padding-top: 10px;
-      page-break-inside: avoid;
-    }
-    .signature-box {
-      text-align: center;
-    }
-    .signature-line {
-      border-bottom: 1px solid #475569;
-      height: 40px;
-      margin-bottom: 6px;
-    }
-    .signature-name {
-      font-size: 11px;
-      font-weight: 800;
+    .print-observation-text {
+      white-space: pre-line !important;
+      word-wrap: break-word !important;
+      overflow-wrap: break-word !important;
+      line-height: 1.45;
       color: #1e293b;
-    }
-    .signature-role {
-      font-size: 10px;
-      color: #64748b;
-    }
-    .toolbar-print {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: #19370D;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 6px;
-      margin-bottom: 20px;
-    }
-    .btn-print-action {
-      background: #BED66F;
-      color: #19370D;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-weight: 800;
-      cursor: pointer;
-      font-size: 12px;
     }
   </style>
 </head>
 <body>
-
-  <!-- Barra de utilidades visible en pantalla, excluida de la impresión -->
-  <div class="toolbar-print no-print">
-    <div>
-      <strong>Informe Técnico Oficial SIPRO-PH</strong> &bull; Proyecto: ${project.codigo || 'EXP-PH'} (${project.municipio || 'Antioquia'})
+  <!-- 1. EL RECUADRO DE IDENTIFICACIÓN TERRITORIAL DEL PROYECTO -->
+  <div class="sheet-territorial-card">
+    <div class="sheet-territorial-title">
+      <span>📍</span> Identificación Territorial del Proyecto
     </div>
-    <div style="display:flex;gap:10px;">
-      <button class="btn-print-action" onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
-      <button style="background:transparent;border:1px solid #BED66F;color:#BED66F;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;" onclick="window.close()">Cerrar</button>
-    </div>
-  </div>
-
-  <!-- 1. ENCABEZADO INSTITUCIONAL -->
-  <header class="header-bar">
-    <div class="header-logo-group">
-      <img src="Inspo/Logo.png" alt="Gobernación de Antioquia" class="logo-img" onerror="this.src='assets/Logo.png'">
+    <div class="territorial-grid">
       <div>
-        <div class="gov-name">GOBERNACIÓN DE ANTIOQUIA</div>
-        <div class="gov-dept">Secretaría de Infraestructura Física &bull; Dirección de Infraestructura Física y Apoyo Territorial</div>
-        <div class="gov-prog">Sistema de Revisión y Priorización Técnico-Documental de Proyectos de Placa Huella (SIPRO-PH)</div>
+        <span class="territorial-item-lbl">Municipio y Subregión:</span>
+        <div class="territorial-item-val">${this.escapeHtml(municipioSubregion)}</div>
+      </div>
+      <div>
+        <span class="territorial-item-lbl">Nombre del Proyecto y Modalidad:</span>
+        <div class="territorial-item-val">${this.escapeHtml(nombreProyecto)} <span class="badge-modalidad">${modalidadLabel}</span></div>
+      </div>
+      <div>
+        <span class="territorial-item-lbl">Código Vial y Longitud:</span>
+        <div class="territorial-item-val">${this.escapeHtml(codigoVialLongitud)}</div>
+      </div>
+      <div>
+        <span class="territorial-item-lbl">Alcalde(sa) Municipal:</span>
+        <div class="territorial-item-val">${this.escapeHtml(alcaldeNombre)}</div>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <span class="territorial-item-lbl">Secretario(a) de Planeación / Obras Públicas Municipal:</span>
+        <div class="territorial-item-val">${this.escapeHtml(secretarioNombre)}</div>
       </div>
     </div>
-    <div class="header-badge-group">
-      <div class="doc-code">${project.codigo || 'EXP-PH'}</div>
-      <div class="status-badge">
-        ${isFavorable ? '✓ CONCEPTO FAVORABLE' : '⚠ REQUIERE SUBSANACIÓN'}
-      </div>
-      <div style="font-size:10px;color:#64748b;margin-top:3px;">Emisión: <b>${fechaHoy}</b></div>
-    </div>
-  </header>
-
-  <div class="report-main-title">
-    <h1>INFORME TÉCNICO DE REVISIÓN Y SUBSANACIÓN DOCUMENTAL - PROYECTO PLACA HUELLA</h1>
   </div>
 
-  <!-- DATOS GENERALES DEL EXPEDIENTE ACTIVO -->
-  <table class="meta-table">
-    <tr>
-      <td class="lbl">Municipio:</td>
-      <td><b>${project.municipio || 'Municipio'}</b> (${project.subregion || 'Antioquia'})</td>
-      <td class="lbl">Nombre del Proyecto:</td>
-      <td><b>${project.nombreTramo || project.nombreExpediente || 'Proyecto Placa Huella'}</b></td>
-    </tr>
-    <tr>
-      <td class="lbl">Código Vial:</td>
-      <td><b style="font-family:monospace;">${project.codigoVial || '05000VT01'}</b></td>
-      <td class="lbl">Longitud a Intervenir:</td>
-      <td><b>${(project.longitudM || 0).toLocaleString('es-CO')} metros lineales</b></td>
-    </tr>
-    <tr>
-      <td class="lbl">Alcalde(sa) Municipal:</td>
-      <td>${alcalde.nombre || 'Alcalde Municipal'} (C.C. ${alcalde.cedula || 'S/N'})</td>
-      <td class="lbl">Ing. Proyectista:</td>
-      <td>${ing.nombre || 'Ingeniero Proyectista'} (Mat. ${ing.matricula || 'COPNIA'})</td>
-    </tr>
-    <tr>
-      <td class="lbl">Presupuesto Estimado:</td>
-      <td>$ ${Number(project.presupuestoTotal || 0).toLocaleString('es-CO')} COP</td>
-      <td class="lbl">Aporte Departamento:</td>
-      <td>$ ${Number(project.aporteDepto || 0).toLocaleString('es-CO')} COP (Aporte Mpal: $ ${Number(project.aporteMpio || 0).toLocaleString('es-CO')} COP)</td>
-    </tr>
-  </table>
+  <!-- 2. LA TABLA DE LA MATRIZ DE REQUISITOS Y DOCUMENTOS FALTANTES / NO ACEPTADOS -->
+  <div class="sheet-matriz-faltantes">
+    <div class="sheet-matriz-title">
+      <span>📋</span> Matriz de Requisitos y Documentos Faltantes / No Aceptados (${processedFindings.length})
+    </div>
+    <div class="sheet-matriz-subtitle">
+      Listado prioritario de observaciones técnicas y requisitos pendientes de subsanación:
+    </div>
 
-  <!-- 2. RESUMEN EJECUTIVO DE LA REVISIÓN -->
-  <div class="section-title">1. Resumen Ejecutivo de la Evaluación Técnica</div>
-  <div class="kpi-grid">
-    <div class="kpi-box">
-      <div class="kpi-lbl">Dictamen General</div>
-      <div class="kpi-val" style="color:${isFavorable ? '#15803d' : '#be123c'}">${isFavorable ? 'FAVORABLE' : 'SUBSANACIÓN'}</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-lbl">Fase 1A - Cuantía Acero</div>
-      <div class="kpi-val">${cuantiaReal} kg/m <span style="font-size:10px;color:#64748b">(Mín: 26.25)</span></div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-lbl">Fase 1B - Alineación Vial</div>
-      <div class="kpi-val">${coberturaGIS}% <span style="font-size:10px;color:#64748b">(Tolerancia 10m)</span></div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-lbl">Fase 2 - Documentos</div>
-      <div class="kpi-val">${f2Conformes} de 27 conformes</div>
-    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:28%;">Ítem / Fase / Requisito</th>
+          <th style="width:20%;">Estado Actual</th>
+          <th style="width:52%;">Detalle / Motivo de No Aceptación</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
   </div>
-
-  <table class="meta-table" style="margin-bottom:18px;">
-    <tr>
-      <td class="lbl" style="width:25%;">Control Fase 1A (Estructural):</td>
-      <td>Cuantía calculada en <b>${cuantiaReal} kg/m</b> | Peso total de acero: <b>${pesoAceroTotal} kg</b> | Marcas de despiece conformes: <b>${marcasOk}</b>.</td>
-    </tr>
-    <tr>
-      <td class="lbl">Control Fase 1B (Espacial):</td>
-      <td>Longitud KML evaluada: <b>${longKml} m</b> | Tramos independientes: <b>${totalTramos}</b> | Puntos de referencia extraídos: <b>${totalPuntos}</b> | Coincidencia con red vial: <b>${coberturaGIS}%</b> (Tolerancia 10 m).</td>
-    </tr>
-    <tr>
-      <td class="lbl">Control Fase 2 (Documental):</td>
-      <td><b>${f2Conformes}</b> de 27 requisitos aprobados de conformidad &bull; <b>${f2Pendientes}</b> pendientes por subsanar.</td>
-    </tr>
-  </table>
-
-  <!-- 3. TABLA PRINCIPAL DE OBSERVACIONES Y REQUISITOS POR SUBSANAR -->
-  <div class="section-title">2. Tabla Principal de Observaciones y Requisitos por Subsanar (${findings.length})</div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th style="width:22%;">Compuerta / Requisito</th>
-        <th style="width:14%;">Entidad / Fase</th>
-        <th style="width:14%;">Estado</th>
-        <th style="width:50%;">Observación Técnica / Motivo de Subsanación</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${findings.length === 0 ? `
-        <tr>
-          <td colspan="4" style="text-align:center;padding:14px;color:#15803d;font-weight:700;">
-            ✓ No se registran observaciones ni documentos pendientes por subsanar. El expediente cumple satisfactoriamente la totalidad de compuertas técnicas.
-          </td>
-        </tr>
-      ` : findings.map(f => `
-        <tr>
-          <td><b>${f.titulo}</b></td>
-          <td style="color:#64748b;">${f.entidad || f.fase}</td>
-          <td><span class="badge-subsanar">${f.estado}</span></td>
-          <td>${f.motivo}</td>
-        </tr>
-      `).join('')}
-    </tbody>
-  </table>
-
-  <!-- 4. LISTADO DE DOCUMENTOS CONFORMES (VERIFICADOS) -->
-  <div class="section-title">3. Listado de Documentos Conformes Verificados (${compliantItems.length})</div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th style="width:10%;">Ítem / Fase</th>
-        <th style="width:40%;">Requisito Conforme</th>
-        <th style="width:30%;">Archivo Aportado / Soporte</th>
-        <th style="width:20%;">Dictamen</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${compliantItems.length === 0 ? `
-        <tr>
-          <td colspan="4" style="text-align:center;padding:12px;color:#64748b;">
-            No se han registrado requisitos conformes en la evaluación actual.
-          </td>
-        </tr>
-      ` : compliantItems.map(c => `
-        <tr>
-          <td><b style="font-family:monospace;">${c.fase}</b></td>
-          <td>${c.titulo}</td>
-          <td style="font-size:10px;color:#475569;">${c.archivo || 'Documento soporte verificado'}</td>
-          <td><span class="badge-conforme">✓ CONFORME</span></td>
-        </tr>
-      `).join('')}
-    </tbody>
-  </table>
-
-  <!-- 5. CONCEPTO TÉCNICO Y ESPACIO DE FIRMAS -->
-  <div class="section-title">4. Concepto Técnico Departamental</div>
-  <div class="concept-box">
-    ${conceptoTexto}
-  </div>
-
-  <div class="signatures-grid">
-    <div class="signature-box">
-      <div class="signature-line"></div>
-      <div class="signature-name">Profesional de Apoyo a la Supervisión</div>
-      <div class="signature-role">Revisión Técnico-Documental</div>
-      <div class="signature-role">Dirección de Infraestructura Física y Apoyo Territorial</div>
-      <div class="signature-role">Secretaría de Infraestructura Física</div>
-    </div>
-    <div class="signature-box">
-      <div class="signature-line"></div>
-      <div class="signature-name">Supervisor Designado</div>
-      <div class="signature-role">Supervisión de Proyectos</div>
-      <div class="signature-role">Secretaría de Infraestructura Física</div>
-      <div class="signature-role">Gobernación de Antioquia</div>
-    </div>
-  </div>
-
 </body>
 </html>`;
   },
@@ -1058,49 +1261,7 @@ const ReportsEngine = {
    * Ejecuta la generación y apertura en ventana dedicada para impresión limpia
    */
   imprimirInformeTecnico() {
-    const project = App.currentProject;
-    if (!project) {
-      alert("Por favor cargue o seleccione un expediente municipal antes de generar el informe técnico.");
-      return;
-    }
-
-    const htmlContent = this.generatePrintableReportHtml(project, App.auditGlobal);
-    const printWin = window.open("", "_blank", "width=920,height=800,menubar=no,toolbar=no,location=no,status=no");
-
-    if (printWin) {
-      printWin.document.open();
-      printWin.document.write(htmlContent);
-      printWin.document.close();
-      printWin.focus();
-      setTimeout(() => {
-        try {
-          printWin.print();
-        } catch (e) {
-          console.warn("Impresión automática bloqueada por el navegador, use el botón de la barra superior:", e);
-        }
-      }, 500);
-    } else {
-      // Fallback con iframe oculto si el navegador bloquea las ventanas emergentes
-      let iframe = document.getElementById("printTechnicalReportIframe");
-      if (!iframe) {
-        iframe = document.createElement("iframe");
-        iframe.id = "printTechnicalReportIframe";
-        iframe.style.position = "fixed";
-        iframe.style.right = "0";
-        iframe.style.bottom = "0";
-        iframe.style.width = "0";
-        iframe.style.height = "0";
-        iframe.style.border = "none";
-        document.body.appendChild(iframe);
-      }
-      iframe.contentWindow.document.open();
-      iframe.contentWindow.document.write(htmlContent);
-      iframe.contentWindow.document.close();
-      setTimeout(() => {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      }, 500);
-    }
+    this.imprimirFichaObservacionesPDF();
   },
 
 
@@ -1786,7 +1947,129 @@ const ReportsEngine = {
   },
 
   printReport() {
-    this.imprimirInformeTecnico();
+    this.imprimirFichaObservacionesPDF();
+  },
+
+  imprimirInformeTecnico() {
+    this.imprimirFichaObservacionesPDF();
+  },
+
+  /**
+   * Exporta o imprime exclusivamente Bloque 1 (Identificación Territorial) y Bloque 2 (Matriz de Faltantes/No Aceptados)
+   * Suprime encabezados y pies de página mediante ventana dedicada y @page con margin 0
+   */
+  imprimirFichaObservacionesPDF() {
+    const project = (window.App && App.currentProject) ||
+                    (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[App.currentProjectId]?.datos) ||
+                    (window.proyectosAuditados && window.proyectosAuditados[App.currentProjectId]?.datos);
+    if (!project) {
+      alert("Por favor cargue o seleccione un expediente municipal antes de imprimir o exportar la Ficha de Observaciones.");
+      return;
+    }
+
+    // 1. Sincronizar espejos de impresión y auto-ajustar alturas en tab-3 si está en el DOM
+    const textareas = document.querySelectorAll(".report-textarea");
+    textareas.forEach(t => {
+      this.autoResizeTextarea(t);
+    });
+
+    // 2. Construir el HTML limpio (únicamente los dos elementos requeridos)
+    const htmlContent = this.generatePrintableReportHtml(project, (window.App && App.auditGlobal));
+
+    // 3. Abrir ventana de impresión dedicada sin menús ni barras
+    const printWin = window.open("", "_blank", "width=920,height=800,menubar=no,toolbar=no,location=no,status=no");
+
+    if (printWin) {
+      printWin.document.open();
+      printWin.document.write(htmlContent);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        try {
+          printWin.print();
+        } catch (e) {
+          console.warn("Impresión automática bloqueada por el navegador:", e);
+        }
+      }, 350);
+    } else {
+      // Fallback con iframe oculto si el navegador bloquea las ventanas emergentes
+      let iframe = document.getElementById("printTechnicalReportIframe");
+      if (!iframe) {
+        iframe = document.createElement("iframe");
+        iframe.id = "printTechnicalReportIframe";
+        iframe.style.position = "fixed";
+        iframe.style.right = "0";
+        iframe.style.bottom = "0";
+        iframe.style.width = "0";
+        iframe.style.height = "0";
+        iframe.style.border = "none";
+        document.body.appendChild(iframe);
+      }
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(htmlContent);
+      iframe.contentWindow.document.close();
+      setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      }, 350);
+    }
+  },
+
+  /**
+   * Exportación directa a PDF con html2pdf si está disponible, pasando únicamente el contenedor limpio
+   */
+  exportarFichaPDFDirecta(filename) {
+    const project = (window.App && App.currentProject) ||
+                    (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[App.currentProjectId]?.datos) ||
+                    (window.proyectosAuditados && window.proyectosAuditados[App.currentProjectId]?.datos);
+    if (!project) return;
+
+    const cleanHtml = this.generatePrintableReportHtml(project, window.App && App.auditGlobal);
+    const container = document.createElement("div");
+    container.id = "cleanPdfRootContainer";
+    const bodyMatch = cleanHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    container.innerHTML = bodyMatch ? bodyMatch[1] : cleanHtml;
+
+    const fn = filename || `Ficha_Observaciones_${(project.municipio || 'Municipio').replace(/\s+/g, '_')}.pdf`;
+
+    if (typeof html2pdf !== "undefined") {
+      const opt = {
+        margin: [0, 0, 0, 0], // Sin márgenes superiores ni inferiores de encabezado/pie
+        filename: fn,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
+      };
+      return html2pdf().set(opt).from(container).save();
+    }
+
+    this.imprimirFichaObservacionesPDF();
+  },
+
+  /**
+   * Actualiza campos editables de la identificación territorial en memoria y en sipro_auditoria.json
+   */
+  updateProjectField(field, val) {
+    const projectId = App.currentProjectId;
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[projectId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[projectId]);
+    if (!exp) return;
+    exp.datos = exp.datos || {};
+
+    if (field === "alcalde") {
+      exp.datos.alcalde = exp.datos.alcalde || {};
+      exp.datos.alcalde.nombre = val;
+    } else if (field === "secretario") {
+      exp.datos.secretarioPlaneacion = exp.datos.secretarioPlaneacion || {};
+      exp.datos.secretarioPlaneacion.nombre = val;
+    } else if (field === "nombreExpediente") {
+      exp.datos.nombreExpediente = val;
+    }
+
+    // Guardado silencioso de respaldo
+    if (window.App && typeof App.saveAuditProgress === "function") {
+      App.saveAuditProgress(true);
+    }
   }
 };
 

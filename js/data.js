@@ -414,6 +414,25 @@ const SIPRO_DATA = {
             "recursos municipio",
             "financiacion"
         ]
+    },
+    {
+        "id": 28,
+        "num": "28",
+        "title": "Presupuesto oficial detallado del proyecto",
+        "rule": "Presupuesto detallado en Excel (.xlsx/.xls) o PDF con cantidades de acero, concretos y longitud coincidentes con el diseño.",
+        "entity": "Secretaría de Obras / Planeación Municipal",
+        "validity": "Vigente",
+        "daysMax": 180,
+        "expectedFilePattern": [
+            "presupuesto",
+            "pto",
+            "apu",
+            "cantidades de obra",
+            "cantidades",
+            "presupuesto oficial",
+            "28. "
+        ],
+        "soloRecursos": true
     }
 ],
 

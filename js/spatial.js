@@ -203,6 +203,10 @@ const SpatialEngine = {
       return window.redVialDepartamentalCompleta;
     }
 
+    if (this._loadingBaseRoadsPromise) {
+      return this._loadingBaseRoadsPromise;
+    }
+
     window.redVialDepartamentalCompleta = window.redVialDepartamentalCompleta || {
       type: "FeatureCollection",
       features: [],
@@ -211,6 +215,8 @@ const SpatialEngine = {
       primaria: { type: "FeatureCollection", features: [] }
     };
     this.fullDeptGeoData = window.redVialDepartamentalCompleta;
+
+    this._loadingBaseRoadsPromise = (async () => {
 
     try {
       const [tercRes, secRes, primRes] = await Promise.all([
@@ -277,9 +283,14 @@ const SpatialEngine = {
       console.log(`[SpatialEngine] Base Departamental cargada: ${countT} terciarias, ${countS} secundarias, ${countP} primarias.`);
     } catch (err) {
       console.warn("Aviso al cargar bases viales departamentales:", err);
+    } finally {
+      this._loadingBaseRoadsPromise = null;
     }
 
     return window.redVialDepartamentalCompleta;
+    })();
+
+    return this._loadingBaseRoadsPromise;
   },
 
   /**
@@ -326,21 +337,26 @@ const SpatialEngine = {
         ? window.redVialDepartamentalCompleta.primaria.features.length
         : ((this.cachedGeoData.primaria && this.cachedGeoData.primaria.features) ? this.cachedGeoData.primaria.features.length : 0);
 
-      if (bTerc) bTerc.innerText = countT > 0 ? countT.toLocaleString() : "0";
-      if (bSec) bSec.innerText = countS > 0 ? countS.toLocaleString() : "0";
-      if (bPrim) bPrim.innerText = countP > 0 ? countP.toLocaleString() : "0";
+      if (bTerc) bTerc.innerText = countT > 0 ? countT.toLocaleString('es-CO') : "0";
+      if (bSec) bSec.innerText = countS > 0 ? countS.toLocaleString('es-CO') : "0";
+      if (bPrim) bPrim.innerText = countP > 0 ? countP.toLocaleString('es-CO') : "0";
     } else {
       // MODO SOLO MUNICIPIO ACTIVO
-      const countT = (this.projectRoadsData && this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features)
+      const activeMpio = this.currentProject && this.currentProject.municipio;
+      const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+      let countT = (this.projectRoadsData && this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features)
         ? this.projectRoadsData.terciaria.features.length : 0;
+      if (countT === 0 && daneCode && this.terciariaByMpio && this.terciariaByMpio[daneCode]) {
+        countT = this.terciariaByMpio[daneCode].length;
+      }
       const countS = (this.projectRoadsData && this.projectRoadsData.secundaria && this.projectRoadsData.secundaria.features)
         ? this.projectRoadsData.secundaria.features.length : 0;
       const countP = (this.projectRoadsData && this.projectRoadsData.primaria && this.projectRoadsData.primaria.features)
         ? this.projectRoadsData.primaria.features.length : 0;
 
-      if (bTerc) bTerc.innerText = countT.toLocaleString();
-      if (bSec) bSec.innerText = countS.toLocaleString();
-      if (bPrim) bPrim.innerText = countP.toLocaleString();
+      if (bTerc) bTerc.innerText = countT > 0 ? countT.toLocaleString('es-CO') : "0";
+      if (bSec) bSec.innerText = countS > 0 ? countS.toLocaleString('es-CO') : "0";
+      if (bPrim) bPrim.innerText = countP > 0 ? countP.toLocaleString('es-CO') : "0";
     }
   },
 
@@ -502,13 +518,21 @@ const SpatialEngine = {
     const activeMpio = project.municipio;
     const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
 
-    // 1. Terciaria Recortada
+    // 1. Terciaria Recortada (Consolida la red completa del municipio + entorno del proyecto)
     let tercFeatures = [];
+    if (daneCode && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
+      tercFeatures = [...this.terciariaByMpio[daneCode]];
+    }
     if (arcgisData && arcgisData.terciaria && arcgisData.terciaria.features && arcgisData.terciaria.features.length > 0) {
-      tercFeatures = arcgisData.terciaria.features;
-    } else if (daneCode && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
-      tercFeatures = this.terciariaByMpio[daneCode];
-    } else if (bbox && window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.terciaria) {
+      const existingIds = new Set(tercFeatures.map(f => (f.properties && (f.properties.CODIGO_VIA || f.properties.OBJECTID)) || JSON.stringify(f.geometry)));
+      arcgisData.terciaria.features.forEach(f => {
+        const id = (f.properties && (f.properties.CODIGO_VIA || f.properties.OBJECTID)) || JSON.stringify(f.geometry);
+        if (!existingIds.has(id)) {
+          tercFeatures.push(f);
+          existingIds.add(id);
+        }
+      });
+    } else if (tercFeatures.length === 0 && bbox && window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.terciaria) {
       tercFeatures = this.filterFeaturesByBbox(window.redVialDepartamentalCompleta.terciaria.features || [], bbox);
     }
     this.projectRoadsData.terciaria = { type: "FeatureCollection", features: tercFeatures };
@@ -561,9 +585,45 @@ const SpatialEngine = {
     this.renderTerciariaLayer();
     if (this.layerVisibility.secundaria) this.renderSecundariaLayer();
     if (this.layerVisibility.primaria) this.renderPrimariaLayer();
+    this.renderProjectTrack(project);
+    this.renderBufferLayer(project);
     if (this.layerVisibility.measurementVectors) this.renderMeasurementVectorsLayer(project);
     this.renderContrastTable(project);
     this.bringProjectTracksToFront();
+
+    // Reevaluar conformidad global si existe el expediente
+    if (expMap && pId && expMap[pId]) {
+      const exp = expMap[pId];
+      const a1A = exp.fase1A || {};
+      const a1B = exp.fase1B || {};
+      const a2 = exp.fase2 || {};
+      const totalDocs = exp.modalidad === "RECURSOS" ? 28 : 27;
+
+      const a1AOk = a1A.aprobado !== undefined ? a1A.aprobado : (a1A.cuantiaConforme === true);
+      const a1BOk = a1B.coberturaConforme === true;
+      const a2Ok = (a2.itemsConformes || 0) >= totalDocs;
+
+      if (exp.auditGlobal) {
+        exp.auditGlobal.isApproved = a1AOk && a1BOk && a2Ok;
+        if (!a1AOk) {
+          exp.auditGlobal.activeGatekeeper = "1A_DISENO";
+        } else if (!a1BOk) {
+          exp.auditGlobal.activeGatekeeper = "1B_ESPACIAL";
+        } else if (a2Ok) {
+          exp.auditGlobal.activeGatekeeper = "3_APROBADO";
+        } else {
+          exp.auditGlobal.activeGatekeeper = "2_DOCUMENTAL";
+        }
+      }
+    }
+
+    // Invocar actualización reactiva de KPIs ejecutivos y banner
+    if (window.App && typeof window.App.actualizarKPIsEjecutivos === "function") {
+      window.App.actualizarKPIsEjecutivos(pId);
+    }
+    if (window.App && typeof window.App.renderPipelineBanner === "function" && expMap && pId && expMap[pId] && expMap[pId].auditGlobal) {
+      window.App.renderPipelineBanner(expMap[pId].auditGlobal);
+    }
   },
 
   /**
@@ -910,9 +970,18 @@ const SpatialEngine = {
   /**
    * Alterna entre ver solo las vías del municipio activo o toda la red de Antioquia
    */
-  toggleMpioFilter() {
+  async toggleMpioFilter() {
     this.filterByActiveMunicipio = !this.filterByActiveMunicipio;
     this.syncToggleButtonsUI();
+
+    // Si conmutamos a Toda Antioquia y no se han cargado las departamentales, cargarlas
+    if (!this.filterByActiveMunicipio) {
+      if (!window.redVialDepartamentalCompleta || !window.redVialDepartamentalCompleta.features || window.redVialDepartamentalCompleta.features.length === 0) {
+        this.showToast("🌐 Cargando red vial de toda Antioquia...");
+        await this.loadBaseRoads();
+      }
+    }
+
     this.updateLayerBadges();
 
     if (this.layerVisibility.terciaria) this.renderTerciariaLayer();
@@ -930,12 +999,14 @@ const SpatialEngine = {
         this.leafletMap.fitBounds(antioquiaBounds, { padding: [20, 20] });
       }
       const totalVias = (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.features) ? window.redVialDepartamentalCompleta.features.length : 4733;
-      this.showToast(`🌐 Toda Antioquia: Renderizando red departamental completa (${totalVias.toLocaleString()} vías con aceleración por canvas).`);
+      this.showToast(`🌐 Toda Antioquia: Renderizando red departamental completa (${totalVias.toLocaleString('es-CO')} vías).`);
     } else {
       // Modo Municipio Activo: recortar al municipio y centrar en tramos del proyecto
       this.zoomToProjectTracks();
       const mpioName = (this.currentProject && this.currentProject.municipio) || "Municipio";
-      this.showToast(`📍 Solo Municipio Activo: Red vial recortada al entorno de ${mpioName}.`);
+      const countMpio = (this.projectRoadsData && this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features)
+        ? this.projectRoadsData.terciaria.features.length : 0;
+      this.showToast(`📍 Solo Municipio Activo: ${countMpio} vías de ${mpioName}.`);
     }
   },
 
@@ -1154,9 +1225,177 @@ const SpatialEngine = {
     };
   },
 
+  haversineDistanceM(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  },
+
   pointToSegmentDistanceMeters(latP, lngP, latA, lngA, latB, lngB) {
     const res = this.getClosestPointOnSegment(latP, lngP, latA, lngA, latB, lngB);
     return res.distM;
+  },
+
+  /**
+   * PASO A — Analizador de Cumplimiento por Sub-Segmentos (5 metros)
+   * Subdivide o interpola puntos cada 5 metros a lo largo del recorrido (K0+000 a Fin).
+   * Evalúa la distancia perpendicular mínima a la Red Vial para cada sub-segmento.
+   * Identifica tramos que cumplen (≤ 10m), tramos que no cumplen (> 10m) y puntos de quiebre.
+   */
+  analyzeTrackSubSegments(coords, candidates) {
+    if (!coords || coords.length < 2) return null;
+
+    // 1. Interpolación de puntos a intervalos de máximo 5 metros
+    const STEP_M = 5.0;
+    const sampledPoints = [];
+    let cumulativeDistM = 0;
+
+    for (let i = 0; i < coords.length - 1; i++) {
+      const p1 = coords[i];
+      const p2 = coords[i + 1];
+      const lat1 = p1.lat !== undefined ? p1.lat : (Array.isArray(p1) ? p1[0] : 0);
+      const lng1 = p1.lng !== undefined ? p1.lng : (Array.isArray(p1) ? p1[1] : 0);
+      const lat2 = p2.lat !== undefined ? p2.lat : (Array.isArray(p2) ? p2[0] : 0);
+      const lng2 = p2.lng !== undefined ? p2.lng : (Array.isArray(p2) ? p2[1] : 0);
+
+      const segLen = this.haversineDistanceM(lat1, lng1, lat2, lng2);
+      if (sampledPoints.length === 0) {
+        sampledPoints.push({ lat: lat1, lng: lng1, abscisaM: 0 });
+      }
+
+      if (segLen <= 0.05) continue;
+
+      const numSteps = Math.max(1, Math.ceil(segLen / STEP_M));
+      for (let s = 1; s <= numSteps; s++) {
+        const frac = s / numSteps;
+        const sLat = lat1 + (lat2 - lat1) * frac;
+        const sLng = lng1 + (lng2 - lng1) * frac;
+        const sDist = cumulativeDistM + (segLen * frac);
+        sampledPoints.push({ lat: sLat, lng: sLng, abscisaM: sDist });
+      }
+      cumulativeDistM += segLen;
+    }
+
+    if (sampledPoints.length < 2) return null;
+
+    const totalTrackLengthM = cumulativeDistM;
+
+    // 2. Evaluación de cada sub-segmento (punto j a punto j+1)
+    const evaluatedSteps = [];
+    let vMax = null;
+    let maxDistM = 0;
+
+    for (let j = 0; j < sampledPoints.length - 1; j++) {
+      const ptA = sampledPoints[j];
+      const ptB = sampledPoints[j + 1];
+      const stepLen = this.haversineDistanceM(ptA.lat, ptA.lng, ptB.lat, ptB.lng);
+      const midLat = (ptA.lat + ptB.lat) / 2;
+      const midLng = (ptA.lng + ptB.lng) / 2;
+
+      const proj = this.findClosestProjectionToRoads(midLat, midLng, candidates);
+      const distM = proj.distM;
+      const cumple = distM <= this.BUFFER_TOLERANCIA_M;
+
+      if (!vMax || distM > maxDistM) {
+        maxDistM = distM;
+        vMax = proj;
+        vMax.abscisaM = ptA.abscisaM;
+        vMax.nombrePunto = "Punto de Máxima Desviación";
+        vMax.tipoControl = "maxDesviacion";
+      }
+
+      evaluatedSteps.push({
+        from: ptA,
+        to: ptB,
+        stepLen,
+        abscisaM: ptA.abscisaM,
+        proj,
+        distM,
+        cumple
+      });
+    }
+
+    // 3. Agrupación en tramos visuales contiguos (Verde vs. Rojo) y puntos de quiebre
+    const visualRuns = [];
+    const puntosDesviacion = [];
+    let currentRun = null;
+    let longitudEnViaM = 0;
+    let longitudFueraViaM = 0;
+
+    for (let k = 0; k < evaluatedSteps.length; k++) {
+      const step = evaluatedSteps[k];
+      if (step.cumple) {
+        longitudEnViaM += step.stepLen;
+      } else {
+        longitudFueraViaM += step.stepLen;
+      }
+
+      if (!currentRun || currentRun.cumple !== step.cumple) {
+        // Punto de quiebre / desviación: cuando el trazado abandona el corredor de 10 m
+        if (currentRun && currentRun.cumple && !step.cumple) {
+          puntosDesviacion.push({
+            tipo: "abandono_via",
+            lat: step.from.lat,
+            lng: step.from.lng,
+            abscisaM: step.from.abscisaM,
+            distM: step.distM,
+            codigoVia: step.proj.codigoVia,
+            nombreVia: step.proj.nombreVia
+          });
+        }
+
+        currentRun = {
+          cumple: step.cumple,
+          latLngs: [[step.from.lat, step.from.lng], [step.to.lat, step.to.lng]],
+          longitudM: step.stepLen,
+          startAbscisaM: step.from.abscisaM,
+          endAbscisaM: step.to.abscisaM,
+          maxDistM: step.distM,
+          proj: step.proj
+        };
+        visualRuns.push(currentRun);
+      } else {
+        currentRun.latLngs.push([step.to.lat, step.to.lng]);
+        currentRun.longitudM += step.stepLen;
+        currentRun.endAbscisaM = step.to.abscisaM;
+        if (step.distM > currentRun.maxDistM) {
+          currentRun.maxDistM = step.distM;
+        }
+      }
+    }
+
+    const pctEnVia = totalTrackLengthM > 0 ? +((longitudEnViaM / totalTrackLengthM) * 100).toFixed(1) : 0;
+    const pctFueraVia = totalTrackLengthM > 0 ? +((longitudFueraViaM / totalTrackLengthM) * 100).toFixed(1) : 0;
+
+    const cumpleTotal = longitudFueraViaM <= 1.0;
+    const noCumpleTotal = longitudEnViaM <= 1.0;
+    const cumpleParcial = !cumpleTotal && !noCumpleTotal;
+
+    return {
+      totalTrackLengthM: +totalTrackLengthM.toFixed(1),
+      longitudEnViaM: +longitudEnViaM.toFixed(1),
+      longitudFueraViaM: +longitudFueraViaM.toFixed(1),
+      pctEnVia,
+      pctFueraVia,
+      cumpleTotal,
+      noCumpleTotal,
+      cumpleParcial,
+      visualRuns,
+      puntosDesviacion,
+      vMax,
+      maxDistM: +maxDistM.toFixed(1)
+    };
+  },
+
+  /**
+   * Alias de compatibilidad hacia recalculateProjectProximity
+   */
+  calculateOverallRoadAlignment(project) {
+    return this.recalculateProjectProximity(project);
   },
 
   /**
@@ -1165,61 +1404,104 @@ const SpatialEngine = {
   recalculateProjectProximity(project) {
     if (!project || (!project.georreferenciacion && !project.fase1B)) return;
     const geo = project.georreferenciacion || project.fase1B || {};
+
+    // Deduplicación defensiva de tramos por coordenadas exactas
+    if (geo.tramos && Array.isArray(geo.tramos)) {
+      const seenT = new Set();
+      geo.tramos = geo.tramos.filter(t => {
+        const coords = t.coordenadas || [];
+        if (coords.length > 1) {
+          const firstLat = coords[0].lat;
+          const firstLng = coords[0].lng;
+          const midIdx = Math.floor(coords.length / 2);
+          const midLat = coords[midIdx].lat;
+          const midLng = coords[midIdx].lng;
+          const lastIdx = coords.length - 1;
+          const lastLat = coords[lastIdx].lat;
+          const lastLng = coords[lastIdx].lng;
+          const key = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
+          const revKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+          if (seenT.has(key) || seenT.has(revKey)) return false;
+          seenT.add(key);
+          seenT.add(revKey);
+        }
+        return true;
+      });
+    }
+
+    // Deduplicación defensiva de puntos de inspección por coordenadas exactas
+    if (geo.puntos && Array.isArray(geo.puntos) && geo.puntos !== geo.puntosContraste) {
+      const seenP = new Set();
+      geo.puntos = geo.puntos.filter(p => {
+        const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
+        const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
+        if (lat && lng) {
+          const key = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
+          if (seenP.has(key)) return false;
+          seenP.add(key);
+        }
+        return true;
+      });
+    }
+
     const tramos = geo.tramos || [];
-    const puntos = geo.puntos || geo.puntosInspeccion || geo.puntosContraste || [];
+    const puntos = (geo.puntos && geo.puntos !== geo.puntosContraste) ? geo.puntos : (geo.puntosInspeccion || []);
     const candidates = this.getCandidateFeatures(project);
 
-    // 1. TRAMOS (LineStrings)
+    // 1. TRAMOS (LineStrings y Polygons con análisis de sub-segmentos de 5 metros)
     tramos.forEach((t, tIdx) => {
       const coords = t.coordenadas || [];
       t.vectoresMedicion = [];
 
-      if (coords.length > 0) {
-        const pStart = coords[0];
-        const pMid = coords[Math.floor(coords.length / 2)];
-        const pEnd = coords[coords.length - 1];
+      if (coords.length > 1) {
+        const sub = this.analyzeTrackSubSegments(coords, candidates);
+        if (sub) {
+          t.subAnalysis = sub;
+          t.cumpleTotal = sub.cumpleTotal;
+          t.noCumpleTotal = sub.noCumpleTotal;
+          t.cumpleParcial = sub.cumpleParcial;
+          t.longitudEnViaM = sub.longitudEnViaM;
+          t.longitudFueraViaM = sub.longitudFueraViaM;
+          t.pctEnVia = sub.pctEnVia;
+          t.pctFueraVia = sub.pctFueraVia;
+          t.puntosDesviacion = sub.puntosDesviacion;
+          t.distanciaEjeM = sub.maxDistM;
+          t.distanciaMetros = sub.maxDistM;
 
-        const vStart = this.findClosestProjectionToRoads(pStart.lat, pStart.lng, candidates);
-        vStart.tipoControl = "inicio";
-        vStart.nombrePunto = `${t.nombrePlacemark || 'Tramo'} (Inicio)`;
-
-        const vMid = this.findClosestProjectionToRoads(pMid.lat, pMid.lng, candidates);
-        vMid.tipoControl = "medio";
-        vMid.nombrePunto = `${t.nombrePlacemark || 'Tramo'} (Punto Medio)`;
-
-        const vEnd = this.findClosestProjectionToRoads(pEnd.lat, pEnd.lng, candidates);
-        vEnd.tipoControl = "fin";
-        vEnd.nombrePunto = `${t.nombrePlacemark || 'Tramo'} (Fin)`;
-
-        let vMax = vStart;
-        const step = Math.max(1, Math.floor(coords.length / 12));
-        for (let i = 0; i < coords.length; i += step) {
-          const pt = coords[i];
-          const vSample = this.findClosestProjectionToRoads(pt.lat, pt.lng, candidates);
-          if (vSample.distM > vMax.distM) {
-            vMax = vSample;
-            vMax.tipoControl = "maxDesviacion";
-            vMax.nombrePunto = `${t.nombrePlacemark || 'Tramo'} (Máx. Desviación)`;
+          if (sub.vMax) {
+            t.vectorPrincipal = sub.vMax;
+            t.coordOrigenKML = sub.vMax.coordOrigenKML;
+            t.coordMasCercanaEje = sub.vMax.coordMasCercanaEje;
+            t.codigoViaGeoJSON = sub.vMax.codigoVia;
+            t.nombreViaGeoJSON = sub.vMax.nombreVia;
+            t.categoriaVia = sub.vMax.categoriaVia;
+            t.orden = sub.vMax.orden;
+            t.colorCategoria = sub.vMax.colorCategoria;
+            t.vectoresMedicion = [sub.vMax];
           }
-        }
 
-        t.vectoresMedicion = [vStart, vMid, vEnd];
-        if (vMax !== vStart && vMax !== vMid && vMax !== vEnd) {
-          t.vectoresMedicion.push(vMax);
+          if (sub.cumpleTotal) {
+            t.cumple = true;
+            t.estado = `SOBRE ${t.codigoViaGeoJSON}`;
+            t.detalleParcial = null;
+          } else if (sub.cumpleParcial) {
+            t.cumple = false;
+            t.estado = `PARCIAL: ${sub.longitudEnViaM} m en vía (${sub.pctEnVia}%) / ${sub.longitudFueraViaM} m fuera`;
+            t.detalleParcial = `De ${sub.totalTrackLengthM} m totales: ${sub.longitudEnViaM} m coinciden con ${t.codigoViaGeoJSON}, pero ${sub.longitudFueraViaM} m se desvían hasta ${sub.maxDistM} m del eje.`;
+          } else {
+            t.cumple = false;
+            t.estado = `A ${sub.maxDistM} m DE ${t.codigoViaGeoJSON}`;
+            t.detalleParcial = `Todo el tramo (${sub.totalTrackLengthM} m) se encuentra fuera del corredor de 10 m de la vía oficial (desviación máx: ${sub.maxDistM} m).`;
+          }
+        } else {
+          // Fallback a evaluación básica por extremos si no hay suficientes puntos
+          const pStart = coords[0];
+          const vStart = this.findClosestProjectionToRoads(pStart.lat, pStart.lng, candidates);
+          t.vectorPrincipal = vStart;
+          t.distanciaEjeM = vStart.distM;
+          t.cumple = vStart.distM <= this.BUFFER_TOLERANCIA_M;
+          t.estado = t.cumple ? `SOBRE ${vStart.codigoVia}` : `A ${vStart.distM.toFixed(1)} m DE ${vStart.codigoVia}`;
         }
-
-        t.vectorPrincipal = vMax;
-        t.distanciaEjeM = vMax.distM;
-        t.distanciaMetros = vMax.distM;
-        t.coordOrigenKML = vMax.coordOrigenKML;
-        t.coordMasCercanaEje = vMax.coordMasCercanaEje;
-        t.codigoViaGeoJSON = vMax.codigoVia;
-        t.nombreViaGeoJSON = vMax.nombreVia;
-        t.categoriaVia = vMax.categoriaVia;
-        t.orden = vMax.orden;
-        t.colorCategoria = vMax.colorCategoria;
-        t.cumple = t.distanciaEjeM <= this.BUFFER_TOLERANCIA_M;
-        t.estado = t.cumple ? `✓ SOBRE ${t.codigoViaGeoJSON}` : `! A ${t.distanciaEjeM.toFixed(1)} m DE ${t.codigoViaGeoJSON}`;
       }
     });
 
@@ -1253,8 +1535,105 @@ const SpatialEngine = {
     });
 
     const tramosConformes = tramos.filter(t => t.cumple).length;
-    geo.coberturaBufferPct = tramos.length > 0 ? +((tramosConformes / tramos.length) * 100).toFixed(1) : 100;
+
+    let sumEnViaM = 0;
+    let sumTotalTrackM = 0;
+    let hasSubAnalysis = false;
+
+    tramos.forEach(t => {
+      if (t.subAnalysis && t.subAnalysis.totalTrackLengthM > 0) {
+        hasSubAnalysis = true;
+        sumEnViaM += t.subAnalysis.longitudEnViaM;
+        sumTotalTrackM += t.subAnalysis.totalTrackLengthM;
+      }
+    });
+
+    let porcentajeAlineacion = 0;
+    if (hasSubAnalysis && sumTotalTrackM > 0) {
+      porcentajeAlineacion = +((sumEnViaM / sumTotalTrackM) * 100).toFixed(1);
+    } else if (tramos.length > 0) {
+      porcentajeAlineacion = +((tramosConformes / tramos.length) * 100).toFixed(1);
+    } else if (puntos.length > 0) {
+      const puntosCumplen = puntos.filter(p => p.cumple).length;
+      porcentajeAlineacion = +((puntosCumplen / puntos.length) * 100).toFixed(1);
+    }
+
+    const hasGeoms = (tramos.length > 0 || puntos.length > 0);
+    const hasKmzDoc = Boolean(
+      (geo.archivoKml && geo.archivoKml !== "Sin archivo" && !geo.archivoKml.startsWith("Sin archivo")) ||
+      (project.archivosFiles && (project.archivosFiles[24] || project.archivosFiles["24"]))
+    );
+
+    const tieneKMZ = Boolean(
+      geo.tieneKMZ !== false &&
+      geo.tieneGeorreferenciacionValida !== false &&
+      hasGeoms &&
+      hasKmzDoc
+    );
+
+    if (!tieneKMZ) {
+      porcentajeAlineacion = 0;
+    }
+
+    geo.porcentajeAlineacion = porcentajeAlineacion;
+    geo.coberturaBufferPct = porcentajeAlineacion;
+    geo.tieneKMZ = tieneKMZ;
+    geo.tieneGeorreferenciacionValida = tieneKMZ;
     geo.puntosAnomalia = tramos.length - tramosConformes;
+    geo.coberturaConforme = tieneKMZ && (porcentajeAlineacion >= 95.0);
+    geo.aprobado = geo.coberturaConforme;
+    geo.estado = tieneKMZ ? (geo.coberturaConforme ? "Cumple" : "Alerta de Desfase Espacial") : "No Cumple - Falta archivo KMZ/KML";
+    if (!tieneKMZ) {
+      geo.estadoCompuerta = 'BLOQUEADO';
+      geo.motivoRechazo = 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.';
+    }
+
+    const pId = project.id || project.codigo || (window.App && window.App.currentProjectId);
+    const expMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || (window.App && window.App.expedientesMap);
+    if (expMap && pId && expMap[pId]) {
+      const exp = expMap[pId];
+      if (!exp.fase1B) exp.fase1B = {};
+      exp.fase1B.porcentajeAlineacion = porcentajeAlineacion;
+      exp.fase1B.coberturaBufferPct = porcentajeAlineacion;
+      exp.fase1B.tieneKMZ = tieneKMZ;
+      exp.fase1B.tieneGeorreferenciacionValida = tieneKMZ;
+      exp.fase1B.coberturaConforme = geo.coberturaConforme;
+      exp.fase1B.aprobado = geo.coberturaConforme;
+      exp.fase1B.estado = geo.estado;
+      exp.fase1B.tramos = tramos;
+      exp.fase1B.puntosAnomalia = geo.puntosAnomalia;
+
+      if (!tieneKMZ) {
+        exp.fase1B.estadoCompuerta = 'BLOQUEADO';
+        exp.fase1B.motivoRechazo = 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.';
+      }
+
+      if (exp.auditGlobal && exp.auditGlobal.audit1B) {
+        exp.auditGlobal.audit1B.porcentajeAlineacion = porcentajeAlineacion;
+        exp.auditGlobal.audit1B.coberturaBufferPct = porcentajeAlineacion;
+        exp.auditGlobal.audit1B.tieneKMZ = tieneKMZ;
+        exp.auditGlobal.audit1B.tieneGeorreferenciacionValida = tieneKMZ;
+        exp.auditGlobal.audit1B.coberturaConforme = geo.coberturaConforme;
+        exp.auditGlobal.audit1B.aprobado = geo.coberturaConforme;
+        if (!tieneKMZ) {
+          exp.auditGlobal.audit1B.estadoCompuerta = 'BLOQUEADO';
+          exp.auditGlobal.audit1B.motivoRechazo = 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.';
+        }
+      }
+
+      if (exp.kpis) {
+        exp.kpis.coberturaBufferPct = porcentajeAlineacion;
+        exp.kpis.coberturaConforme = geo.coberturaConforme;
+      }
+    }
+
+    if (project.fase1B) {
+      project.fase1B.porcentajeAlineacion = porcentajeAlineacion;
+      project.fase1B.coberturaBufferPct = porcentajeAlineacion;
+      project.fase1B.tieneKMZ = tieneKMZ;
+      project.fase1B.coberturaConforme = geo.coberturaConforme;
+      project.fase1B.aprobado = geo.coberturaConforme;
+    }
   },
 
   /**
@@ -1300,7 +1679,14 @@ const SpatialEngine = {
 
     if (this.filterByActiveMunicipio) {
       // 1. MODO RECORTADA AL MUNICIPIO / PROYECTO
-      featuresToRender = (this.projectRoadsData && this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features) || [];
+      const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+      let mpioFeatures = [];
+      if (this.projectRoadsData && this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features && this.projectRoadsData.terciaria.features.length > 0) {
+        mpioFeatures = [...this.projectRoadsData.terciaria.features];
+      } else if (daneCode && this.terciariaByMpio && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
+        mpioFeatures = [...this.terciariaByMpio[daneCode]];
+      }
+      featuresToRender = mpioFeatures;
       subtitleText = `${featuresToRender.length} vías terciarias en entorno de ${activeMpio ? activeMpio.toUpperCase() : 'Proyecto'}`;
     } else {
       // 2. MODO TODA ANTIOQUIA (COMPLETA)
@@ -1308,7 +1694,7 @@ const SpatialEngine = {
         ? window.redVialDepartamentalCompleta.terciaria.features
         : ((this.cachedGeoData.terciaria && this.cachedGeoData.terciaria.features) || []);
       featuresToRender = full;
-      subtitleText = `🌐 Red Vial Completa de Antioquia (${featuresToRender.length.toLocaleString()} vías terciarias)`;
+      subtitleText = `🌐 Red Vial Completa de Antioquia (${featuresToRender.length.toLocaleString('es-CO')} vías terciarias)`;
     }
 
     if (featuresToRender.length === 0) return;
@@ -1538,39 +1924,132 @@ const SpatialEngine = {
 
     if (tramos.length > 0) {
       tramos.forEach(t => {
-        const latLngs = (t.coordenadas || []).map(c => [c.lat, c.lng]);
-        if (latLngs.length > 1) {
-          const haloLine = L.polyline(latLngs, {
-            pane: 'tramosProyectoPane',
-            color: '#000000',
-            weight: 9,
-            opacity: 0.95,
-            lineCap: 'round',
-            lineJoin: 'round'
-          });
-          this.layers.projectTrackLayer.addLayer(haloLine);
+        const sub = t.subAnalysis;
+        if (sub && sub.visualRuns && sub.visualRuns.length > 0) {
+          // PASO B — Renderizado Bicolor en el Mapa (Tramo que Cumple vs. Tramo que No Cumple)
+          sub.visualRuns.forEach((run, rIdx) => {
+            if (!run.latLngs || run.latLngs.length < 2) return;
 
-          const coreLine = L.polyline(latLngs, {
-            pane: 'tramosProyectoPane',
-            color: '#00FF66',
-            weight: 5,
-            opacity: 1.0,
-            lineCap: 'round',
-            lineJoin: 'round'
-          }).bindPopup(`
-            <div style="font-family:sans-serif;font-size:12px;line-height:1.4">
-              <div style="background:#00412e;color:#00FF66;font-weight:bold;padding:5px 8px;border-radius:4px 4px 0 0;margin:-10px -10px 8px -10px;border-bottom:1px solid #00FF66">
-                📍 ${t.nombrePlacemark || t.idTramo || 'Tramo de Proyecto'}
-              </div>
-              <b>Longitud Calculada:</b> ${t.longitudCalculada ? t.longitudCalculada.toFixed(1) + ' m' : (t.longitudM ? t.longitudM.toFixed(1) + ' m' : 'N/D')}<br>
-              <b>Archivo de Origen:</b> ${t.carpetaContenedora || geo.archivoKml || 'KML'}<br>
-              <b>Vía Oficial Cruzada:</b> <span style="font-family:monospace;color:#0284c7;font-weight:bold">${t.codigoViaGeoJSON || 'N/A'}</span><br>
-              <b>Nombre Vía:</b> ${t.nombreViaGeoJSON || 'N/A'}<br>
-              <b>Distancia al Eje:</b> <b>${t.distanciaEjeM !== undefined ? t.distanciaEjeM.toFixed(1) + ' m' : '0 m'}</b><br>
-              <b>Estado:</b> <span style="color:${t.cumple ? '#059669' : '#e11d48'};font-weight:bold">${t.estado}</span>
-            </div>
-          `);
-          this.layers.projectTrackLayer.addLayer(coreLine);
+            if (run.cumple) {
+              // Sub-segmentos que CUMPLE (≤ 10 m): Verde Neón (#00FF66) con borde oscuro
+              const haloLine = L.polyline(run.latLngs, {
+                pane: 'tramosProyectoPane',
+                color: '#000000',
+                weight: 9,
+                opacity: 0.95,
+                lineCap: 'round',
+                lineJoin: 'round'
+              });
+              this.layers.projectTrackLayer.addLayer(haloLine);
+
+              const coreLine = L.polyline(run.latLngs, {
+                pane: 'tramosProyectoPane',
+                color: '#00FF66',
+                weight: 5,
+                opacity: 1.0,
+                lineCap: 'round',
+                lineJoin: 'round'
+              }).bindPopup(`
+                <div style="font-family:sans-serif;font-size:12px;line-height:1.4">
+                  <div style="background:#00412e;color:#00FF66;font-weight:bold;padding:5px 8px;border-radius:4px 4px 0 0;margin:-10px -10px 8px -10px;border-bottom:1px solid #00FF66">
+                    ✅ Sub-tramo Conforme (En Vía ≤ 10m)
+                  </div>
+                  <b>Tramo:</b> ${t.nombrePlacemark || 'Tramo'}<br>
+                  <b>Longitud Conforme:</b> ${run.longitudM.toFixed(1)} m (Abscisa K0+${Math.round(run.startAbscisaM)} a K0+${Math.round(run.endAbscisaM)})<br>
+                  <b>Vía Oficial:</b> <span style="font-family:monospace;color:#0284c7;font-weight:bold">${run.proj?.codigoVia || t.codigoViaGeoJSON || 'N/A'}</span><br>
+                  <b>Distancia al Eje:</b> ≤ 10 m (Máx: ${run.maxDistM.toFixed(1)} m)
+                </div>
+              `);
+              this.layers.projectTrackLayer.addLayer(coreLine);
+            } else {
+              // Sub-segmentos que NO CUMPLE (> 10 m): Rojo / Magenta de Alerta (#FF1744) con borde oscuro y trazo discontinuo
+              const haloLine = L.polyline(run.latLngs, {
+                pane: 'tramosProyectoPane',
+                color: '#000000',
+                weight: 9,
+                opacity: 0.95,
+                lineCap: 'round',
+                lineJoin: 'round'
+              });
+              this.layers.projectTrackLayer.addLayer(haloLine);
+
+              const coreLine = L.polyline(run.latLngs, {
+                pane: 'tramosProyectoPane',
+                color: '#FF1744',
+                weight: 5,
+                dashArray: '6, 6',
+                opacity: 1.0,
+                lineCap: 'round',
+                lineJoin: 'round'
+              }).bindPopup(`
+                <div style="font-family:sans-serif;font-size:12px;line-height:1.4">
+                  <div style="background:#881337;color:#FFD1D9;font-weight:bold;padding:5px 8px;border-radius:4px 4px 0 0;margin:-10px -10px 8px -10px;border-bottom:1px solid #FF1744">
+                    ⚠️ Sub-tramo NO Conforme (Fuera de Vía > 10m)
+                  </div>
+                  <b>Tramo:</b> ${t.nombrePlacemark || 'Tramo'}<br>
+                  <b>Longitud Fuera de Vía:</b> ${run.longitudM.toFixed(1)} m (Abscisa K0+${Math.round(run.startAbscisaM)} a K0+${Math.round(run.endAbscisaM)})<br>
+                  <b>Vía Oficial:</b> <span style="font-family:monospace;color:#f43f5e;font-weight:bold">${run.proj?.codigoVia || t.codigoViaGeoJSON || 'N/A'}</span><br>
+                  <b>Desviación Máxima:</b> <b style="color:#FF1744">${run.maxDistM.toFixed(1)} m</b> del eje vial
+                </div>
+              `);
+              this.layers.projectTrackLayer.addLayer(coreLine);
+            }
+          });
+
+          // Punto de Quiebre / Desviación:
+          if (sub.puntosDesviacion && sub.puntosDesviacion.length > 0) {
+            sub.puntosDesviacion.forEach((ptDesv, pIdx) => {
+              const devIcon = L.divIcon({
+                className: 'deviation-break-icon',
+                html: `<div style="background:#BE123C;color:#FFFFFF;border:2px solid #FFFFFF;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 0 10px rgba(190,18,60,0.8);cursor:pointer;" title="Punto de desviación del corredor vial">⚠️</div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+              });
+
+              const marker = L.marker([ptDesv.lat, ptDesv.lng], {
+                pane: 'tramosProyectoPane',
+                icon: devIcon,
+                zIndexOffset: 3500
+              });
+
+              marker.bindTooltip(`
+                <div style="font-family:sans-serif;font-size:11px;line-height:1.4;max-width:240px;">
+                  <b style="color:#FF1744">⚠️ Punto de desviación</b><br>
+                  A partir de este punto (Abscisa aprox. <b>K0+${Math.round(ptDesv.abscisaM)} m</b> desde el inicio) el trazado se desvía de la vía <b>${ptDesv.codigoVia || t.codigoViaGeoJSON}</b>.
+                </div>
+              `, {
+                direction: 'top',
+                offset: [0, -12],
+                className: 'spatial-deviation-tooltip'
+              });
+
+              this.layers.projectTrackLayer.addLayer(marker);
+            });
+          }
+        } else {
+          // Fallback a trazado clásico
+          const latLngs = (t.coordenadas || []).map(c => [c.lat, c.lng]);
+          if (latLngs.length > 1) {
+            const haloLine = L.polyline(latLngs, {
+              pane: 'tramosProyectoPane',
+              color: '#000000',
+              weight: 9,
+              opacity: 0.95,
+              lineCap: 'round',
+              lineJoin: 'round'
+            });
+            this.layers.projectTrackLayer.addLayer(haloLine);
+
+            const coreLine = L.polyline(latLngs, {
+              pane: 'tramosProyectoPane',
+              color: t.cumple ? '#00FF66' : '#FF1744',
+              weight: 5,
+              opacity: 1.0,
+              lineCap: 'round',
+              lineJoin: 'round'
+            });
+            this.layers.projectTrackLayer.addLayer(coreLine);
+          }
         }
       });
       this.bringProjectTracksToFront();
@@ -1944,14 +2423,27 @@ const SpatialEngine = {
       }
     });
 
-    if (allLatLngs.length === 0 && this.layers.projectTrackLayer) {
-      const trackBounds = (typeof this.layers.projectTrackLayer.getBounds === "function")
-        ? this.layers.projectTrackLayer.getBounds()
-        : null;
-      if (trackBounds && trackBounds.isValid()) {
-        this.leafletMap.fitBounds(trackBounds, { padding: [60, 60], maxZoom: 18 });
-        this.bringProjectTracksToFront();
-        return;
+    if (allLatLngs.length === 0) {
+      if (this.layers.projectTrackLayer) {
+        const trackBounds = (typeof this.layers.projectTrackLayer.getBounds === "function")
+          ? this.layers.projectTrackLayer.getBounds()
+          : null;
+        if (trackBounds && trackBounds.isValid()) {
+          this.leafletMap.fitBounds(trackBounds, { padding: [60, 60], maxZoom: 18 });
+          this.bringProjectTracksToFront();
+          return;
+        }
+      }
+      if (this.layers.terciariaLayer && this.layers.terciariaLayer.getLayers().length > 0) {
+        const tercSubLayer = this.layers.terciariaLayer.getLayers()[0];
+        if (tercSubLayer && typeof tercSubLayer.getBounds === "function") {
+          const tb = tercSubLayer.getBounds();
+          if (tb && tb.isValid()) {
+            this.leafletMap.fitBounds(tb, { padding: [40, 40] });
+            this.bringProjectTracksToFront();
+            return;
+          }
+        }
       }
     }
 
@@ -1977,7 +2469,9 @@ const SpatialEngine = {
     if (!container) return;
 
     this.currentProject = project || {};
-    this.filterByActiveMunicipio = true;
+    if (this.filterByActiveMunicipio === undefined || this.filterByActiveMunicipio === null) {
+      this.filterByActiveMunicipio = true;
+    }
     this.syncToggleButtonsUI();
 
     const geo = this.currentProject.georreferenciacion || this.currentProject.fase1B || {};
@@ -2123,10 +2617,11 @@ const SpatialEngine = {
     project = project || {};
     const geo = project.georreferenciacion || project.fase1B || {};
     const tramos = geo.tramos || [];
-    const puntos = geo.puntos || geo.puntosInspeccion || geo.puntosContraste || [];
+    const puntos = (geo.puntos && geo.puntos !== geo.puntosContraste) ? geo.puntos : (geo.puntosInspeccion || []);
 
     const totalTramos = tramos.length;
-    const tramosConformes = tramos.filter(t => t.cumple).length;
+    const tramosConformes = tramos.filter(t => t.cumple && !t.cumpleParcial).length;
+    const tramosParciales = tramos.filter(t => t.cumpleParcial).length;
     const totalPuntos = puntos.length;
     const puntosConformes = puntos.filter(p => p.cumple).length;
 
@@ -2138,7 +2633,7 @@ const SpatialEngine = {
 
     if (countPointsEl) {
       if (totalTramos > 0) {
-        countPointsEl.innerText = `${tramosConformes} de ${totalTramos} tramos conformes (≤ 10 m de eje vial) | ${puntosConformes} de ${totalPuntos} puntos conformes`;
+        countPointsEl.innerText = `${tramosConformes} conformes (100% en vía)${tramosParciales > 0 ? ` | ${tramosParciales} parciales (bicolor)` : ''} de ${totalTramos} tramos | ${puntosConformes} de ${totalPuntos} puntos conformes`;
       } else if (totalPuntos > 0) {
         countPointsEl.innerText = `${puntosConformes} de ${totalPuntos} puntos a menos de 10 m de un eje vial oficial`;
       } else {
@@ -2180,9 +2675,14 @@ const SpatialEngine = {
     if (totalTramos === 0 && totalPuntos === 0) {
       tableBody.innerHTML = alertsHtml + `
         <tr>
-          <td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted);background:rgba(0,0,0,0.02);">
-            <div style="font-size:14px;font-weight:700;color:var(--text-main);margin-bottom:4px;">Eje vial pendiente de georreferenciación</div>
-            <div style="font-size:12px;">Cargue la carpeta del municipio con archivo KML, KMZ, ZIP, 7Z o RAR para contrastar contra la red vial terciaria oficial.</div>
+          <td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted);background:rgba(239,68,68,0.03);">
+            <div style="font-size:15px;font-weight:700;color:var(--danger, #dc2626);margin-bottom:6px;">⚠️ Archivo de Georreferenciación Faltante (Ítem 24)</div>
+            <div style="font-size:13px;color:var(--text-main);margin-bottom:14px;max-width:540px;margin-left:auto;margin-right:auto;">No se ha detectado ningún archivo .KMZ, .KML o contenedor comprimido con trazados georreferenciados válidos en el expediente del proyecto.</div>
+            <div>
+              <button type="button" class="btn btn-primary" onclick="App.subirSubsanacionItem(24)" style="padding:7px 16px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                <span>📤</span> Aportar Archivo KMZ / KML (Ítem 24)
+              </button>
+            </div>
           </td>
         </tr>
       `;
@@ -2198,15 +2698,26 @@ const SpatialEngine = {
       tr.setAttribute("onclick", `SpatialEngine.focusContrastItem(${tIdx}, true)`);
       tr.title = "Clic para centrar en el mapa y resaltar vector de distancia al eje vial";
 
-      const isOk = t.cumple;
+      const isOk = t.cumple && !t.cumpleParcial;
+      const isParcial = !!t.cumpleParcial;
       const dist = t.distanciaEjeM !== undefined ? t.distanciaEjeM : 0;
       const lenText = t.longitudCalculada ? `${t.longitudCalculada.toFixed(1)} m` : (t.longitudM ? `${t.longitudM.toFixed(1)} m` : "N/D");
+
+      let statusBadge = "";
+      if (isOk) {
+        statusBadge = `<span class="status-pill cumple" style="font-size:10px;white-space:nowrap;">✓ ${t.estado || `SOBRE ${t.codigoViaGeoJSON}`}</span>`;
+      } else if (isParcial) {
+        statusBadge = `<span class="status-pill warning" style="font-size:10px;white-space:nowrap;background:rgba(217,119,6,0.18);color:#D97706;border:1px solid rgba(217,119,6,0.45);font-weight:800;">⚠️ PARCIAL: ${t.longitudEnViaM} m en vía (${t.pctEnVia}%) / ${t.longitudFueraViaM} m fuera</span>`;
+      } else {
+        statusBadge = `<span class="status-pill no-cumple" style="font-size:10px;white-space:nowrap;">! ${t.estado || `A ${dist.toFixed(1)} m DE ${t.codigoViaGeoJSON}`}</span>`;
+      }
 
       tr.innerHTML = `
         <td class="font-mono font-bold" style="color:#10b981">${t.idTramo || 'TR'}</td>
         <td>
           <div style="font-weight:700;color:var(--text-main)">${t.nombrePlacemark || 'Tramo sin nombre'}</div>
           <div style="font-size:10px;color:var(--text-muted)">${t.carpetaContenedora || 'KML/KMZ'}</div>
+          ${t.detalleParcial ? `<div style="font-size:10.5px;color:#d97706;margin-top:4px;line-height:1.3;font-style:italic;">⚠️ ${t.detalleParcial}</div>` : ''}
         </td>
         <td class="font-mono" style="font-size:11px">${t.codigoViaDeclarado || 'N/A'}</td>
         <td class="font-mono font-bold" style="color:#0284c7">${t.codigoViaGeoJSON || 'N/A'}</td>
@@ -2216,14 +2727,12 @@ const SpatialEngine = {
             ${t.categoriaVia || 'Red Terciaria (Orden 3)'}
           </span>
         </td>
-        <td class="font-mono" style="text-align:right">
-          <div style="font-weight:700;color:#10b981">${lenText}</div>
-          <div style="font-size:10px;color:var(--text-muted)">Dist: ${dist.toFixed(1)} m</div>
+        <td class="font-mono col-longt-dist" style="text-align:right">
+          <div class="longt-main-val" style="font-weight:700;font-size:11.5px;color:${isOk ? '#00FF66' : (isParcial ? '#FBBF24' : '#FF4D6D')}">${lenText}</div>
+          <div class="longt-sub-val" style="font-size:10.5px;font-weight:600;color:#FFFFFF;margin-top:2px;">${isParcial ? `Desv. máx: ${dist.toFixed(1)} m` : `Dist: ${dist.toFixed(1)} m`}</div>
         </td>
         <td style="text-align:center">
-          <span class="status-pill ${isOk ? 'cumple' : 'no-cumple'}" style="font-size:10px;white-space:nowrap;">
-            ${isOk ? '✓ ' + (t.estado || `SOBRE ${t.codigoViaGeoJSON}`) : '! ' + (t.estado || `A ${dist.toFixed(1)} m DE ${t.codigoViaGeoJSON}`)}
-          </span>
+          ${statusBadge}
         </td>
       `;
       tableBody.appendChild(tr);
@@ -2254,8 +2763,8 @@ const SpatialEngine = {
             ${p.categoriaVia || 'Red Terciaria (Orden 3)'}
           </span>
         </td>
-        <td class="font-mono" style="text-align:right">
-          <div style="font-size:11px;font-weight:700;color:var(--text-main)">Eje: ${dist.toFixed(1)} m</div>
+        <td class="font-mono col-longt-dist" style="text-align:right">
+          <div class="longt-main-val" style="font-size:11.5px;font-weight:700;color:${isOk ? '#00FF66' : '#FF4D6D'}">Eje: ${dist.toFixed(1)} m</div>
         </td>
         <td style="text-align:center">
           <span class="status-pill ${isOk ? 'cumple' : 'no-cumple'}" style="font-size:10px;white-space:nowrap;">
@@ -2295,7 +2804,11 @@ const SpatialEngine = {
       return {
         fase: "1B_ESPACIAL",
         aprobado: false,
-        tieneGeorreferenciacionValida: tieneGeorreferenciacionValida,
+        tieneKMZ: false,
+        porcentajeAlineacion: 0,
+        tieneGeorreferenciacionValida: false,
+        estadoCompuerta: 'BLOQUEADO',
+        motivoRechazo: 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.',
         alertaComprimido: alertaComprimido,
         codigoDeclarado: "Sin código",
         codigoOficial: "Sin código",
@@ -2373,6 +2886,8 @@ const SpatialEngine = {
     return {
       fase: "1B_ESPACIAL",
       aprobado: passed,
+      tieneKMZ: tieneGeorreferenciacionValida && hasGeom,
+      porcentajeAlineacion: coveragePct,
       tieneGeorreferenciacionValida: tieneGeorreferenciacionValida,
       alertaComprimido: alertaComprimido,
       codigoDeclarado: declaredCode,
@@ -2390,7 +2905,7 @@ const SpatialEngine = {
       concordanciaMetricaOk: metricOk,
       puntosAnomalia: geo.puntosAnomalia || 0,
       tramos: geo.tramos || [],
-      puntos: geo.puntos || geo.puntosInspeccion || [],
+      puntos: (geo.puntos && geo.puntos !== geo.puntosContraste) ? geo.puntos : (geo.puntosInspeccion || []),
       puntosInspeccion: geo.puntosInspeccion || geo.puntos || [],
       puntosContraste: geo.puntosContraste || [],
       hallazgosCriticos: criticalIssues,

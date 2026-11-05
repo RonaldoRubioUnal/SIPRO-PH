@@ -151,6 +151,11 @@ const FolderReader = {
       kw: ["cofinanciacion", "cdp", "recursos", "aportes", "contrapartida", "disponibilidad", "compromiso", "financiacion"],
       pref: ["27", "3 27", "2 5", "03 0 2"],
       exc: ["especificac", "despiece"]
+    },
+    28: {
+      kw: ["presupuesto", "pto", "apu", "cantidades de obra", "cantidades", "analisis de precios", "presupuesto oficial"],
+      pref: ["28", "3 28"],
+      exc: ["despiece"]
     }
   },
 
@@ -165,86 +170,364 @@ const FolderReader = {
       .trim();
   },
 
-  matchFileToItemRule(fileName, itemId) {
-    const rule = this.itemRules27[itemId];
-    if (!rule) return { matched: false, score: 0 };
-    const norm = this.normalizeText(fileName);
-
-    // 1. Exclusiones seguras
-    for (const exc of (rule.exc || [])) {
-      if (norm.includes(exc)) {
-        if (itemId === 2 && (norm.includes("especificac") || norm.includes("esquema"))) {
-          // Permitir si explícitamente es esquema o especificaciones
-        } else {
-          return { matched: false, score: 0 };
-        }
-      }
-    }
-
-    let score = 0;
-
-    // 2. Coincidencia por palabras clave
-    for (const kw of (rule.kw || [])) {
-      if (kw.startsWith(".")) {
-        if (fileName.toLowerCase().endsWith(kw)) {
-          score += 10;
-          break;
-        }
-      } else if (norm.includes(kw)) {
-        score += 10;
-        break;
-      }
-    }
-
-    // 3. Coincidencia por prefijo numérico flexible
-    const numPrefix2 = String(itemId).padStart(2, "0");
-    const numPrefix1 = String(itemId);
-    if (norm.startsWith(numPrefix2 + " ") || norm.startsWith(numPrefix1 + " ") || norm === numPrefix2 || norm === numPrefix1) {
-      score += 8;
-    } else {
-      for (const pref of (rule.pref || [])) {
-        if (norm.startsWith(pref + " ") || norm.startsWith(pref + "  ") || norm === pref) {
-          score += 8;
-          break;
-        }
-      }
-    }
-
-    return { matched: score > 0, score: score };
+  /**
+   * Extrae la extensión de cualquier archivo de forma 100% segura
+   * usando exclusivamente file.name.split('.').pop().toLowerCase().trim()
+   */
+  getFileExtension(fileOrName) {
+    if (!fileOrName) return "";
+    const name = typeof fileOrName === "string" ? fileOrName : (fileOrName.name || "");
+    return name.includes(".") ? name.split(".").pop().toLowerCase().trim() : "";
   },
 
-  classifyFilesToItems27(files) {
-    const detectedMap = {};
-    const assignedFiles = new Set();
-    const sharedBundleItems = new Set([17, 18, 19, 20]);
+  /**
+   * Obtiene el nombre físico de la carpeta contenedora sin alterar
+   */
+  getRawFolderName(rawFiles, dirHandle = null) {
+    if (dirHandle && dirHandle.name) {
+      return dirHandle.name;
+    }
+    if (rawFiles && rawFiles.length > 0) {
+      const fWithRel = rawFiles.find(f => f.webkitRelativePath && f.webkitRelativePath.includes("/"));
+      if (fWithRel) {
+        return fWithRel.webkitRelativePath.split("/")[0];
+      }
+      if (rawFiles[0] && rawFiles[0].name) {
+        return rawFiles[0].name.replace(/\.[^/.]+$/, "");
+      }
+    }
+    return "expediente_municipal";
+  },
 
-    for (let itemId = 1; itemId <= 27; itemId++) {
-      let bestFile = null;
-      let bestScore = -1;
+  /**
+   * Limpia el nombre del archivo quitando números iniciales, tildes y caracteres especiales
+   */
+  cleanFileNameForSemanticMatch(fileName) {
+    if (!fileName) return "";
+    return fileName
+      .replace(/\.[^/.]+$/, '')
+      .replace(/^\s*\d+[\s.\-_)]*/, '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  },
 
-      for (const file of files) {
-        if (assignedFiles.has(file.name) && !sharedBundleItems.has(itemId)) {
-          continue;
-        }
+  /**
+   * Evalúa la coincidencia semántica flexible por raíces para clasificar un archivo en uno o varios ítems
+   */
+  matchFileToItems(file) {
+    const fileName = file.name || "";
+    const clean = this.cleanFileNameForSemanticMatch(fileName);
+    const cleanNorm = clean.replace(/[^a-z0-9]/g, ' ');
+    const ext = this.getFileExtension(file);
+    const matchedItemIds = [];
 
-        const res = this.matchFileToItemRule(file.name, itemId);
-        if (res.matched && res.score > bestScore) {
-          bestScore = res.score;
-          bestFile = file;
+    // 1. Regla universal Item 24 (Georreferenciación):
+    // Todo archivo con extensión .kmz o .kml (o si contiene georref/trazado/track/tramo)
+    if (ext === "kmz" || ext === "kml" || ["georref", "trazado", "track", "tramos"].some(k => clean.includes(k))) {
+      matchedItemIds.push(24);
+    }
+
+    // 2. Regla estricta Item 28 (Presupuesto Oficial):
+    // Extensión obligatoria de hoja de cálculo Y coincidencia semántica con "presupuesto" o "pto"
+    if (["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext) && (clean.includes("presupuesto") || clean.includes("pto")) && !clean.includes("despiece")) {
+      matchedItemIds.push(28);
+    }
+
+    // 3. Items 17, 18, 19, 20 Bundle (Declaraciones y compromisos anexos)
+    const isBundle = clean.includes("declaracion") && (clean.includes("compromiso") || clean.includes("anexo"));
+    if (isBundle) {
+      matchedItemIds.push(17, 18, 19, 20);
+    }
+
+    // 4. Reglas semánticas individuales para cada ítem (usando raíces flexibles y raíz 'alcald'):
+    // Item 1: Solicitud
+    if (["solicitud", "carta", "oficio", "intencion", "formal", "peticion"].some(k => clean.includes(k)) &&
+        !["despiece", "especificac", "cedula", "rut", "posesion"].some(e => clean.includes(e))) {
+      matchedItemIds.push(1);
+    }
+
+    // Item 2: Especificaciones y diseño
+    if (["especificac", "especif", "esquema", "memoria tecnica", "estudios", "diseno"].some(k => clean.includes(k)) &&
+        !["despiece", "presupuesto", "apu"].some(e => clean.includes(e))) {
+      matchedItemIds.push(2);
+    }
+
+    // Item 3: Despiece de acero (REGLA ESTRICTA)
+    // Condición obligatoria: contener obligatoriamente "despiece", "acero" o "figuracion"
+    // Exclusión estricta: Jamás asignar si contiene nombres de otros documentos
+    const item3Exclusiones = [
+      "vigencias", "cdp", "disponibilidad", "certificado", "solicitud",
+      "acta", "socializacion", "socializ", "rut", "cedula", "antecedentes",
+      "cronograma", "ficha", "presupuesto", "especificaciones", "especificac", "fotografico", "fotos"
+    ];
+    const tieneExclusionItem3 = item3Exclusiones.some(e => clean.includes(e));
+    const tienePalabraItem3 = ["despiece", "acero", "figuracion"].some(k => clean.includes(k));
+
+    if (tienePalabraItem3 && !tieneExclusionItem3) {
+      matchedItemIds.push(3);
+    }
+
+    // Item 4: Certificado vías a cargo / terciarias
+    if ((["vias a cargo", "terciaria", "red vial", "vias terciarias"].some(k => clean.includes(k)) ||
+         (clean.includes("certificado") && clean.includes("via"))) &&
+        !["especificac", "despiece", "posesion"].some(e => clean.includes(e))) {
+      matchedItemIds.push(4);
+    }
+
+    // Item 5: Socialización
+    if ((["socializ", "concertacion"].some(k => clean.includes(k)) ||
+         (clean.includes("comunitaria") && clean.includes("asistencia")) ||
+         (clean.includes("acta") && ["comunidad", "asistencia", "reunion", "participacion"].some(k => clean.includes(k)))) &&
+        !["posesion", "especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(5);
+    }
+
+    // Item 6: Registro fotográfico
+    if (["fotograf", "fotos", "foto", "evidencia"].some(k => clean.includes(k)) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(6);
+    }
+
+    // Item 7: Cédula Alcalde / Alcaldesa
+    if ((["cedula", "identidad", "identificacion"].some(k => clean.includes(k)) || /\bcc\b/.test(cleanNorm)) &&
+        !["rut", "foto"].some(e => clean.includes(e))) {
+      matchedItemIds.push(7);
+    }
+
+    // Item 8: Acta de posesión
+    if (clean.includes("posesion") && !["socializ", "especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(8);
+    }
+
+    // Item 9: Concejo / Facultades para contratar
+    if (["facultad", "facultades", "concejo", "acuerdo", "autorizacion"].some(k => clean.includes(k)) &&
+        !["posesion", "socializ", "especificac"].some(e => clean.includes(e))) {
+      matchedItemIds.push(9);
+    }
+
+    // Item 10: RUT
+    if (["rut", "tributario", "dian"].some(k => clean.includes(k)) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(10);
+    }
+
+    // Item 11: Contraloría (Alcalde/Alcaldesa y Municipio)
+    if ((["contralor", "sirec", "boletin"].some(k => clean.includes(k)) || (clean.includes("fiscal") && !clean.includes("parafiscal"))) &&
+        !["procurad", "policia"].some(e => clean.includes(e))) {
+      matchedItemIds.push(11);
+    }
+
+    // Item 12: RNMC - Medidas correctivas
+    if (["rnmc", "medidas correctivas", "correctivas"].some(k => clean.includes(k))) {
+      matchedItemIds.push(12);
+    }
+
+    // Item 13: Antecedentes judiciales policía
+    if (["judicial", "policia", "pasado judicial"].some(k => clean.includes(k)) &&
+        !["rnmc", "correctivas", "sexuales"].some(e => clean.includes(e))) {
+      matchedItemIds.push(13);
+    }
+
+    // Item 14: Procuraduría (Alcalde/Alcaldesa y Municipio)
+    if (["procurad", "disciplinario", "siri"].some(k => clean.includes(k)) &&
+        !["contralor", "policia"].some(e => clean.includes(e))) {
+      matchedItemIds.push(14);
+    }
+
+    // Item 15: Parafiscales y seguridad social
+    if ((["parafiscal", "seguridad social", "aportes"].some(k => clean.includes(k)) ||
+         (clean.includes("seguridad") && !clean.includes("policia")) ||
+         (clean.includes("paz y salvo") && !clean.includes("alimento"))) &&
+        !["despiece", "especificac"].some(e => clean.includes(e))) {
+      matchedItemIds.push(15);
+    }
+
+    // Item 16: REDAM - Deudores alimentarios
+    if (["redam", "alimentarios", "alimentos", "deudores"].some(k => clean.includes(k))) {
+      matchedItemIds.push(16);
+    }
+
+    // Item 17: Compromiso anticorrupción
+    if (!isBundle && (["anticorrupcion", "pacto"].some(k => clean.includes(k)) || (clean.includes("compromiso") && clean.includes("corrupcion"))) &&
+        !clean.includes("paco")) {
+      matchedItemIds.push(17);
+    }
+
+    // Item 18: Lavado de activos / SARLAFT
+    if (!isBundle && (["lavado", "sarlaft", "terrorismo"].some(k => clean.includes(k)) || (clean.includes("activos") && !clean.includes("fijo")))) {
+      matchedItemIds.push(18);
+    }
+
+    // Item 19: Inhabilidades e incompatibilidades
+    if (!isBundle && ["inhabilidad", "incompatibilidad", "conflicto"].some(k => clean.includes(k))) {
+      matchedItemIds.push(19);
+    }
+
+    // Item 20: No multas ni sanciones
+    if (!isBundle && ["multas", "sancion", "no multas", "incumplimiento"].some(k => clean.includes(k)) &&
+        !["rnmc", "correctivas"].some(e => clean.includes(e))) {
+      matchedItemIds.push(20);
+    }
+
+    // Item 21: PACO
+    if (["paco", "portal anticorrupcion", "transparencia", "cic"].some(k => clean.includes(k))) {
+      matchedItemIds.push(21);
+    }
+
+    // Item 22: Delitos sexuales menores (Ley 1918)
+    if (["delitos sexuales", "menores", "sexuales", "1918"].some(k => clean.includes(k))) {
+      matchedItemIds.push(22);
+    }
+
+    // Item 23: Banco de proyectos / BPIN
+    if (((clean.includes("banco") && clean.includes("proyecto")) || ["bpin", "radicacion"].some(k => clean.includes(k))) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(23);
+    }
+
+    // Item 25: Cronograma de obra
+    if (["cronograma", "plan de trabajo"].some(k => clean.includes(k)) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(25);
+    }
+
+    // Item 26: Plan de Desarrollo Municipal
+    if ((["plan desarrollo", "pdd", "plan de desarrollo"].some(k => clean.includes(k)) ||
+         (clean.includes("desarrollo") && !clean.includes("social") && !clean.includes("trabajo"))) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matchedItemIds.push(26);
+    }
+
+    // Item 27: Cofinanciación / CDP / Contrapartida
+    if ((["cofinanc", "cofianc", "vigencias futuras", "cdp", "disponibilidad presupuestal", "disponibilidad", "contrapartida"].some(k => clean.includes(k)) ||
+         (clean.includes("compromiso") && ["junta", "jac", "comunitario", "aporte"].some(j => clean.includes(j)))) &&
+        !["especificac", "despiece", "anticorrupcion"].some(e => clean.includes(e))) {
+      matchedItemIds.push(27);
+    }
+
+    return [...new Set(matchedItemIds)];
+  },
+
+  /**
+   * Método de compatibilidad para evaluar un archivo contra un ítem específico
+   */
+  matchFileToItemRule(fileName, itemId) {
+    const matched = this.matchFileToItems({ name: fileName });
+    return { matched: matched.includes(itemId), score: matched.includes(itemId) ? 10 : 0 };
+  },
+
+  /**
+   * Lee un archivo Excel y extrae su texto plano de forma segura
+   */
+  async readExcelAsText(file) {
+    if (!file) return "";
+    try {
+      if (typeof XLSX === "undefined") return "";
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      let text = "";
+      for (const sheetName of wb.SheetNames) {
+        const sheet = wb.Sheets[sheetName];
+        if (sheet && typeof XLSX.utils !== "undefined" && XLSX.utils.sheet_to_txt) {
+          text += " " + XLSX.utils.sheet_to_txt(sheet);
         }
       }
+      return text;
+    } catch (e) {
+      console.warn("Error leyendo Excel como texto:", file.name, e);
+      return "";
+    }
+  },
 
-      if (bestFile) {
-        detectedMap[itemId] = bestFile;
-        const norm = this.normalizeText(bestFile.name);
-        const isBundle = norm.includes("declaraciones") && (norm.includes("compromisos") || norm.includes("anexos"));
-        if (!isBundle) {
-          assignedFiles.add(bestFile.name);
+  /**
+   * Clasifica la totalidad de archivos de la carpeta en los 28 ítems normativos
+   * Permite asociar múltiples archivos por requisito y nunca indexa por número inicial
+   */
+  async classifyFilesToItems27(files) {
+    const detectedMap = {};
+    const detectedFilesMap = {};
+    const archivosDetectadosMap = {};
+
+    for (let itemId = 1; itemId <= 28; itemId++) {
+      detectedFilesMap[itemId] = [];
+    }
+
+    // 1. Recorrer la totalidad de archivos de la carpeta evaluando coincidencias semánticas
+    for (const file of files) {
+      const matchedItemIds = this.matchFileToItems(file);
+      for (const itemId of matchedItemIds) {
+        detectedFilesMap[itemId].push(file);
+      }
+    }
+
+    // 2. Si el ítem 3 no se detectó por nombre, inspeccionar si alguna hoja de cálculo contiene internamente la tabla de despiece de acero
+    if (detectedFilesMap[3].length === 0 && typeof XLSX !== "undefined") {
+      const item3Exclusiones = [
+        "vigencias", "cdp", "disponibilidad", "certificado", "solicitud",
+        "acta", "socializacion", "socializ", "rut", "cedula", "antecedentes",
+        "cronograma", "ficha", "presupuesto", "especificaciones", "especificac", "fotografico", "fotos"
+      ];
+      for (const file of files) {
+        const ext = this.getFileExtension(file);
+        if (["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext)) {
+          const fClean = this.cleanFileNameForSemanticMatch(file.name);
+          if (item3Exclusiones.some(e => fClean.includes(e))) continue;
+          if (detectedFilesMap[28].includes(file)) continue;
+          try {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: "array" });
+            let hasSteelTable = false;
+            for (const sName of wb.SheetNames) {
+              const sheet = wb.Sheets[sName];
+              if (!sheet) continue;
+              const sTxt = (XLSX.utils && XLSX.utils.sheet_to_txt) ? XLSX.utils.sheet_to_txt(sheet).toUpperCase() : "";
+              if (sTxt.includes("DESPIECE DE ACERO") || sTxt.includes("CUADRO DETALLADO DE DESPIECE") || (sTxt.includes("RIELES") && sTxt.includes("VIGA RIOSTRA") && sTxt.includes("CUANTIA"))) {
+                hasSteelTable = true;
+                break;
+              }
+            }
+            if (hasSteelTable) {
+              detectedFilesMap[3].push(file);
+              console.log("Ítem 3 detectado por inspección interna de tabla de despiece en Excel:", file.name);
+              break;
+            }
+          } catch (e) {}
         }
       }
     }
 
-    return detectedMap;
+    // 3. Si el ítem 28 no se detectó por nombre, inspeccionar si alguna hoja de cálculo contiene la pestaña PRESUPUESTO
+    if (detectedFilesMap[28].length === 0 && typeof XLSX !== "undefined") {
+      for (const file of files) {
+        const ext = this.getFileExtension(file);
+        if (["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext)) {
+          try {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: "array", bookSheets: true });
+            if (wb && wb.SheetNames && wb.SheetNames.some(s => s.trim().toUpperCase().includes("PRESUPUESTO"))) {
+              detectedFilesMap[28].push(file);
+              console.log("Ítem 28 detectado por inspección interna de hoja PRESUPUESTO:", file.name);
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    // 4. Poblar detectedMap y archivosDetectadosMap (soporta multi-archivo por requisito)
+    // Cero relleno o fallback: si un requisito no encuentra archivo estricto, queda archivo: null y Faltante
+    for (let itemId = 1; itemId <= 28; itemId++) {
+      const matched = detectedFilesMap[itemId];
+      if (matched && matched.length > 0) {
+        detectedMap[itemId] = matched[0]; // Archivo principal para visualización
+        archivosDetectadosMap[itemId] = matched.map(f => f.name).join(", ");
+      } else {
+        detectedMap[itemId] = null;
+      }
+    }
+
+    return { detectedMap, detectedFilesMap, archivosDetectadosMap };
   },
 
   init() {
@@ -274,7 +557,11 @@ const FolderReader = {
       item3Input.addEventListener("change", async (e) => {
         const file = e.target.files && e.target.files[0];
         if (file) {
-          await this.reprocessItem3File(file, App.currentProjectId);
+          if (window.App && typeof App.subirSubsanacionItem === "function") {
+            await App.subirSubsanacionItem(3, App.currentProjectId, file);
+          } else {
+            await this.reprocessItem3File(file, App.currentProjectId);
+          }
         }
         item3Input.value = "";
       });
@@ -291,11 +578,48 @@ const FolderReader = {
       const btn = document.getElementById(btnId);
       if (btn) {
         btn.addEventListener("click", () => {
-          const inp = document.getElementById("folderInput") || document.getElementById("sidebarFolderInput");
-          if (inp) inp.click();
+          this.triggerFolderPicker();
         });
       }
     });
+  },
+
+  /**
+   * Abre selector de carpeta con File System Access API (showDirectoryPicker) o fallback
+   */
+  async triggerFolderPicker() {
+    if (window.showDirectoryPicker) {
+      try {
+        const dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+        const files = [];
+        async function readDir(handle, currentPath = "") {
+          for await (const entry of handle.values()) {
+            if (entry.kind === "file") {
+              const file = await entry.getFile();
+              Object.defineProperty(file, "webkitRelativePath", {
+                value: currentPath ? `${currentPath}/${file.name}` : file.name,
+                configurable: true
+              });
+              file._handle = entry;
+              files.push(file);
+            } else if (entry.kind === "directory") {
+              await readDir(entry, currentPath ? `${currentPath}/${entry.name}` : entry.name);
+            }
+          }
+        }
+        await readDir(dirHandle, dirHandle.name);
+        if (files.length > 0) {
+          const exp = await this.readFolder(files, dirHandle);
+          if (exp) exp.dirHandle = dirHandle;
+          return;
+        }
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.warn("showDirectoryPicker fallback a input:", err);
+      }
+    }
+    const inp = document.getElementById("folderInput") || document.getElementById("sidebarFolderInput");
+    if (inp) inp.click();
   },
 
   setupDropzones() {
@@ -339,7 +663,11 @@ const FolderReader = {
       if (files.length === 1 && !files[0].webkitRelativePath) {
         const ext = files[0].name.slice(files[0].name.lastIndexOf('.')).toLowerCase();
         if (['.xlsx', '.xls', '.xlsm', '.pdf'].includes(ext)) {
-          await this.reprocessItem3File(files[0], App.currentProjectId);
+          if (window.App && typeof App.subirSubsanacionItem === "function") {
+            await App.subirSubsanacionItem(3, App.currentProjectId, files[0]);
+          } else {
+            await this.reprocessItem3File(files[0], App.currentProjectId);
+          }
           return;
         }
       }
@@ -610,10 +938,17 @@ const FolderReader = {
   },
 
   /**
+   * Alias de lectura de carpeta para compatibilidad con File System Access API
+   */
+  async readFolder(rawFiles, dirHandle = null) {
+    return this.processFileList(rawFiles, dirHandle);
+  },
+
+  /**
    * Procesa la lista de archivos soportando carpetas múltiples o individuales
    * Garantiza que cada proyecto quede indexado en window.proyectosAuditados
    */
-  async processFileList(rawFiles) {
+  async processFileList(rawFiles, dirHandle = null) {
     this.isProcessing = true;
     this.showLoadingModal(true, rawFiles.length);
 
@@ -623,48 +958,40 @@ const FolderReader = {
       // PIPELINE DE DESCOMPRESIÓN AUTOMÁTICA EN MEMORIA (PASO A y B)
       const files = await this.expandirArchivosComprimidos(rawFiles);
 
-      // 1. Detectar si los archivos pertenecen a múltiples proyectos (por Fichas de priorización o por carpetas raíz)
+      // 1. Detectar si los archivos pertenecen a múltiples proyectos (por Fichas de priorización en distintas subcarpetas)
       const fichas = files.filter(f => {
         const norm = this.cleanForRegex(f.name);
         return norm.includes("ficha") && norm.includes("prioriz");
       });
 
-      let projectGroups = [];
-      if (fichas.length > 1) {
-        projectGroups = this.groupFilesByProject(files, fichas);
-      } else {
-        // Verificar si hay múltiples subcarpetas de proyectos aunque tengan nombres genéricos
-        const folderMap = {};
-        files.forEach(f => {
-          if (f.webkitRelativePath) {
-            const parts = f.webkitRelativePath.split('/');
-            if (parts.length > 2) {
-              const subDir = parts[0] + '/' + parts[1];
-              if (!folderMap[subDir]) folderMap[subDir] = [];
-              folderMap[subDir].push(f);
-            }
+      // Deduplicar fichas que estén en la misma carpeta física (ej. .pdf y .xlsx de la misma ficha en la misma carpeta)
+      const seenDirs = new Map();
+      fichas.forEach(f => {
+        const rel = f.webkitRelativePath || "";
+        const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+        if (!seenDirs.has(dir)) {
+          seenDirs.set(dir, f);
+        } else {
+          // Preferir .pdf sobre .xlsx si ambos existen en el mismo directorio
+          const current = seenDirs.get(dir);
+          if (this.getFileExtension(current) !== 'pdf' && this.getFileExtension(f) === 'pdf') {
+            seenDirs.set(dir, f);
           }
-        });
-
-        const subDirKeys = Object.keys(folderMap);
-        if (subDirKeys.length > 1 && subDirKeys.every(k => folderMap[k].length >= 3)) {
-          projectGroups = subDirKeys.map(k => {
-            const grpFiles = folderMap[k];
-            const grpFicha = grpFiles.find(f => {
-              const n = this.cleanForRegex(f.name);
-              return n.includes("ficha") || n.includes("prioriz");
-            });
-            return { fichaFile: grpFicha, files: grpFiles };
-          });
         }
+      });
+      const uniqueFichas = Array.from(seenDirs.values());
+
+      let projectGroups = [];
+      if (uniqueFichas.length > 1) {
+        projectGroups = this.groupFilesByProject(files, uniqueFichas);
       }
 
       let lastCreatedId = null;
 
       if (projectGroups.length > 1) {
-        // Procesamiento en lote de múltiples proyectos
+        // Procesamiento en lote de múltiples proyectos reales en subcarpetas
         for (const grp of projectGroups) {
-          const rec = await this.processSingleProjectFiles(grp.files, grp.fichaFile);
+          const rec = await this.processSingleProjectFiles(grp.files, grp.fichaFile, dirHandle);
           if (rec) lastCreatedId = rec.id;
         }
         App.populateProjectSelect();
@@ -674,11 +1001,15 @@ const FolderReader = {
         this.showToast(`✓ Se auditaron ${projectGroups.length} proyectos de manera independiente.`);
       } else {
         // Procesamiento de un solo proyecto
-        const fichaFile = fichas[0] || files.find(f => {
-          const norm = this.cleanForRegex(f.name);
-          return norm.includes("ficha") || norm.includes("prioriz");
-        });
-        const rec = await this.processSingleProjectFiles(files, fichaFile);
+        let fichaFile = uniqueFichas[0] || fichas.find(f => this.getFileExtension(f) === 'pdf')
+          || fichas.find(f => ['xlsx', 'xls', 'xlsm'].includes(this.getFileExtension(f)))
+          || fichas[0]
+          || files.find(f => {
+            const norm = this.cleanForRegex(f.name);
+            return norm.includes("ficha") || norm.includes("prioriz");
+          });
+
+        const rec = await this.processSingleProjectFiles(files, fichaFile, dirHandle);
         if (rec) {
           App.populateProjectSelect();
           if (typeof window.cargarProyecto === "function") {
@@ -704,7 +1035,7 @@ const FolderReader = {
       
       const relatedFiles = files.filter(item => {
         const itemPath = item.webkitRelativePath || "";
-        if (dir && (itemPath.startsWith(dir + "/") || itemPath === dir || itemPath.startsWith(dir))) return true;
+        if (dir && (itemPath.startsWith(dir + "/") || itemPath === dir)) return true;
         const itemTop = itemPath.split('/')[0];
         if (fichaTop && itemTop && fichaTop === itemTop) return true;
         return false;
@@ -723,21 +1054,18 @@ const FolderReader = {
    * Procesa los archivos de un proyecto específico de forma 100% aislada
    * Ejecuta Fase 1A, Fase 1B y Fase 2 y encapsula el resultado en window.proyectosAuditados[id]
    */
-  async processSingleProjectFiles(rawFiles, fichaFile) {
+  async processSingleProjectFiles(rawFiles, fichaFile, dirHandle = null) {
     // Asegurar descompresión completa en memoria
     const files = await this.expandirArchivosComprimidos(rawFiles);
 
-    if (!fichaFile) {
-      fichaFile = files.find(f => {
-        const norm = this.cleanForRegex(f.name);
-        return norm.includes("ficha") && norm.includes("prioriz");
-      }) || files.find(f => {
-        const norm = this.cleanForRegex(f.name);
-        return norm.includes("ficha") || norm.includes("prioriz");
-      });
-    }
+    // Obtener nombre de la carpeta de forma segura sin split('.') destructivo
+    const rawFolderName = this.getRawFolderName(files, dirHandle);
+
+    // Generar proyectoId sanitizado (solo letras, números, guiones y guiones bajos)
+    const proyectoId = 'proj_' + rawFolderName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+
     // =========================================================================
-    // PASO 1: DETECCIÓN Y LECTURA ESTRICTA DE "1. DATOS GENERALES DEL PROYECTO"
+    // PASO 1: DETECCIÓN Y LECTURA BLINDADA DE "FICHA DE PRIORIZACIÓN"
     // =========================================================================
     let fichaData = {
       detected: false,
@@ -756,93 +1084,160 @@ const FolderReader = {
 
     const mpiosList = SIPRO_DATA.municipiosAntioquia || SIPRO_DATA.municipios || [];
 
+    // Localizar ficha si no vino suministrada o buscar alternativas (.pdf vs .xlsx)
+    const allFichas = files.filter(f => {
+      const norm = this.cleanForRegex(f.name);
+      return norm.includes("ficha") && norm.includes("prioriz");
+    });
+    if (!fichaFile || allFichas.length > 1) {
+      fichaFile = allFichas.find(f => this.getFileExtension(f) === "pdf")
+        || allFichas.find(f => ["xlsx", "xls", "xlsm"].includes(this.getFileExtension(f)))
+        || allFichas[0]
+        || files.find(f => {
+          const norm = this.cleanForRegex(f.name);
+          return norm.includes("ficha") || norm.includes("prioriz");
+        });
+    }
+
     if (fichaFile) {
       fichaData.detected = true;
       fichaData.fileName = fichaFile.name;
-      const text = await this.readPdfOrText(fichaFile);
+      let text = "";
+      try {
+        const ext = this.getFileExtension(fichaFile);
+        if (ext === "pdf") {
+          text = await this.readPdfOrText(fichaFile);
+        } else if (["xlsx", "xls", "xlsm", "xlsb", "ods"].includes(ext)) {
+          text = await this.readExcelAsText(fichaFile);
+        } else {
+          text = await fichaFile.text();
+        }
+      } catch (errFicha) {
+        console.warn("Error leyendo Ficha principal (" + fichaFile.name + "):", errFicha);
+        const altFicha = allFichas.find(f => f.name !== fichaFile.name);
+        if (altFicha) {
+          try {
+            const extAlt = this.getFileExtension(altFicha);
+            if (extAlt === "pdf") text = await this.readPdfOrText(altFicha);
+            else if (["xlsx", "xls", "xlsm", "xlsb", "ods"].includes(extAlt)) text = await this.readExcelAsText(altFicha);
+            else text = await altFicha.text();
+            fichaData.fileName = altFicha.name;
+          } catch (eAlt) {
+            console.warn("Error leyendo Ficha alternativa (" + altFicha.name + "):", eAlt);
+          }
+        }
+      }
       fichaData.textoExtraido = text || "";
 
-      // Localizar estrictamente la sección "1. DATOS GENERALES DEL PROYECTO"
-      const secMatch = text.match(/(?:1[\.\s]*)?DATOS\s+GENERALES(?:\s+DEL\s+PROYECTO)?/i);
-      let sectionText = "";
-      if (secMatch) {
-        const startIdx = secMatch.index + secMatch[0].length;
-        const nextSec = text.slice(startIdx).search(/\n\s*2[\.\s]+[A-Z]/i);
-        const endIdx = nextSec >= 0 ? startIdx + nextSec : startIdx + 1200;
-        sectionText = text.slice(startIdx, endIdx);
-      } else {
-        sectionText = text.slice(0, 1500);
-      }
-
-      const normSec = this.normalizeText(sectionText);
-
-      // A. Buscar municipio explícitamente etiquetado bajo "Municipio de" en la sección 1
-      const labelMatch = normSec.match(/MUNICIPIO(?:\s+DE)?[\s:\._-]*([A-Z\s]{3,35})/i);
-      if (labelMatch) {
-        const cand = labelMatch[1].trim();
-        for (const m of mpiosList) {
-          if (!m || !m.nombre) continue;
-          const normMpio = this.normalizeText(m.nombre);
-          if (cand.includes(normMpio)) {
-            fichaData.municipio = m.nombre;
-            fichaData.codMunicipio = m.codigo;
-            fichaData.subregion = m.subregion;
-            break;
+      if (text) {
+        try {
+          // Localizar sección "1. DATOS GENERALES DEL PROYECTO"
+          const secMatch = text.match(/(?:1[\.\s]*)?DATOS\s+GENERALES(?:\s+DEL\s+PROYECTO)?/i);
+          let sectionText = "";
+          if (secMatch) {
+            const startIdx = secMatch.index + secMatch[0].length;
+            const nextSec = text.slice(startIdx).search(/\n\s*2[\.\s]+[A-Z]/i);
+            const endIdx = nextSec >= 0 ? startIdx + nextSec : startIdx + 1200;
+            sectionText = text.slice(startIdx, endIdx);
+          } else {
+            sectionText = text.slice(0, 1500);
           }
-        }
-      }
 
-      // B. Si el diseño es columnar, buscar coincidencia en la sección 1
-      if (!fichaData.municipio) {
-        for (const m of mpiosList) {
-          if (!m || !m.nombre) continue;
-          const normMpio = this.normalizeText(m.nombre);
-          const regex = new RegExp(`\\b${normMpio}\\b`, "i");
-          if (regex.test(normSec)) {
-            fichaData.municipio = m.nombre;
-            fichaData.codMunicipio = m.codigo;
-            fichaData.subregion = m.subregion;
-            break;
+          const normSec = this.normalizeText(sectionText);
+
+          // A. Buscar municipio explícitamente etiquetado bajo "Municipio de" en la sección 1
+          const labelMatch = normSec.match(/MUNICIPIO(?:\s+DE)?[\s:\._-]*([A-Z\s]{3,35})/i);
+          if (labelMatch) {
+            const cand = labelMatch[1].trim();
+            for (const m of mpiosList) {
+              if (!m || !m.nombre) continue;
+              const normMpio = this.normalizeText(m.nombre);
+              if (cand.includes(normMpio)) {
+                fichaData.municipio = m.nombre;
+                fichaData.codMunicipio = m.codigo;
+                fichaData.subregion = m.subregion;
+                break;
+              }
+            }
           }
+
+          // B. Coincidencia columnar en sección 1
+          if (!fichaData.municipio) {
+            for (const m of mpiosList) {
+              if (!m || !m.nombre) continue;
+              const normMpio = this.normalizeText(m.nombre);
+              const regex = new RegExp(`\\b${normMpio}\\b`, "i");
+              if (regex.test(normSec)) {
+                fichaData.municipio = m.nombre;
+                fichaData.codMunicipio = m.codigo;
+                fichaData.subregion = m.subregion;
+                break;
+              }
+            }
+          }
+
+          // C. Extraer Longitud de la sección 1 (ej: "420 m", "1000 m")
+          const longMatch = normSec.match(/(?:CONSTRUCCION DE PLACA HUELLAS?|VIAS TERCIARIAS|LONGITUD|META)[\s\S]{0,120}?([0-9\.\,]+)\s*(?:M\b|METROS)/i)
+                         || normSec.match(/\b([0-9]{2,5})\s*M\b/);
+          if (longMatch) {
+            const lVal = parseFloat(longMatch[1].replace(/\./g, "").replace(",", "."));
+            if (lVal >= 40 && lVal <= 25000) fichaData.longitudTotalM = lVal;
+          }
+
+          // D. Extraer Aporte del Departamento
+          const aporteMatch = sectionText.match(/(?:VALOR|APORTADO POR EL DEPARTAMENTO)[\s\S]{0,120}?\$\s*([0-9\.\,]{6,15})/i)
+                           || sectionText.match(/\$\s*([0-9\.\,]{6,15})/);
+          if (aporteMatch) {
+            const valNum = parseInt(aporteMatch[1].replace(/[\.\,]/g, ""), 10);
+            if (valNum > 10000000) {
+              fichaData.aporteDepto = valNum;
+              fichaData.presupuestoEstimado = Math.round(valNum / 0.8);
+            }
+          }
+
+          // E. Extraer Plazo
+          const plazoMatch = sectionText.match(/PLAZO[\s\S]{0,60}?(SEIS|\d+)\s*(?:\([0-9]+\)\s*)?MESES/i);
+          if (plazoMatch) fichaData.plazo = plazoMatch[0].trim();
+
+          // Códigos viales
+          const matchedCodes = this.normalizeText(text).match(/05[0-9]{3}vt[0-9]{1,4}/gi);
+          if (matchedCodes) fichaData.codigosViales = [...new Set(matchedCodes.map(c => c.toUpperCase()))];
+        } catch (eParseFicha) {
+          console.warn("Advertencia analizando campos de Ficha de Priorización:", eParseFicha);
         }
       }
-
-      // C. Extraer Longitud de la sección 1 (ej: "420 m", "1000 m")
-      const longMatch = normSec.match(/(?:CONSTRUCCION DE PLACA HUELLAS?|VIAS TERCIARIAS|LONGITUD|META)[\s\S]{0,120}?([0-9\.\,]+)\s*(?:M\b|METROS)/i)
-                     || normSec.match(/\b([0-9]{2,5})\s*M\b/);
-      if (longMatch) {
-        const lVal = parseFloat(longMatch[1].replace(/\./g, "").replace(",", "."));
-        if (lVal >= 40 && lVal <= 25000) fichaData.longitudTotalM = lVal;
-      }
-
-      // D. Extraer Aporte del Departamento (ej: "$ 146,666,444")
-      const aporteMatch = sectionText.match(/(?:VALOR|APORTADO POR EL DEPARTAMENTO)[\s\S]{0,120}?\$\s*([0-9\.\,]{6,15})/i)
-                       || sectionText.match(/\$\s*([0-9\.\,]{6,15})/);
-      if (aporteMatch) {
-        const valNum = parseInt(aporteMatch[1].replace(/[\.\,]/g, ""), 10);
-        if (valNum > 10000000) {
-          fichaData.aporteDepto = valNum;
-          fichaData.presupuestoEstimado = Math.round(valNum / 0.8);
-        }
-      }
-
-      // E. Extraer Plazo
-      const plazoMatch = sectionText.match(/PLAZO[\s\S]{0,60}?(SEIS|\d+)\s*(?:\([0-9]+\)\s*)?MESES/i);
-      if (plazoMatch) fichaData.plazo = plazoMatch[0].trim();
-
-      // Extraer códigos viales
-      const matchedCodes = this.normalizeText(text).match(/05[0-9]{3}vt[0-9]{1,4}/gi);
-      if (matchedCodes) fichaData.codigosViales = [...new Set(matchedCodes.map(c => c.toUpperCase()))];
     }
 
-    // Fallback de municipio si no se detectó en la sección 1
+    // =========================================================================
+    // FALLBACKS BLINDADOS PARA DETECCIÓN DEL MUNICIPIO (125 MUNICIPIOS DE ANTIOQUIA)
+    // =========================================================================
+    const sortedMpios = [...mpiosList].sort((a, b) => (b.nombre || "").length - (a.nombre || "").length);
+
+    // 1. Fallback: Buscar municipio en el nombre de la carpeta (ej. DOC. MPIO GIRALDO -> GIRALDO)
+    if (!fichaData.municipio && rawFolderName) {
+      const normFolder = this.normalizeText(rawFolderName);
+      for (const m of sortedMpios) {
+        if (!m || !m.nombre) continue;
+        const normMpio = this.normalizeText(m.nombre);
+        const reg = new RegExp(`(?:^|[^a-z0-9])${normMpio}(?:$|[^a-z0-9])`, 'i');
+        if (reg.test(normFolder)) {
+          fichaData.municipio = m.nombre;
+          fichaData.codMunicipio = m.codigo;
+          fichaData.subregion = m.subregion;
+          break;
+        }
+      }
+    }
+
+    // 2. Fallback: Buscar municipio en los nombres de todos los archivos (ej. RVT_Giraldo_Vereda.kmz -> GIRALDO)
     if (!fichaData.municipio) {
       for (const f of files) {
         const normName = this.normalizeText(f.name);
-        for (const m of mpiosList) {
+        for (const m of sortedMpios) {
           if (!m || !m.nombre) continue;
           const normMpio = this.normalizeText(m.nombre);
-          if (normName.includes(normMpio)) {
+          const reg = new RegExp(`(?:^|[^a-z0-9])${normMpio}(?:$|[^a-z0-9])`, 'i');
+          if (reg.test(normName)) {
             fichaData.municipio = m.nombre;
             fichaData.codMunicipio = m.codigo;
             fichaData.subregion = m.subregion;
@@ -850,6 +1245,22 @@ const FolderReader = {
           }
         }
         if (fichaData.municipio) break;
+      }
+    }
+
+    // 3. Fallback: Buscar municipio en el texto completo de la Ficha
+    if (!fichaData.municipio && fichaData.textoExtraido) {
+      const normFull = this.normalizeText(fichaData.textoExtraido);
+      for (const m of sortedMpios) {
+        if (!m || !m.nombre) continue;
+        const normMpio = this.normalizeText(m.nombre);
+        const reg = new RegExp(`\\b${normMpio}\\b`, 'i');
+        if (reg.test(normFull)) {
+          fichaData.municipio = m.nombre;
+          fichaData.codMunicipio = m.codigo;
+          fichaData.subregion = m.subregion;
+          break;
+        }
       }
     }
 
@@ -861,44 +1272,86 @@ const FolderReader = {
     }
 
     // =========================================================================
-    // PASO 2: MAPEO DINÁMICO DE LOS 27 ÍTEMS NORMATIVOS (ESTRICTO POR ANCLAS)
+    // PASO 2: MAPEO DINÁMICO DE LOS 27/28 ÍTEMS NORMATIVOS (ESTRICTO SEMÁNTICO)
     // =========================================================================
-    const detectedMap = this.classifyFilesToItems27(files);
+    const classification = await this.classifyFilesToItems27(files);
+    const detectedMap = classification.detectedMap || {};
+    const detectedFilesMap = classification.detectedFilesMap || {};
+    const archivosDetectadosMap = classification.archivosDetectadosMap || {};
     const items27 = SIPRO_DATA.items27;
 
     // =========================================================================
-    // PASO 3: METADATOS Y TEXTO DE LOS ARCHIVOS DETECTADOS
+    // PASO 3: METADATOS Y TEXTO DE LOS ARCHIVOS DETECTADOS (BLINDADO CON TRY/CATCH)
     // =========================================================================
     const archivosMetadata = {};
-    const archivosDetectadosMap = {};
     let extractedEngineer = null;
     let extractedMatricula = null;
+    let extractedAlcalde = null;
+    let extractedSecretario = null;
 
-    for (let i = 1; i <= 27; i++) {
+    for (let i = 1; i <= 28; i++) {
       const file = detectedMap[i];
       if (file) {
-        archivosDetectadosMap[i] = file.name;
-        
         let textSnippet = "";
-        if (file.name.toLowerCase().endsWith(".pdf") && (i === 1 || i === 2 || i === 3 || i === 4)) {
-          textSnippet = await this.readPdfOrText(file);
+        try {
+          const ext = this.getFileExtension(file);
+          if (ext === "pdf" && (i === 1 || i === 2 || i === 3 || i === 4 || i === 8 || i === 11 || i === 12)) {
+            textSnippet = await this.readPdfOrText(file);
+          } else if (["xlsx", "xls", "xlsm"].includes(ext) && (i === 2 || i === 3 || i === 28)) {
+            textSnippet = await this.readExcelAsText(file);
+          }
+        } catch (eSnippet) {
+          console.warn("Error leyendo snippet de " + file.name + ":", eSnippet);
         }
 
+        const allMatched = detectedFilesMap[i] || [file];
         archivosMetadata[i] = {
-          fileName: file.name,
+          fileName: allMatched.map(f => f.name).join(", "),
           sizeBytes: file.size,
           lastModified: file.lastModified,
           textSnippet: textSnippet ? textSnippet.slice(0, 500) : "Documento digital verificado en la carpeta."
         };
 
-        if ((i === 2 || i === 3) && textSnippet) {
-          const matMatch = textSnippet.match(/mat[\s\.:]*([0-9A-Z\-\s]+ANT)/i) || textSnippet.match(/(05202-[0-9A-Z]+)/i);
-          if (matMatch) extractedMatricula = matMatch[1].trim();
+        if (textSnippet) {
+          // Extraer Alcalde (en Item 1 o cualquier documento municipal)
+          if (!extractedAlcalde && (i === 1 || i === 4 || i === 8 || i === 11)) {
+            const alcMatch = textSnippet.match(/(?:ALCALDE(?:SA)?(?:\s+MUNICIPAL)?[\s:\._-]*)([A-ZÁÉÍÓÚÑ\s]{4,35})/i)
+                          || textSnippet.match(/([A-ZÁÉÍÓÚÑ\s]{4,35})\s*\n[\s\S]{0,35}?ALCALDE(?:SA)?(?:\s+MUNICIPAL)?/i);
+            if (alcMatch) {
+              const c = alcMatch[1].trim().replace(/\n/g, ' ');
+              if (c.length > 3 && !c.toLowerCase().includes("antioquia") && !c.toLowerCase().includes("gobernador")) {
+                extractedAlcalde = c;
+              }
+            }
+          }
 
-          const ingMatch = textSnippet.match(/ING(?:ENIERO|ENIERA)?[\.\s]+([A-Z\s]{8,35})/i);
-          if (ingMatch) extractedEngineer = ingMatch[0].trim();
+          // Extraer Secretario(a) de Planeación / Obras Públicas
+          if (!extractedSecretario && (i === 2 || i === 4 || i === 8 || i === 11 || i === 12 || i === 28)) {
+            const secMatch = textSnippet.match(/(?:SECRETARI[OA]\s+DE\s+(?:PLANEACI[OÓ]N|INFRAESTRUCTURA|OBRAS(?:\s+P[UÚ]BLICAS)?))[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{4,35})/i)
+                          || textSnippet.match(/([A-ZÁÉÍÓÚÑ\s]{4,35})\s*\n[\s\S]{0,45}?(?:SECRETARI[OA]\s+DE\s+(?:PLANEACI[OÓ]N|INFRAESTRUCTURA|OBRAS))/i);
+            if (secMatch) {
+              const s = secMatch[1].trim().replace(/\n/g, ' ');
+              if (s.length > 3 && !s.toLowerCase().includes("antioquia")) {
+                extractedSecretario = s;
+              }
+            }
+          }
+
+          // Matrícula e Ingeniero
+          if (i === 2 || i === 3) {
+            const matMatch = textSnippet.match(/mat[\s\.:]*([0-9A-Z\-\s]+ANT)/i) || textSnippet.match(/(05202-[0-9A-Z]+)/i);
+            if (matMatch) extractedMatricula = matMatch[1].trim();
+
+            const ingMatch = textSnippet.match(/ING(?:ENIERO|ENIERA)?[\.\s]+([A-Z\s]{8,35})/i);
+            if (ingMatch) extractedEngineer = ingMatch[0].trim();
+          }
         }
       }
+    }
+
+    if (!extractedAlcalde && fichaData.textoExtraido) {
+      const alcFichaMatch = fichaData.textoExtraido.match(/(?:NOMBRE\s+DEL\s+ALCALDE|ALCALDE(?:SA)?(?:\s+MUNICIPAL)?)[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{4,35})/i);
+      if (alcFichaMatch) extractedAlcalde = alcFichaMatch[1].trim();
     }
 
     const matchedCount = Object.keys(archivosDetectadosMap).length;
@@ -906,26 +1359,58 @@ const FolderReader = {
     // =========================================================================
     // PASO 4: AUDITORÍA Y RECÁLCULO DE ACERO Y CONCRETO (FASE 1A)
     // =========================================================================
-    // PASO 4: AUDITORÍA Y RECÁLCULO DE ACERO Y CONCRETO (FASE 1A)
-    // =========================================================================
     const fileDespiece = detectedMap[3];
     const fileEspec = detectedMap[2];
-    const despieceConfig = await this.parseDespieceFile(fileDespiece, fileEspec, fichaData, extractedEngineer, extractedMatricula);
-
+    let despieceConfig = null;
+    if (fileDespiece) {
+      try {
+        despieceConfig = await this.parseDespieceFile(fileDespiece, fileEspec, fichaData, extractedEngineer, extractedMatricula);
+      } catch (eDespiece) {
+        console.warn("Error en parseDespieceFile:", eDespiece);
+      }
+    }
+    if (!despieceConfig) {
+      despieceConfig = {
+        tieneDocumento: false,
+        archivoNombre: null,
+        totalKilos: 0,
+        pesoTotalDeclaradoKg: 0,
+        longitudIntervencionM: fichaData.longitudTotalM || 0,
+        cuantiaKgM: 0,
+        cumpleCuantia: false,
+        despieceExtraido: {
+          tieneDocumento: false,
+          archivoNombre: null,
+          mensajeAlerta: "Documento de despiece de acero (Ítem 3) no aportado en esta carpeta",
+          acero: {
+            formatoDetectado: "NO_APORTADO",
+            totalAceroDeclarado: "0 kg",
+            totalKg: 0,
+            cuantiaKgM: 0,
+            filasDespiece: []
+          }
+        },
+        concretoVolumes: { totalConcretoGlobalM3: 0, totalCementoSacos: 0 }
+      };
+    }
 
     // =========================================================================
     // PASO 5: AUDITORÍA ESPACIAL (FASE 1B)
     // =========================================================================
     // Recopilar candidatos a georreferenciación (Ítem 24): KML, KMZ, ZIP, 7Z, RAR
     const georefCandidates = [];
-    if (detectedMap[24]) georefCandidates.push(detectedMap[24]);
+    if (detectedFilesMap[24] && detectedFilesMap[24].length > 0) {
+      georefCandidates.push(...detectedFilesMap[24]);
+    } else if (detectedMap[24]) {
+      georefCandidates.push(detectedMap[24]);
+    }
 
     for (const f of files) {
       if (georefCandidates.includes(f)) continue;
-      const lower = f.name.toLowerCase();
-      if (lower.endsWith(".kml") || lower.endsWith(".kmz")) {
+      const ext = this.getFileExtension(f);
+      if (ext === "kml" || ext === "kmz") {
         georefCandidates.push(f);
-      } else if (lower.endsWith(".zip") || lower.endsWith(".7z") || lower.endsWith(".rar")) {
+      } else if (["zip", "7z", "rar"].includes(ext)) {
         const clean = this.cleanForRegex(f.name);
         if (clean.includes("georref") || clean.includes("trazado") || clean.includes("track") ||
             clean.includes("tramo") || clean.includes("placa") || clean.includes("kml") || clean.includes("kmz") ||
@@ -935,10 +1420,10 @@ const FolderReader = {
       }
     }
 
-    // Si aún no hay candidato para Ítem 24, inspeccionar cualquier archivo comprimido presente
     if (georefCandidates.length === 0) {
       for (const f of files) {
-        if (/\.(zip|kmz|7z|rar)$/i.test(f.name)) {
+        const ext = this.getFileExtension(f);
+        if (["zip", "kmz", "7z", "rar", "kml"].includes(ext)) {
           georefCandidates.push(f);
         }
       }
@@ -946,12 +1431,27 @@ const FolderReader = {
 
     let geoConfig = null;
     if (georefCandidates.length > 0) {
-      geoConfig = await this.parseGeorefFiles(georefCandidates, fichaData);
+      try {
+        geoConfig = await this.parseGeorefFiles(georefCandidates, fichaData);
+      } catch (eGeo) {
+        console.warn("Error en parseGeorefFiles:", eGeo);
+        geoConfig = null;
+      }
 
-      // Si se extrajeron tramos o archivo KML válido, asegurar asignación del Ítem 24
-      if (geoConfig && (geoConfig.tramos.length > 0 || geoConfig.archivoKml)) {
+      const hasValidGeom = Boolean(
+        geoConfig &&
+        geoConfig.tieneKMZ === true &&
+        ((geoConfig.tramos && geoConfig.tramos.length > 0) ||
+         (geoConfig.puntos && geoConfig.puntos.length > 0) ||
+         (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
+      );
+
+      if (hasValidGeom) {
         if (!detectedMap[24]) {
-          const primaryFile = georefCandidates.find(f => /\.kml$/i.test(f.name) || /\.kmz$/i.test(f.name)) || georefCandidates[0];
+          const primaryFile = georefCandidates.find(f => {
+            const ext = this.getFileExtension(f);
+            return ext === "kml" || ext === "kmz";
+          }) || georefCandidates[0];
           detectedMap[24] = primaryFile;
           archivosDetectadosMap[24] = primaryFile.name;
           archivosMetadata[24] = {
@@ -961,10 +1461,30 @@ const FolderReader = {
             textSnippet: `Georreferenciación verificada en contenedor digital. ${geoConfig.tramos.length} tramos independientes procesados.`
           };
         }
+      } else {
+        // Garantizar que no quede registrado como detectado si no hay geometrías válidas
+        delete detectedMap[24];
+        delete detectedMap["24"];
+        delete archivosDetectadosMap[24];
+        delete archivosDetectadosMap["24"];
+        delete archivosMetadata[24];
+        delete archivosMetadata["24"];
+        if (detectedFilesMap && detectedFilesMap[24]) {
+          delete detectedFilesMap[24];
+          delete detectedFilesMap["24"];
+        }
       }
     }
 
-    if (!geoConfig || (geoConfig.tramos.length === 0 && (!geoConfig.puntosContraste || geoConfig.puntosContraste.length === 0))) {
+    const hasValidGeomConfig = Boolean(
+      geoConfig &&
+      geoConfig.tieneKMZ === true &&
+      ((geoConfig.tramos && geoConfig.tramos.length > 0) ||
+       (geoConfig.puntos && geoConfig.puntos.length > 0) ||
+       (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
+    );
+
+    if (!hasValidGeomConfig) {
       const prevAlerts = geoConfig ? (geoConfig.alertasArchivos || []) : [];
       const failedArchive = (files || []).find(f => f._extractionError || /\.(zip|kmz|7z|rar)$/i.test(f.name));
       let alertaComp = null;
@@ -974,19 +1494,27 @@ const FolderReader = {
 
       geoConfig = {
         archivoKml: null,
+        archivosProcesados: [],
         codigoViaDeclarado: "Sin código",
         codigoViaGeoJSON: "Sin código",
         jerarquiaOficial: "NO GEORREFERENCIADA",
         jurisdiccion: `Municipal de ${fichaData.municipio}`,
         bufferToleranciaM: 10,
         coberturaBufferPct: 0,
+        porcentajeAlineacion: 0,
         longitudKmlM: 0,
         desviacionLongitudPct: 100,
         puntosAnomalia: 0,
         tramos: [],
+        puntos: [],
         puntosInspeccion: [],
         puntosContraste: [],
+        tieneKMZ: false,
         tieneGeorreferenciacionValida: false,
+        aprobado: false,
+        coberturaConforme: false,
+        estadoCompuerta: 'BLOQUEADO',
+        motivoRechazo: 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.',
         alertaComprimido: alertaComp,
         alertasArchivos: prevAlerts,
         estado: alertaComp ? "Alerta de Extracción" : "No Cumple - Falta archivo KMZ/KML"
@@ -1002,35 +1530,83 @@ const FolderReader = {
     const slug = `${cleanMpioSlug}_${finalLength}m`;
     const newExpedienteId = `EXP-${fichaData.codMunicipio || '05000'}-${slug}`;
 
+    // =========================================================================
+    // LECTURA DE ARCHIVO DE TRAZABILIDAD (sipro_auditoria.json) O LIMPIEZA DE CACHÉ
+    // =========================================================================
+    let savedAuditData = null;
+    const auditJsonFile = files.find(f => f.name.toLowerCase() === "sipro_auditoria.json");
+    if (auditJsonFile) {
+      try {
+        const jsonTxt = await auditJsonFile.text();
+        savedAuditData = JSON.parse(jsonTxt);
+        console.log("sipro_auditoria.json restaurado desde archivo físico:", savedAuditData);
+      } catch (err) {
+        console.warn("Error leyendo sipro_auditoria.json:", err);
+      }
+    } else {
+      // Si NO existe sipro_auditoria.json en la carpeta física:
+      // Limpiar e ignorar cualquier dato viejo en localStorage para garantizar lectura fresca
+      try {
+        localStorage.removeItem(`sipro_auditoria_${proyectoId}`);
+        localStorage.removeItem(`sipro_auditoria_${slug}`);
+        localStorage.removeItem(`sipro_auditoria_${newExpedienteId}`);
+        localStorage.removeItem(`sipro_auditoria_${rawFolderName}`);
+      } catch (e) {}
+      savedAuditData = null;
+    }
+
+    // =========================================================================
+    // DETECCIÓN DE MODALIDAD (MATERIALES vs RECURSOS)
+    // =========================================================================
+    let modalidad = "MATERIALES";
+    if (detectedMap[28]) {
+      modalidad = "RECURSOS";
+    }
+    if (savedAuditData && savedAuditData.modalidad) {
+      modalidad = savedAuditData.modalidad;
+    }
+
     const nombreExp = `${fichaData.municipio} - Proyecto Placa Huella Vías Terciarias`;
     const deptoVal = fichaData.aporteDepto || Math.round(fichaData.presupuestoEstimado * 0.8);
     const mpioVal = Math.round(deptoVal * 0.25);
 
     const proyectoData = {
-      id: newExpedienteId,
+      id: proyectoId,
+      rawFolderName: rawFolderName,
       slug: slug,
       codigo: `EXP-${fichaData.codMunicipio || '05000'}-PH`,
-      nombreExpediente: nombreExp,
+      nombreExpediente: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.nombreExpediente) || nombreExp,
       municipio: fichaData.municipio,
       codMunicipio: fichaData.codMunicipio || "05000",
       subregion: fichaData.subregion || "ANTIOQUIA",
+      modalidad: modalidad,
       vereda: (geoConfig.tramos && geoConfig.tramos.length > 0)
         ? geoConfig.tramos.slice(0, 4).map(t => t.nombrePlacemark).join(", ")
         : (geoConfig.puntosContraste.length > 0 
             ? geoConfig.puntosContraste.slice(0, 4).map(p => p.sector).join(", ") 
             : "Tramos según expediente cargado"),
       nombreTramo: `Placa Huella ${fichaData.municipio} (${finalLength}m)`,
-      codigoVial: geoConfig.codigoViaDeclarado || fichaData.codigosViales[0] || `${fichaData.codMunicipio || '05000'}VT01`,
-      longitudM: finalLength,
+      codigoVial: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.codigoVial)
+        || geoConfig.codigoViaDeclarado || fichaData.codigosViales[0] || `${fichaData.codMunicipio || '05000'}VT01`,
+      longitudM: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.longitudM) || finalLength,
       presupuestoTotal: deptoVal + mpioVal,
       aporteDepto: deptoVal,
       aporteMpio: mpioVal,
       plazoMeses: 6,
       poblacionBeneficiada: Math.round(finalLength * 3.8),
       alcalde: {
-        nombre: `ALCALDE MUNICIPAL DE ${fichaData.municipio}`,
+        nombre: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.alcalde && savedAuditData.datosIdentificacion.alcalde.nombre)
+          || extractedAlcalde
+          || `ALCALDE MUNICIPAL DE ${fichaData.municipio}`,
         cedula: "71.000.000",
         periodo: "2024 - 2027"
+      },
+      secretarioPlaneacion: {
+        nombre: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.secretarioPlaneacion && savedAuditData.datosIdentificacion.secretarioPlaneacion.nombre)
+          || extractedSecretario
+          || "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS",
+        cargo: "Secretario(a) de Planeación / Obras Públicas",
+        entidad: `Municipio de ${fichaData.municipio}`
       },
       ingenieroProyectista: {
         nombre: extractedEngineer || "INGENIERO CIVIL PROYECTISTA",
@@ -1038,12 +1614,13 @@ const FolderReader = {
         entidadMatricula: "COPNIA",
         vigente: !!extractedMatricula
       },
-      estadoSimulacion: matchedCount === 27 ? "APROBADO_CONFORME" : "EN_EVALUACION",
-      faseActiva: matchedCount === 27 ? "3_APROBADO" : "2_DOCUMENTAL",
+      estadoSimulacion: matchedCount === (modalidad === "RECURSOS" ? 28 : 27) ? "APROBADO_CONFORME" : "EN_EVALUACION",
+      faseActiva: matchedCount === (modalidad === "RECURSOS" ? 28 : 27) ? "3_APROBADO" : "2_DOCUMENTAL",
       fichaPriorizacion: fichaData,
       totalArchivosCargados: files.length,
       archivosMetadata: archivosMetadata,
       archivosFiles: detectedMap,
+      archivosFilesMap: detectedFilesMap,
       despieceExtraido: despieceConfig.despieceExtraido || despieceConfig,
       despieceAcero: despieceConfig,
       concretoVolumes: despieceConfig.concretoVolumes,
@@ -1062,40 +1639,74 @@ const FolderReader = {
     // =========================================================================
     // PASO 7: EJECUTAR AUDITORÍA AISLADA COMPLETA Y ENCAPSULAR EN EL ALMACÉN GLOBAL
     // =========================================================================
-    const audit1A = StructuralEngine.auditProject(proyectoData);
-    const audit1B = SpatialEngine.auditProject(proyectoData);
-    const audit2 = DocumentalEngine.auditProject(proyectoData);
+    let audit1A, audit1B, audit2;
+    try {
+      audit1A = StructuralEngine.auditProject(proyectoData);
+    } catch (eA) {
+      console.warn("Error en StructuralEngine.auditProject:", eA);
+      audit1A = { cuantiaConforme: false, cuantiaCalculadaKgM: 0 };
+    }
+    try {
+      audit1B = SpatialEngine.auditProject(proyectoData);
+    } catch (eB) {
+      console.warn("Error en SpatialEngine.auditProject:", eB);
+      audit1B = { coberturaConforme: false, coberturaBufferPct: 0 };
+    }
+    try {
+      audit2 = DocumentalEngine.auditProject(proyectoData);
+    } catch (eC) {
+      console.warn("Error en DocumentalEngine.auditProject:", eC);
+      audit2 = { itemsConformes: matchedCount, itemsNoConformes: 27 - matchedCount };
+    }
 
-    audit1B.tieneGeorreferenciacionValida = geoConfig.tieneGeorreferenciacionValida;
-    audit1B.alertaComprimido = geoConfig.alertaComprimido;
+    const hasValidKmz = Boolean(
+      geoConfig &&
+      geoConfig.tieneKMZ === true &&
+      ((geoConfig.tramos && geoConfig.tramos.length > 0) ||
+       (geoConfig.puntos && geoConfig.puntos.length > 0) ||
+       (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
+    );
 
-    const isApproved = audit1A.aprobado && audit1B.aprobado && audit2.aprobado;
-    const activeGatekeeper = !audit1A.aprobado ? "1A" : (!audit1B.aprobado ? "1B" : (!audit2.aprobado ? "2" : "3"));
+    audit1B.tieneKMZ = hasValidKmz;
+    audit1B.tieneGeorreferenciacionValida = hasValidKmz;
+    audit1B.coberturaConforme = hasValidKmz && Boolean(audit1B.coberturaConforme);
+    audit1B.aprobado = audit1B.coberturaConforme;
+    audit1B.coberturaBufferPct = hasValidKmz ? audit1B.coberturaBufferPct : 0;
+    audit1B.porcentajeAlineacion = hasValidKmz ? (audit1B.porcentajeAlineacion !== undefined ? audit1B.porcentajeAlineacion : audit1B.coberturaBufferPct) : 0;
+    audit1B.tramos = geoConfig.tramos || [];
+    audit1B.puntosContraste = geoConfig.puntosContraste || [];
+    audit1B.alertasArchivos = geoConfig.alertasArchivos || [];
+    audit1B.alertaComprimido = geoConfig.alertaComprimido || null;
+    if (!hasValidKmz) {
+      audit1B.estadoCompuerta = 'BLOQUEADO';
+      audit1B.motivoRechazo = 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.';
+    }
 
-    let score = 0;
-    if (audit1A.aprobado) score += 35;
-    else score += (audit1A.marcasCumplen / (audit1A.totalMarcas || 1)) * 35;
+    const totalItemsCount = (modalidad === "RECURSOS") ? 28 : 27;
+    const isApproved = (
+      audit1A.cuantiaConforme &&
+      hasValidKmz &&
+      audit1B.coberturaConforme &&
+      audit2.itemsConformes >= totalItemsCount
+    );
 
-    if (audit1B.aprobado) score += 30;
-    else score += (audit1B.coberturaBufferPct / 100) * 30;
-
-    score += (audit2.itemsConformes / 27) * 35;
-    score = +score.toFixed(1);
-
-    const totalCriticas = audit1A.hallazgosCriticos.length + audit1B.hallazgosCriticos.length + audit2.hallazgosCriticos.length;
+    let activeGatekeeper = "2_DOCUMENTAL";
+    if (!audit1A.cuantiaConforme) {
+      activeGatekeeper = "1A_DISENO";
+    } else if (!hasValidKmz || !audit1B.coberturaConforme) {
+      activeGatekeeper = "1B_ESPACIAL";
+    } else if (isApproved) {
+      activeGatekeeper = "3_APROBADO";
+    }
 
     const kpis = {
-      scoreConformidad: score,
-      totalEvaluadoM: proyectoData.longitudM,
-      totalMarcas: audit1A.totalMarcas,
-      totalCriticas: totalCriticas,
-      cuantiaKgM: audit1A.cuantiaRealKgM,
-      cuantiaSuperavitKgM: audit1A.cuantiaSuperavitKgM,
+      cuantiaActualKgM: despieceConfig.cuantiaKgM || audit1A.cuantiaCalculadaKgM,
+      cuantiaConforme: audit1A.cuantiaConforme,
       coberturaBufferPct: audit1B.coberturaBufferPct,
       coberturaConforme: audit1B.coberturaConforme,
       itemsConformes: audit2.itemsConformes,
       itemsNoConformes: audit2.itemsNoConformes,
-      itemsTotal: 27
+      itemsTotal: totalItemsCount
     };
 
     const auditGlobal = {
@@ -1106,22 +1717,38 @@ const FolderReader = {
       activeGatekeeper
     };
 
-    // Encapsular TODO el estado en su propio objeto dentro del almacén central indexado
+    // Encapsular TODO el estado indexado de forma segura por proyectoId
     window.proyectosAuditados = window.proyectosAuditados || {};
-    window.proyectosAuditados[newExpedienteId] = {
-      id: newExpedienteId,
+    window.proyectosAuditados[proyectoId] = {
+      id: proyectoId,
+      rawFolderName: rawFolderName,
       slug: slug,
+      expedienteId: newExpedienteId,
       municipio: fichaData.municipio,
       codMunicipio: fichaData.codMunicipio,
       subregion: fichaData.subregion,
+      modalidad: modalidad,
+      dirHandle: dirHandle || null,
+      historialSubsanaciones: (savedAuditData && savedAuditData.historialSubsanaciones) || [],
       datos: proyectoData,
       archivos: files,
       archivosFileMap: detectedMap,
+      archivosFilesMap: detectedFilesMap,
       despieceExtraido: despieceConfig.despieceExtraido || despieceConfig,
-      fase1A: audit1A,
+      fase1A: { ...audit1A, longitudTramo: finalLength, longitudIntervencionM: finalLength },
       concretoVolumes: despieceConfig.concretoVolumes,
       fase1B: {
         ...audit1B,
+        porcentajeAlineacion: hasValidKmz ? (geoConfig.porcentajeAlineacion !== undefined ? geoConfig.porcentajeAlineacion : geoConfig.coberturaBufferPct) : 0,
+        coberturaBufferPct: hasValidKmz ? geoConfig.coberturaBufferPct : 0,
+        tieneKMZ: hasValidKmz,
+        tieneGeorreferenciacionValida: hasValidKmz,
+        aprobado: hasValidKmz && audit1B.coberturaConforme,
+        coberturaConforme: hasValidKmz && audit1B.coberturaConforme,
+        estadoCompuerta: (hasValidKmz && audit1B.coberturaConforme) ? 'APROBADO' : 'BLOQUEADO',
+        motivoRechazo: !hasValidKmz
+          ? 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.'
+          : (audit1B.coberturaConforme ? null : `Desfase de alineación: Cobertura (${audit1B.coberturaBufferPct}%) inferior al 95%.`),
         puntos: (geoConfig && (geoConfig.puntos || geoConfig.puntosInspeccion)) || []
       },
       fase2: audit2,
@@ -1130,24 +1757,102 @@ const FolderReader = {
       timestamp: Date.now()
     };
 
+    // Si modalidad es RECURSOS, ejecutar de una vez la auditoría de presupuesto (Fase 1C)
+    if (modalidad === "RECURSOS" && typeof PresupuestoEngine !== "undefined") {
+      const budgetFile = detectedMap[28];
+      if (budgetFile && /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(budgetFile.name)) {
+        try {
+          const pData = await PresupuestoEngine.parseExcelBudget(budgetFile, window.proyectosAuditados[proyectoId]?.fase1A || audit1A);
+          PresupuestoEngine.auditarCoherencia(window.proyectosAuditados[proyectoId], pData);
+        } catch (eBudget) {
+          console.warn("Error en parseExcelBudget:", eBudget);
+          PresupuestoEngine.auditarCoherencia(window.proyectosAuditados[proyectoId]);
+        }
+      } else {
+        PresupuestoEngine.auditarCoherencia(window.proyectosAuditados[proyectoId]);
+      }
+    }
+
+    // Restaurar observaciones previas si existían en savedAuditData (SIN sobreescribir archivos ni detección)
+    if (savedAuditData) {
+      const expObj = window.proyectosAuditados[proyectoId];
+      if (savedAuditData.fase3) {
+        expObj.fase3 = expObj.fase3 || { observacionesEditadas: {}, matrizObservaciones: {}, conceptoGeneral: "", hallazgosManuales: [] };
+        expObj.fase3.matrizObservaciones = expObj.fase3.matrizObservaciones || {};
+        expObj.fase3.observacionesEditadas = expObj.fase3.observacionesEditadas || {};
+
+        const obsData = savedAuditData.fase3.matrizObservaciones || savedAuditData.fase3.observaciones || {};
+        for (const [key, val] of Object.entries(obsData)) {
+          expObj.fase3.matrizObservaciones[key] = val;
+          expObj.fase3.observacionesEditadas[key] = val;
+        }
+        if (savedAuditData.fase3.conceptoGeneral) {
+          expObj.fase3.conceptoGeneral = savedAuditData.fase3.conceptoGeneral;
+        }
+        if (savedAuditData.fase3.hallazgosManuales) {
+          expObj.fase3.hallazgosManuales = savedAuditData.fase3.hallazgosManuales;
+        }
+      }
+      if (savedAuditData.fase1C && expObj.fase1C) {
+        if (savedAuditData.fase1C.toleranciaPct) expObj.fase1C.toleranciaPct = savedAuditData.fase1C.toleranciaPct;
+      }
+    }
+
+    // Asegurar registro estricto de observación si falta el archivo de georreferenciación (Ítem 24 / Fase 1B)
+    const expObjMaster = window.proyectosAuditados[proyectoId];
+    if (expObjMaster) {
+      expObjMaster.fase3 = expObjMaster.fase3 || { observacionesEditadas: {}, matrizObservaciones: {}, conceptoGeneral: "", hallazgosManuales: [] };
+      expObjMaster.fase3.matrizObservaciones = expObjMaster.fase3.matrizObservaciones || {};
+      expObjMaster.fase3.observacionesEditadas = expObjMaster.fase3.observacionesEditadas || {};
+
+      if (!hasValidKmz) {
+        const geoObs = "Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem 24): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.";
+        expObjMaster.fase3.matrizObservaciones["item_24"] = geoObs;
+        expObjMaster.fase3.matrizObservaciones["FASE_2_ITEM_24"] = geoObs;
+        expObjMaster.fase3.matrizObservaciones["FASE_1B_GEO"] = geoObs;
+        if (expObjMaster.fase2 && expObjMaster.fase2.items) {
+          const it24 = expObjMaster.fase2.items.find(i => Number(i.id) === 24 || i.id === "24");
+          if (it24) {
+            it24.conforme = false;
+            it24.faltante = true;
+            it24.estado = "Faltante";
+            it24.archivoDetectado = null;
+            it24.observacion = geoObs;
+          }
+        }
+      }
+    }
+
     // Sincronizar catálogo maestro de SIPRO_DATA
     SIPRO_DATA.expedientesMap = window.proyectosAuditados;
-    SIPRO_DATA.expedientesMap[newExpedienteId].despieceExtraido = despieceConfig.despieceExtraido || despieceConfig;
+    SIPRO_DATA.expedientesMap[proyectoId].despieceExtraido = despieceConfig.despieceExtraido || despieceConfig;
     SIPRO_DATA.proyectos = Object.values(window.proyectosAuditados).map(p => p.datos);
 
-    if (isAmbiguous) {
+    if (savedAuditData) {
+      const fechaAviso = savedAuditData.fechaEdicion || new Date(savedAuditData.timestamp || Date.now()).toLocaleString("es-CO");
+      this.showToast(`🔄 Sesión de revisión previa restaurada (Última edición: ${fechaAviso})`);
+    } else if (isAmbiguous) {
       App.openExpedienteModal();
       this.showToast("⚠️ Ficha leída pero municipio ambiguo. Por favor confirma el municipio.");
     } else {
-      const missingCount = 27 - matchedCount;
+      const missingCount = totalItemsCount - matchedCount;
       const cv = despieceConfig.concretoVolumes;
       const msg = missingCount === 0
-        ? `✓ Carpeta de ${fichaData.municipio}: 100% Completa. Despiece (${finalLength}m, ${despieceConfig.pesoTotalDeclaradoKg}kg) y Concreto (${cv.totalConcretoGlobalM3}m³) listos en memoria.`
-        : `⚠️ Carpeta de ${fichaData.municipio}: ${matchedCount} aportados, ${missingCount} FALTANTES. Despiece (${finalLength}m) y Concreto (${cv.totalConcretoGlobalM3}m³) indexados.`;
+        ? `✓ Carpeta de ${fichaData.municipio}: 100% Completa (${modalidad}). Despiece (${finalLength}m, ${despieceConfig.pesoTotalDeclaradoKg}kg) y Concreto (${cv.totalConcretoGlobalM3}m³) listos en memoria.`
+        : `⚠️ Carpeta de ${fichaData.municipio}: ${matchedCount} aportados, ${missingCount} FALTANTES (${modalidad}). Despiece (${finalLength}m) y Concreto (${cv.totalConcretoGlobalM3}m³) indexados.`;
       this.showToast(msg);
     }
 
-    return window.proyectosAuditados[newExpedienteId];
+    // Disparar sincronización vial y cálculo de proximidad en segundo plano sin esperar al clic en la pestaña
+    if (typeof SpatialEngine !== "undefined" && typeof SpatialEngine.syncRoadsForProject === "function") {
+      setTimeout(() => {
+        SpatialEngine.syncRoadsForProject(window.proyectosAuditados[proyectoId].datos || window.proyectosAuditados[proyectoId]).catch(err => {
+          console.warn("Aviso en sincronización vial en segundo plano:", err);
+        });
+      }, 50);
+    }
+
+    return window.proyectosAuditados[proyectoId];
   },
 
   /**
@@ -1325,7 +2030,7 @@ const FolderReader = {
       }
 
       return {
-        archivoKml: processedNames.join(", ") || (fileList[0] ? fileList[0].name : "Sin archivo"),
+        archivoKml: null,
         archivosProcesados: processedNames,
         codigoViaDeclarado: declaredCod,
         codigoViaGeoJSON: declaredCod,
@@ -1333,21 +2038,42 @@ const FolderReader = {
         jurisdiccion: `Municipal de ${fichaData.municipio}`,
         bufferToleranciaM: 10,
         coberturaBufferPct: 0,
+        porcentajeAlineacion: 0,
         longitudKmlM: 0,
         desviacionLongitudPct: 100,
         puntosAnomalia: 0,
         tramos: [],
+        puntos: [],
         puntosInspeccion: [],
         puntosContraste: [],
+        tieneKMZ: false,
         tieneGeorreferenciacionValida: false,
+        aprobado: false,
+        coberturaConforme: false,
+        estadoCompuerta: 'BLOQUEADO',
+        motivoRechazo: 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.',
         alertaComprimido: alertaComp,
         alertasArchivos: allAlerts,
-        estado: alertaComp ? "Alerta de Extracción" : "No Cumple - Sin geometrías KML"
+        estado: alertaComp ? "Alerta de Extracción" : "No Cumple - Falta archivo KMZ/KML"
       };
+    }
+
+    // 1. Reiniciar siempre arreglos y estructuras de deduplicación geográfica
+    const pId = fichaData?.id || fichaData?.codigo;
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    if (pId && expedientesMap[pId] && expedientesMap[pId].fase1B) {
+      expedientesMap[pId].fase1B.tramos = [];
+      expedientesMap[pId].fase1B.puntos = [];
+      expedientesMap[pId].fase1B.puntosInspeccion = [];
+      expedientesMap[pId].fase1B.puntosContraste = [];
+      expedientesMap[pId].fase1B.alertas = [];
+      expedientesMap[pId].fase1B.alertasArchivos = [];
     }
 
     const tramos = [];
     const puntosInspeccion = [];
+    const seenPoints = new Set();
+    const seenTramos = new Set();
     let tramoCounter = 1;
     let puntoCounter = 1;
     let totalLengthM = 0;
@@ -1372,6 +2098,25 @@ const FolderReader = {
             if (coordNode) {
               const coords = this.parseCoordinatesText(coordNode.textContent);
               if (coords.length > 1) {
+                // Deduplicación por Coordenadas Geográficas Exactas (primer, medio y último vértice)
+                const firstLat = coords[0].lat;
+                const firstLng = coords[0].lng;
+                const midIdx = Math.floor(coords.length / 2);
+                const midLat = coords[midIdx].lat;
+                const midLng = coords[midIdx].lng;
+                const lastIdx = coords.length - 1;
+                const lastLat = coords[lastIdx].lat;
+                const lastLng = coords[lastIdx].lng;
+
+                const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
+                const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+
+                if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
+                  continue; // Tramo duplicado omitido
+                }
+                seenTramos.add(lineGeoKey);
+                seenTramos.add(revLineGeoKey);
+
                 let lenM = 0;
                 for (let j = 0; j < coords.length - 1; j++) {
                   lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j+1].lat, coords[j+1].lng);
@@ -1408,6 +2153,67 @@ const FolderReader = {
             }
           }
 
+          // Extraer Polygons independientes (outerBoundaryIs -> LinearRing -> coordinates)
+          const polygons = pm.getElementsByTagName("Polygon");
+          for (let polyIdx = 0; polyIdx < polygons.length; polyIdx++) {
+            const poly = polygons[polyIdx];
+            const coordNode = poly.getElementsByTagName("coordinates")[0];
+            if (coordNode) {
+              const coords = this.parseCoordinatesText(coordNode.textContent);
+              if (coords.length > 1) {
+                // Deduplicación por Coordenadas Geográficas Exactas para Polígonos
+                const firstLat = coords[0].lat;
+                const firstLng = coords[0].lng;
+                const midIdx = Math.floor(coords.length / 2);
+                const midLat = coords[midIdx].lat;
+                const midLng = coords[midIdx].lng;
+                const lastIdx = coords.length - 1;
+                const lastLat = coords[lastIdx].lat;
+                const lastLng = coords[lastIdx].lng;
+
+                const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
+                const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+
+                if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
+                  continue; // Polígono duplicado omitido
+                }
+                seenTramos.add(lineGeoKey);
+                seenTramos.add(revLineGeoKey);
+
+                let lenM = 0;
+                for (let j = 0; j < coords.length - 1; j++) {
+                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j+1].lat, coords[j+1].lng);
+                }
+                totalLengthM += lenM;
+
+                const tramoName = polygons.length > 1
+                  ? `${baseName} (Polígono ${polyIdx + 1})`
+                  : `${baseName} (Polígono)`;
+
+                const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
+                const prox = this.calculateProximity(coords, fichaData);
+                const distM = prox.distM;
+                const cumple = distM <= 10.0;
+                const estado = cumple ? `✓ SOBRE ${prox.codGeoJSON}` : `! A ${distM.toFixed(1)} m DE ${prox.codGeoJSON}`;
+
+                tramos.push({
+                  idTramo: idTramo,
+                  nombrePlacemark: tramoName,
+                  carpetaContenedora: item.sourceFile,
+                  tipoGeometria: "Polygon",
+                  coordenadas: coords,
+                  longitudCalculada: Math.round(lenM * 10) / 10,
+                  codigoViaDeclarado: prox.codDeclarado,
+                  codigoViaGeoJSON: prox.codGeoJSON,
+                  nombreViaGeoJSON: prox.nombreVia,
+                  distanciaEjeM: distM,
+                  cumple: cumple,
+                  estado: estado
+                });
+              }
+            }
+          }
+
           // Extraer Points independientes
           const points = pm.getElementsByTagName("Point");
           for (let ptIdx = 0; ptIdx < points.length; ptIdx++) {
@@ -1416,6 +2222,17 @@ const FolderReader = {
             if (coordNode) {
               const coords = this.parseCoordinatesText(coordNode.textContent);
               if (coords.length > 0) {
+                const primaryCoord = coords[0];
+                const lat = primaryCoord.lat;
+                const lng = primaryCoord.lng;
+
+                // Huella única de punto basada en coordenadas redondeadas a 6 decimales (~0.11 m)
+                const pointGeoKey = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
+                if (seenPoints.has(pointGeoKey)) {
+                  continue; // Punto duplicado en misma coordenada exacta omitido
+                }
+                seenPoints.add(pointGeoKey);
+
                 const ptName = points.length > 1
                   ? `${baseName} (Punto ${ptIdx + 1})`
                   : baseName;
@@ -1424,7 +2241,6 @@ const FolderReader = {
                 const description = descNode ? descNode.textContent.trim() : "";
 
                 const idPunto = `PTO-${String(puntoCounter++).padStart(2, "0")}`;
-                const primaryCoord = coords[0];
                 const prox = this.calculateProximity([primaryCoord], fichaData);
 
                 const distM = prox.distM;
@@ -1509,15 +2325,26 @@ const FolderReader = {
       }
     }
 
+    const aprobado = tieneGeorreferenciacionValida && (coberturaBufferPct >= 95.0);
+
     return {
-      archivoKml: processedNames.join(", "),
+      archivoKml: tieneGeorreferenciacionValida ? (processedNames.join(", ") || "Georreferenciación cargada") : null,
       archivosProcesados: processedNames,
       codigoViaDeclarado: primaryDecl,
       codigoViaGeoJSON: primaryCod,
       jerarquiaOficial: "TERCIARIA",
       jurisdiccion: `Municipal de ${fichaData.municipio}`,
       bufferToleranciaM: 10,
-      coberturaBufferPct: coberturaBufferPct,
+      porcentajeAlineacion: tieneGeorreferenciacionValida ? coberturaBufferPct : 0,
+      coberturaBufferPct: tieneGeorreferenciacionValida ? coberturaBufferPct : 0,
+      tieneKMZ: tieneGeorreferenciacionValida,
+      tieneGeorreferenciacionValida: tieneGeorreferenciacionValida,
+      aprobado: aprobado,
+      coberturaConforme: aprobado,
+      estadoCompuerta: tieneGeorreferenciacionValida ? (aprobado ? 'APROBADO' : 'BLOQUEADO') : 'BLOQUEADO',
+      motivoRechazo: tieneGeorreferenciacionValida
+        ? (aprobado ? null : `Desfase de alineación: Cobertura de red vial (${coberturaBufferPct.toFixed(1)}%) inferior al umbral mínimo del 95%.`)
+        : 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) con geometrías válidas en el expediente.',
       longitudKmlM: lengthKmzM,
       desviacionLongitudPct: 0.8,
       puntosAnomalia: tramos.length - tramosConformes,
@@ -1525,10 +2352,11 @@ const FolderReader = {
       puntos: puntosInspeccion,
       puntosInspeccion: puntosInspeccion,
       puntosContraste: puntosContraste,
-      tieneGeorreferenciacionValida: tieneGeorreferenciacionValida,
       alertaComprimido: alertaComprimido,
       alertasArchivos: tieneGeorreferenciacionValida ? [] : allAlerts,
-      estado: coberturaBufferPct >= 95.0 ? "Cumple" : "Alerta de Desfase Espacial"
+      estado: !tieneGeorreferenciacionValida
+        ? (alertaComprimido ? "Alerta de Extracción" : "No Cumple - Falta archivo KMZ/KML")
+        : (coberturaBufferPct >= 95.0 ? "Cumple" : "Alerta de Desfase Espacial")
     };
   },
 
@@ -1572,6 +2400,48 @@ const FolderReader = {
    */
   async parseKmzOrKml(fileKmz, fichaData) {
     return this.parseGeorefFiles([fileKmz], fichaData);
+  },
+
+  /**
+   * Procesa y evalúa la georreferenciación (Fase 1B) para un expediente o archivo KMZ/KML,
+   * reiniciando completamente los arreglos para prevenir duplicaciones.
+   */
+  async procesarGeorreferenciacion(proyectoId, files, fichaData) {
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    const exp = expedientesMap[proyectoId] || (typeof App !== "undefined" && App.currentAuditRecord && App.currentAuditRecord.id === proyectoId ? App.currentAuditRecord : null);
+
+    if (exp) {
+      if (exp.fase1B) {
+        exp.fase1B.tramos = [];
+        exp.fase1B.puntos = [];
+        exp.fase1B.puntosInspeccion = [];
+        exp.fase1B.puntosContraste = [];
+        exp.fase1B.alertas = [];
+        exp.fase1B.alertasArchivos = [];
+      }
+      if (exp.datos && exp.datos.georreferenciacion) {
+        exp.datos.georreferenciacion.tramos = [];
+        exp.datos.georreferenciacion.puntos = [];
+        exp.datos.georreferenciacion.puntosInspeccion = [];
+        exp.datos.georreferenciacion.puntosContraste = [];
+      }
+    }
+
+    const fData = fichaData || (exp && exp.datos && exp.datos.fichaPriorizacion) || {
+      id: proyectoId,
+      municipio: (exp && exp.municipio) || "Antioquia",
+      codMunicipio: (exp && exp.codMunicipio) || "05000",
+      subregion: (exp && exp.subregion) || "",
+      longitudTotalM: (exp && exp.datos && exp.datos.longitudM) || 0,
+      codigosViales: (exp && exp.datos && exp.datos.codigoVial) ? [exp.datos.codigoVial] : []
+    };
+
+    const res = await this.parseGeorefFiles(files, fData);
+    return res;
+  },
+
+  async evaluarFase1B(proyectoId, files, fichaData) {
+    return this.procesarGeorreferenciacion(proyectoId, files, fichaData);
   },
 
   haversineMeters(lat1, lon1, lat2, lon2) {
@@ -1927,7 +2797,6 @@ const FolderReader = {
     let concCiclStr = "0.00 m³";
     let concTotStr = "0.00 m³";
     let cementoStr = "0 sacos";
-    let granularStr = "0.00 m³";
     let piedraStr = "0.00 m³";
 
     // Detectar si el documento trae tabla de cantidades de materiales (ej. Yolombó pág 10)
@@ -1947,7 +2816,6 @@ const FolderReader = {
         cementoStr = `${mCem[1]} bultos (50 kg)`;
       }
       if (mGran) {
-        granularStr = `${mGran[1]} m³`;
         piedraStr = `${mGran[2]} m³`;
       }
     }
@@ -1956,12 +2824,11 @@ const FolderReader = {
     const paramVolumes = StructuralEngine.calculateConcreteVolumes(longitudM, { pesoTotalKg });
 
     if (!consignadoEnDocumento && longitudM > 0) {
-      conc21Str = `${paramVolumes.totalConcreto21M3.toLocaleString('es-CO')} m³`;
-      concCiclStr = `${paramVolumes.totalConcretoCiclopeoM3.toLocaleString('es-CO')} m³`;
-      concTotStr = `${paramVolumes.totalConcretoGlobalM3.toLocaleString('es-CO')} m³`;
-      cementoStr = `${paramVolumes.sacosCemento.toLocaleString('es-CO')} sacos`;
-      piedraStr = `${paramVolumes.piedraRajonM3.toLocaleString('es-CO')} m³`;
-      granularStr = `${(paramVolumes.totalConcretoGlobalM3 * 0.85).toFixed(2)} m³`;
+      conc21Str = `${(paramVolumes.totalConcreto21M3 || 0).toLocaleString('es-CO')} m³`;
+      concCiclStr = `${(paramVolumes.totalConcretoCiclopeoM3 || 0).toLocaleString('es-CO')} m³`;
+      concTotStr = `${(paramVolumes.totalConcretoGlobalM3 || 0).toLocaleString('es-CO')} m³`;
+      cementoStr = `${(paramVolumes.sacosCemento || 0).toLocaleString('es-CO')} sacos`;
+      piedraStr = "-";
     }
 
     return {
@@ -1971,7 +2838,7 @@ const FolderReader = {
         concretoCiclopeo: concCiclStr,
         concretoTotal: concTotStr,
         cementoBultos: cementoStr,
-        materialGranular: granularStr,
+        dosificacionCemento: `${paramVolumes.dosificacionGlobal || 7.20} sacos / m³`,
         piedraRajon: piedraStr
       },
       paramVolumes
@@ -2372,19 +3239,21 @@ const FolderReader = {
 
     // 3. TABLA DE DESPIECE DE ACERO POR ELEMENTO (12 MARCAS OFICIALES)
     // Prohibición absoluta de fallback/mock: piezas = 0 si no está físicamente diligenciada
+    // 3. TABLA DE DESPIECE DE ACERO POR ELEMENTO (12 MARCAS OFICIALES)
+    // Longitudes de corte dinámicas leídas del documento (cero valores fijos preconfigurados)
     const defaultElements = [
-      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 6.00, obs: "Empalmes escalonados" },
-      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0.80, obs: "Separación cada 0.20 m" },
-      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0.40, obs: "Longitud empalme según norma" },
-      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 4.20, obs: "2 barras superiores corridas" },
-      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 4.20, obs: "2 barras inferiores corridas" },
-      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0.85, obs: "Estribos cerrados c/ 0.20 m" },
-      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 6.00, obs: "3 barras longitudinales" },
-      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0.80, obs: "Flejes en U cada 0.25 m" },
-      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 6.00, obs: "1 barra superior corrida" },
-      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0.45, obs: "Ganchos de anclaje cada 0.30 m" },
-      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 1.40, obs: "Malla de refuerzo en extremos" },
-      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 4.20, obs: "Malla transversal en extremos" }
+      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Empalmes escalonados" },
+      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Separación cada 0.20 m" },
+      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Longitud empalme según norma" },
+      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras superiores corridas" },
+      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras inferiores corridas" },
+      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Estribos cerrados c/ 0.20 m" },
+      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "3 barras longitudinales" },
+      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Flejes en U cada 0.25 m" },
+      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "1 barra superior corrida" },
+      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0, obs: "Ganchos de anclaje cada 0.30 m" },
+      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla de refuerzo en extremos" },
+      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla transversal en extremos" }
     ];
 
     const filasResultado = defaultElements.map(d => ({
@@ -2400,6 +3269,38 @@ const FolderReader = {
       varillas6m: 0,
       obs: d.obs
     }));
+
+    // Detección dinámica de índices de columnas en encabezados de la tabla de despiece
+    let colCorteDetectada = -1;
+    let colPzasDetectada = -1;
+    let colLtDetectada = -1;
+    let colPtDetectada = -1;
+    let colVarDetectada = -1;
+    let colDiamDetectada = -1;
+    let colObsDetectada = -1;
+
+    for (let rIdx = 0; rIdx < Math.min(matrizFilas.length, 30); rIdx++) {
+      const r = matrizFilas[rIdx];
+      if (!Array.isArray(r)) continue;
+      for (let c = 0; c < r.length; c++) {
+        const hText = this.cleanForRegex(String(r[c] || ""));
+        if (hText.includes("longitud corte") || hText.includes("long corte") || hText.includes("corte (m)") || hText.includes("long. corte") || hText === "corte") {
+          if (colCorteDetectada === -1) colCorteDetectada = c;
+        } else if (hText.includes("cantidad piezas") || hText.includes("piezas") || hText.includes("cant piezas") || hText.includes("n piezas") || hText.includes("no piezas")) {
+          if (colPzasDetectada === -1) colPzasDetectada = c;
+        } else if (hText.includes("longitud total") || hText.includes("long total") || hText.includes("long. total")) {
+          if (colLtDetectada === -1) colLtDetectada = c;
+        } else if (hText.includes("peso total")) {
+          if (colPtDetectada === -1) colPtDetectada = c;
+        } else if (hText.includes("varillas") || hText.includes("varilla")) {
+          if (colVarDetectada === -1) colVarDetectada = c;
+        } else if (hText.includes("diametro") || hText.includes("diámetro")) {
+          if (colDiamDetectada === -1) colDiamDetectada = c;
+        } else if (hText.includes("observacion") || hText.includes("detalle")) {
+          if (colObsDetectada === -1) colObsDetectada = c;
+        }
+      }
+    }
 
     let currentCategory = null;
 
@@ -2491,15 +3392,14 @@ const FolderReader = {
         else target.pesoLin = 0.560;
 
         // Determinar índices de corte, piezas, longTotal, pesoTotal, varillas:
-        // Si encontramos la columna del diámetro, las siguientes columnas numéricas son relativas:
-        let corteIdx = 4;
-        let pzasIdx = 5;
-        let ltIdx = 6;
-        let ptIdx = 7;
-        let varIdx = 8;
-        let obsIdx = 9;
+        let corteIdx = colCorteDetectada >= 0 ? colCorteDetectada : 4;
+        let pzasIdx = colPzasDetectada >= 0 ? colPzasDetectada : 5;
+        let ltIdx = colLtDetectada >= 0 ? colLtDetectada : 6;
+        let ptIdx = colPtDetectada >= 0 ? colPtDetectada : 7;
+        let varIdx = colVarDetectada >= 0 ? colVarDetectada : 8;
+        let obsIdx = colObsDetectada >= 0 ? colObsDetectada : 9;
 
-        if (diamColIdx >= 0) {
+        if (colCorteDetectada === -1 && diamColIdx >= 0) {
           const nextVal = this.cleanNumber(row[diamColIdx + 1]);
           if (nextVal > 0 && nextVal < 1.5) {
             corteIdx = diamColIdx + 2;
@@ -2518,9 +3418,14 @@ const FolderReader = {
           }
         }
 
+        // Extracción exacta de Longitud de Corte directamente del documento
         if (row.length > corteIdx) {
-          const corteVal = this.cleanNumber(row[corteIdx]);
-          if (corteVal > 0) target.corte = corteVal;
+          const rawCorte = row[corteIdx];
+          const corteVal = this.cleanNumber(rawCorte);
+          if (corteVal !== null && !isNaN(corteVal) && corteVal >= 0) {
+            target.corte = corteVal;
+            target.hasCorteInDoc = true;
+          }
         }
 
         if (row.length > pzasIdx) {
@@ -2708,6 +3613,7 @@ const FolderReader = {
       paginasTexto: [{ pagina: 1, texto: `Plantilla oficial de despiece (${fileName}) leída y procesada fielmente mediante matriz 2D.` }],
       textoCompleto: `Despiece de Acero extraído fielmente del archivo ${fileName}.`,
       marcas: marcas,
+      longitudTramo: infoGeneral.longitudM,
       longitudIntervencionM: infoGeneral.longitudM,
       pesoTotalDeclaradoKg: subtotalPesoKg,
       cuantiaKgM: cuantia,
@@ -2733,26 +3639,74 @@ const FolderReader = {
     let ciclopeoM3 = 0;
     let cunetasM3 = 0;
     let riostrasM3 = 0;
+    let sobreanchoM3 = 0;
     let transicionM3 = 0;
     let totalConcM3 = 0;
     let totalSacos = 0;
 
+    const dimensionesDetalle = {
+      rieles: null,
+      entrerriel: null,
+      sobreancho: null,
+      riostras: null,
+      cunetas: null,
+      transicion: null
+    };
+
+    const dosificaciones = {
+      rieles: 7.5,
+      entrerriel: 4.5,
+      sobreancho: 7.5,
+      riostras: 7.5,
+      cunetas: 7.5,
+      transicion: 7.5
+    };
+
     for (const r of matrizConcreto) {
       if (!Array.isArray(r) || r.length === 0) continue;
       const rowLine = r.join(" ").toUpperCase();
+      const lVal = r.length >= 4 ? this.cleanNumber(r[3]) : 0;
+      const aVal = r.length >= 5 ? this.cleanNumber(r[4]) : 0;
+      const eVal = r.length >= 6 ? this.cleanNumber(r[5]) : 0;
+      const nVal = r.length >= 7 ? this.cleanNumber(r[6]) : 0;
       const vol = r.length >= 8 ? this.cleanNumber(r[7]) : 0;
+      const dosi = r.length >= 9 ? this.cleanNumber(r[8]) : 0;
       const sacos = r.length >= 10 ? this.cleanNumber(r[9]) : 0;
+
+      const dimObj = {
+        longitudM: lVal,
+        anchoM: aVal,
+        espesorM: eVal,
+        cantidad: nVal,
+        volumenM3: vol,
+        dosificacion: dosi > 0 ? dosi : null,
+        sacos: sacos > 0 ? sacos : null
+      };
 
       if (rowLine.includes("RIELES")) {
         if (vol > 0) huellasM3 = vol;
-      } else if (rowLine.includes("ENTRERRIEL") || rowLine.includes("SOBREANCHO")) {
+        if (dosi > 0) dosificaciones.rieles = dosi;
+        dimensionesDetalle.rieles = dimObj;
+      } else if (rowLine.includes("ENTRERRIEL")) {
         if (vol > 0) ciclopeoM3 += vol;
+        if (dosi > 0) dosificaciones.entrerriel = dosi;
+        dimensionesDetalle.entrerriel = dimObj;
+      } else if (rowLine.includes("SOBREANCHO")) {
+        if (vol > 0) sobreanchoM3 = vol;
+        if (dosi > 0) dosificaciones.sobreancho = dosi;
+        dimensionesDetalle.sobreancho = dimObj;
       } else if (rowLine.includes("VIGAS RIOSTRAS") || rowLine.includes("RIOSTRA")) {
         if (vol > 0) riostrasM3 = vol;
+        if (dosi > 0) dosificaciones.riostras = dosi;
+        dimensionesDetalle.riostras = dimObj;
       } else if (rowLine.includes("CUNETAS Y BORDILLOS") || rowLine.includes("CUNETA")) {
         if (vol > 0) cunetasM3 = vol;
+        if (dosi > 0) dosificaciones.cunetas = dosi;
+        dimensionesDetalle.cunetas = dimObj;
       } else if (rowLine.includes("LOSA DE TRANSICI") || rowLine.includes("TRANSICION")) {
         if (vol > 0) transicionM3 = vol;
+        if (dosi > 0) dosificaciones.transicion = dosi;
+        dimensionesDetalle.transicion = dimObj;
       } else if (rowLine.includes("SUBTOTAL CANTIDADES NOMINALES") || rowLine.includes("TOTAL CONCRETO")) {
         if (vol > 0) totalConcM3 = vol;
         if (sacos > 0) totalSacos = Math.round(sacos);
@@ -2760,30 +3714,130 @@ const FolderReader = {
     }
 
     if (totalConcM3 === 0) {
-      totalConcM3 = +(huellasM3 + ciclopeoM3 + cunetasM3 + riostrasM3 + transicionM3).toFixed(2);
+      totalConcM3 = +(huellasM3 + ciclopeoM3 + cunetasM3 + riostrasM3 + sobreanchoM3 + transicionM3).toFixed(2);
     }
     if (totalSacos === 0 && totalConcM3 > 0) {
       totalSacos = Math.round(totalConcM3 * 7.2);
     }
 
+    const dosificacionGlobal = totalConcM3 > 0 && totalSacos > 0
+      ? +(totalSacos / totalConcM3).toFixed(2)
+      : 7.20;
+
     let paramVolumes = null;
     if (totalConcM3 > 0) {
-      const conc21 = +(huellasM3 + cunetasM3 + riostrasM3 + transicionM3).toFixed(2);
+      const conc21 = +(huellasM3 + cunetasM3 + riostrasM3 + sobreanchoM3 + transicionM3).toFixed(2);
+      const elementos = {
+        rieles: {
+          nombre: "RIELES",
+          tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+          anchoM: dimensionesDetalle.rieles?.anchoM || 0.90,
+          espesorAltoM: dimensionesDetalle.rieles?.espesorM || 0.15,
+          longitudM: dimensionesDetalle.rieles?.longitudM || longitudM,
+          areaSeccionM2: 0.135,
+          cantidad: String(dimensionesDetalle.rieles?.cantidad || 2),
+          volumenSimple21M3: huellasM3,
+          volumenCiclopeoM3: 0,
+          volumenTotalM3: huellasM3,
+          dosificacion: dosificaciones.rieles || 7.5,
+          sacos: Math.round(huellasM3 * (dosificaciones.rieles || 7.5))
+        },
+        entrerriel: {
+          nombre: "ENTRERRIEL",
+          tipo: "Concreto Ciclópeo (f'c = 21 MPa con piedra pegada)",
+          anchoM: dimensionesDetalle.entrerriel?.anchoM || 0.90,
+          espesorAltoM: dimensionesDetalle.entrerriel?.espesorM || 0.15,
+          longitudM: dimensionesDetalle.entrerriel?.longitudM || longitudM,
+          areaSeccionM2: 0.135,
+          cantidad: String(dimensionesDetalle.entrerriel?.cantidad || 1),
+          volumenSimple21M3: 0,
+          volumenCiclopeoM3: ciclopeoM3,
+          volumenTotalM3: ciclopeoM3,
+          dosificacion: dosificaciones.entrerriel || 4.5,
+          sacos: Math.round(ciclopeoM3 * (dosificaciones.entrerriel || 4.5))
+        },
+        sobreancho: {
+          nombre: "SOBREANCHO (Opcional)",
+          tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+          anchoM: dimensionesDetalle.sobreancho?.anchoM || 0.20,
+          espesorAltoM: dimensionesDetalle.sobreancho?.espesorM || 0.15,
+          longitudM: dimensionesDetalle.sobreancho?.longitudM || longitudM,
+          areaSeccionM2: 0.030,
+          cantidad: String(dimensionesDetalle.sobreancho?.cantidad || "Paramétrico"),
+          volumenSimple21M3: sobreanchoM3,
+          volumenCiclopeoM3: 0,
+          volumenTotalM3: sobreanchoM3,
+          dosificacion: dosificaciones.sobreancho || 7.5,
+          sacos: Math.round(sobreanchoM3 * (dosificaciones.sobreancho || 7.5))
+        },
+        riostras: {
+          nombre: "VIGAS RIOSTRAS",
+          tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+          anchoM: dimensionesDetalle.riostras?.anchoM || 0.25,
+          espesorAltoM: dimensionesDetalle.riostras?.espesorM || 0.20,
+          longitudM: dimensionesDetalle.riostras?.longitudM || 4.30,
+          areaSeccionM2: 0.050,
+          cantidad: String(dimensionesDetalle.riostras?.cantidad || (longitudM > 0 ? (Math.floor(longitudM / 3.0) + 1) : 0)),
+          volumenSimple21M3: riostrasM3,
+          volumenCiclopeoM3: 0,
+          volumenTotalM3: riostrasM3,
+          dosificacion: dosificaciones.riostras || 7.5,
+          sacos: Math.round(riostrasM3 * (dosificaciones.riostras || 7.5))
+        },
+        cunetas: {
+          nombre: "CUNETAS Y BORDILLOS",
+          tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+          anchoM: (dimensionesDetalle.cunetas && dimensionesDetalle.cunetas.anchoM !== undefined) ? dimensionesDetalle.cunetas.anchoM : 0.70,
+          espesorAltoM: (dimensionesDetalle.cunetas && (dimensionesDetalle.cunetas.espesorM !== undefined || dimensionesDetalle.cunetas.espesorAltoM !== undefined)) ? (dimensionesDetalle.cunetas.espesorM || dimensionesDetalle.cunetas.espesorAltoM) : 0.09,
+          longitudM: dimensionesDetalle.cunetas?.longitudM || longitudM,
+          areaSeccionM2: (dimensionesDetalle.cunetas && dimensionesDetalle.cunetas.areaSeccionM2 !== undefined)
+            ? Number(dimensionesDetalle.cunetas.areaSeccionM2)
+            : +((((dimensionesDetalle.cunetas && dimensionesDetalle.cunetas.anchoM !== undefined) ? dimensionesDetalle.cunetas.anchoM : 0.70) * ((dimensionesDetalle.cunetas && (dimensionesDetalle.cunetas.espesorM !== undefined || dimensionesDetalle.cunetas.espesorAltoM !== undefined)) ? (dimensionesDetalle.cunetas.espesorM || dimensionesDetalle.cunetas.espesorAltoM) : 0.09)).toFixed(4)),
+          cantidad: String(dimensionesDetalle.cunetas?.cantidad || 2),
+          volumenSimple21M3: cunetasM3,
+          volumenCiclopeoM3: 0,
+          volumenTotalM3: cunetasM3,
+          dosificacion: dosificaciones.cunetas || 7.5,
+          sacos: Math.round(cunetasM3 * (dosificaciones.cunetas || 7.5))
+        },
+        transicion: {
+          nombre: "LOSA DE TRANSICIÓN (Opcional)",
+          tipo: "Concreto Simple f'c = 21 MPa (3000 PSI)",
+          anchoM: dimensionesDetalle.transicion?.anchoM || 4.30,
+          espesorAltoM: dimensionesDetalle.transicion?.espesorM || 0.15,
+          longitudM: dimensionesDetalle.transicion?.longitudM || 1.50,
+          areaSeccionM2: 0.645,
+          cantidad: String(dimensionesDetalle.transicion?.cantidad || 2),
+          volumenSimple21M3: transicionM3,
+          volumenCiclopeoM3: 0,
+          volumenTotalM3: transicionM3,
+          dosificacion: dosificaciones.transicion || 7.5,
+          sacos: Math.round(transicionM3 * (dosificaciones.transicion || 7.5))
+        }
+      };
+
       paramVolumes = {
         longitudM: longitudM,
         huellasM3: huellasM3,
         ciclopeoM3: ciclopeoM3,
         cunetasM3: cunetasM3,
         riostrasM3: riostrasM3,
+        sobreanchoM3: sobreanchoM3,
         transicionM3: transicionM3,
         totalConcreto21M3: conc21,
+        totalConcretoSimpleM3: conc21,
         totalConcretoCiclopeoM3: ciclopeoM3,
         totalConcretoGlobalM3: totalConcM3,
         sacosCemento: totalSacos,
-        piedraRajonM3: +(ciclopeoM3 * 0.40).toFixed(2)
+        dosificacionGlobal: dosificacionGlobal,
+        dosificaciones: dosificaciones,
+        dimensionesDetalle: dimensionesDetalle,
+        elementos: elementos
       };
     } else {
       paramVolumes = StructuralEngine.calculateConcreteVolumes(longitudM, { pesoTotalKg });
+      paramVolumes.dimensionesDetalle = dimensionesDetalle;
+      paramVolumes.dosificaciones = dosificaciones;
     }
 
     return {
@@ -2793,10 +3847,11 @@ const FolderReader = {
         concretoCiclopeo: `${paramVolumes.totalConcretoCiclopeoM3.toLocaleString('es-CO')} m³`,
         concretoTotal: `${paramVolumes.totalConcretoGlobalM3.toLocaleString('es-CO')} m³`,
         cementoBultos: `${paramVolumes.sacosCemento.toLocaleString('es-CO')} sacos`,
-        materialGranular: `${(paramVolumes.totalConcretoGlobalM3 * 0.85).toFixed(2)} m³`,
-        piedraRajon: `${paramVolumes.piedraRajonM3.toLocaleString('es-CO')} m³`
+        dosificacionCemento: `${paramVolumes.dosificacionGlobal || dosificacionGlobal} sacos / m³`
       },
-      paramVolumes: paramVolumes
+      paramVolumes: paramVolumes,
+      dimensionesDetalle: dimensionesDetalle,
+      dosificaciones: dosificaciones
     };
   },
 
@@ -2930,10 +3985,64 @@ const FolderReader = {
       }
     }
 
-    // 5. Re-auditar Fase 1A bajo el estándar técnico
+    // 4.1 Guardar físicamente en carpeta si disponemos de dirHandle
+    if (record.dirHandle && typeof record.dirHandle.getFileHandle === "function") {
+      try {
+        const targetName = file.name.toUpperCase().includes("ITEM_03") || file.name.toUpperCase().includes("ITEM 03")
+          ? file.name
+          : `ITEM_03_${file.name}`;
+        const fileHandle = await record.dirHandle.getFileHandle(targetName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(file);
+        await writable.close();
+        console.log(`Archivo físico de despiece guardado en disco: ${targetName}`);
+      } catch (diskErr) {
+        console.warn("No se pudo escribir directamente en el disco:", diskErr);
+      }
+    }
+
+    // 4.2 Actualizar estado de Ítem 3 en Fase 2 e historial de subsanaciones
+    if (record.fase2 && record.fase2.items) {
+      const it3 = record.fase2.items.find(i => Number(i.id) === 3 || i.id === "3");
+      if (it3) {
+        it3.conforme = true;
+        it3.faltante = false;
+        it3.vencido = false;
+        it3.estado = "Conforme (Subsanado)";
+        it3.archivoDetectado = file.name;
+        it3.subsanado = true;
+        it3.fechaSubsanacion = new Date().toLocaleDateString("es-CO");
+        it3.motivo = `Subsanado con archivo ${file.name} el ${new Date().toLocaleDateString("es-CO")}`;
+      }
+      record.fase2.itemsConformes = record.fase2.items.filter(it => it.conforme || it.subsanado).length;
+      record.fase2.itemsNoConformes = record.fase2.items.length - record.fase2.itemsConformes;
+    }
+
+    record.historialSubsanaciones = record.historialSubsanaciones || [];
+    record.historialSubsanaciones.push({
+      itemId: 3,
+      fileName: file.name,
+      fecha: new Date().toLocaleString("es-CO"),
+      timestamp: Date.now()
+    });
+
+    // 5. Re-auditar Fase 1A bajo el estándar técnico (Single Source of Truth)
     const audit1A = StructuralEngine.auditProject(record.datos);
+    const finalL = despieceConfig.longitudIntervencionM || (record.datos && record.datos.longitudM) || 0;
+    audit1A.longitudTramo = finalL;
+    audit1A.longitudIntervencionM = finalL;
     record.fase1A = audit1A;
+    record.fase1A.longitudTramo = finalL;
     expedientesMap[projectId].fase1A = audit1A;
+
+    // Sincronizar automáticamente Fase 1C si es modalidad RECURSOS
+    if (record.modalidad === "RECURSOS" && typeof PresupuestoEngine !== "undefined") {
+      PresupuestoEngine.auditarCoherencia(record);
+      const container1C = document.getElementById("presupuestoAuditContainer");
+      if (container1C && App.currentProjectId === projectId) {
+        PresupuestoEngine.renderPresupuestoTab(record, container1C);
+      }
+    }
 
     // Actualizar KPIs de Fase 1A y Score Global
     if (record.kpis) {
@@ -2947,7 +4056,30 @@ const FolderReader = {
     }
     if (record.auditGlobal) {
       record.auditGlobal.audit1A = audit1A;
-      record.auditGlobal.isApproved = audit1A.aprobado && (record.fase1B ? record.fase1B.aprobado : true) && (record.fase2 ? record.fase2.aprobado : true);
+      const a1A = audit1A.aprobado;
+      const a1B = record.fase1B ? record.fase1B.aprobado : true;
+      const a2 = record.fase2 ? record.fase2.aprobado : true;
+      const a1C = record.modalidad !== "RECURSOS" || (record.fase1C ? record.fase1C.aprobado : true);
+      record.auditGlobal.isApproved = a1A && a1B && a2 && a1C;
+      if (!a1A) {
+        record.auditGlobal.activeGatekeeper = "1A_DISENO";
+      } else if (!a1B) {
+        record.auditGlobal.activeGatekeeper = "1B_ESPACIAL";
+      } else if (!a1C) {
+        record.auditGlobal.activeGatekeeper = "1C_PRESUPUESTO";
+      } else if (!a2) {
+        record.auditGlobal.activeGatekeeper = "2_DOCUMENTAL";
+      } else {
+        record.auditGlobal.activeGatekeeper = "3_APROBADO";
+      }
+    }
+
+    // Limpiar alertas previas de despiece faltante en Fase 3
+    if (record.fase3) {
+      ["doc_item_3", "FASE_2_ITEM_3", "item_3"].forEach(k => {
+        if (record.fase3.observacionesEditadas) delete record.fase3.observacionesEditadas[k];
+        if (record.fase3.matrizObservaciones) delete record.fase3.matrizObservaciones[k];
+      });
     }
 
     // 6. Sincronizar y re-renderizar de inmediato la interfaz si es el proyecto activo
@@ -2960,12 +4092,51 @@ const FolderReader = {
       StructuralEngine.renderGeometricSummaryCard("geometricSummaryContainer", record.datos);
       StructuralEngine.renderDespieceFiel("despieceExtraidoContainer", record.datos);
       StructuralEngine.renderConcreteTable(record.concretoVolumes, document.getElementById("concreteVolumesContainer"), record.fase1A, record.datos ? record.datos.despieceExtraido : null);
-      App.renderKPIs(record.kpis, record.datos);
+      if (typeof App.actualizarKPIsEjecutivos === "function") App.actualizarKPIsEjecutivos(projectId); else App.renderKPIs(record.kpis, record.datos);
       App.renderPipelineBanner(record.auditGlobal);
+
+      const docCont = document.getElementById("documentalMatrixContainer");
+      if (docCont && record.fase2 && typeof DocumentalEngine !== "undefined") {
+        DocumentalEngine.renderDocumentalMatrix(record.fase2, docCont, (window.App && window.App.currentFilterCluster) || "ALL");
+      }
+      const repCont = document.getElementById("officialReportContainer");
+      if (repCont && record.datos && typeof ReportsEngine !== "undefined") {
+        ReportsEngine.renderOfficialReport(record.datos, record.auditGlobal, repCont);
+      }
     }
 
     this.showToast(`✓ Archivo de Ítem 3 (${file.name}) procesado fielmente. Fase 1A actualizada para ${record.municipio || 'el expediente'}.`);
     return record.fase1A;
+  },
+
+  /**
+   * Reprocesa única y exclusivamente el archivo File aportado para el Ítem 28 (Presupuesto)
+   */
+  async reprocessBudgetFile(file, projectId) {
+    projectId = projectId || (window.App && window.App.currentProjectId);
+    if (!projectId || !file) {
+      if (this.showToast) this.showToast("⚠️ No hay un expediente activo seleccionado para actualizar el Presupuesto.");
+      return null;
+    }
+
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    let record = expedientesMap[projectId];
+    if (!record) {
+      record = Object.values(expedientesMap).find(r => r.id === projectId || r.slug === projectId || (r.datos && r.datos.id === projectId));
+    }
+    if (!record) {
+      if (this.showToast) this.showToast(`⚠️ No se encontró el registro del proyecto ${projectId} en memoria.`);
+      return null;
+    }
+
+    if (typeof PresupuestoEngine !== "undefined") {
+      const state = await PresupuestoEngine.reprocessBudgetFile(file, projectId);
+      if (this.showToast) {
+        this.showToast(`✓ Archivo de Presupuesto (${file.name}) procesado fielmente. Fase 1C actualizada.`);
+      }
+      return state;
+    }
+    return null;
   },
 
   /**
@@ -3047,8 +4218,21 @@ const FolderReader = {
   },
 
   async readPdfOrText(file) {
-    const res = await this.readPdfWithLayout(file);
-    return res ? res.fullText : "";
+    if (!file) return "";
+    try {
+      const ext = this.getFileExtension(file);
+      if (ext === "pdf") {
+        const res = await this.readPdfWithLayout(file);
+        return res ? res.fullText : "";
+      } else if (["xlsx", "xls", "xlsm", "xlsb", "ods"].includes(ext)) {
+        return await this.readExcelAsText(file);
+      } else {
+        return await file.text();
+      }
+    } catch (e) {
+      console.warn("Error en readPdfOrText con archivo " + (file ? file.name : "desconocido") + ":", e);
+      return "";
+    }
   },
 
 
@@ -3123,5 +4307,15 @@ const FolderReader = {
 };
 
 if (typeof window !== "undefined") {
+  FolderReader.clasificarPartidaConcreto = function(desc) {
+    return typeof PresupuestoEngine !== "undefined" && typeof PresupuestoEngine.clasificarPartidaConcreto === "function"
+      ? PresupuestoEngine.clasificarPartidaConcreto(desc)
+      : { esConcreto: false };
+  };
+  FolderReader.extraerDimensionesItem = function(desc, f1A) {
+    return typeof PresupuestoEngine !== "undefined" && typeof PresupuestoEngine.extraerDimensionesItem === "function"
+      ? PresupuestoEngine.extraerDimensionesItem(desc, f1A)
+      : { converted: false, motivo: "Motor no disponible" };
+  };
   window.FolderReader = FolderReader;
 }

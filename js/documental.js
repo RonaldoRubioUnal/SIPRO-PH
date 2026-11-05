@@ -17,7 +17,8 @@ const DocumentalEngine = {
    * Ejecuta la auditoría documental completa del proyecto basada en los archivos reales
    */
   auditProject(project) {
-    const items = SIPRO_DATA.items27;
+    const isRecursos = project && (project.modalidad === "RECURSOS" || (project.datos && project.datos.modalidad === "RECURSOS"));
+    const items = isRecursos ? SIPRO_DATA.items27 : SIPRO_DATA.items27.filter(i => !i.soloRecursos);
     const docStatus = project.documentosStatus || { itemsCumplidos: [], itemsSubsanar: [], diasVigencias: {}, archivosDetectados: {} };
     const diasVigencias = docStatus.diasVigencias || {};
     const archivosDetectados = docStatus.archivosDetectados || {};
@@ -104,7 +105,7 @@ const DocumentalEngine = {
       return {
         ...item,
         conforme: isCompliant,
-        faltante: false,
+        faltante: isMissing,
         vencido: isExpired,
         observacion: observation,
         diasRestantes: daysRemaining,
@@ -339,19 +340,22 @@ const DocumentalEngine = {
     const cardEl = document.createElement("div");
     cardEl.className = "documental-matrix-card";
 
+    const totalItems = (auditResult && auditResult.totalItems) || 27;
+    const isRecursos = totalItems === 28;
+
     cardEl.innerHTML = `
       <div class="documental-header">
         <div>
           <h3 style="font-size: 16px; font-weight: 800; color: var(--color-primary); margin: 0 0 4px 0;">
-            Lista Numérica de Verificación Documental (Ítems 1 al 27)
+            Lista Numérica de Verificación Documental (Ítems 1 al ${totalItems})
           </h3>
           <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
-            Cotejo estricto de los 27 requisitos según la documentación presente en la carpeta del expediente municipal. Haga clic en <b>Abrir</b> o sobre el nombre del archivo para visualizar el documento.
+            Cotejo estricto de los ${totalItems} requisitos ${isRecursos ? '(incluye Presupuesto Oficial en Modalidad RECURSOS)' : ''} según la documentación del expediente. Haga clic en <b>Abrir</b> para ver o en <b>Subsanar</b> para cargar un documento de reemplazo.
           </p>
         </div>
         <div style="display:flex; align-items:center; gap: 8px;">
           <span class="status-pill ${auditResult.aprobado ? 'cumple' : 'alerta'}">
-            ${auditResult.itemsConformes} de 27 Conformes (${auditResult.porcentajeConformidad}%)
+            ${auditResult.itemsConformes} de ${totalItems} Conformes (${auditResult.porcentajeConformidad}%)
           </span>
           ${auditResult.itemsNoConformes > 0 ? `
             <span class="status-pill no-cumple">
@@ -362,17 +366,17 @@ const DocumentalEngine = {
       </div>
 
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table documental-table" style="table-layout: auto; width: 100%;">
           <thead>
             <tr>
-              <th style="width: 50px; text-align: center;">N°</th>
+              <th style="width: 45px; text-align: center;">N°</th>
               <th>Documento Requerido</th>
+              <th style="text-align: center; width: 125px; white-space: nowrap;">Estado</th>
               <th>Archivo Detectado en Carpeta</th>
+              <th style="text-align: center; width: 160px; white-space: nowrap;">Acciones</th>
               <th>Regla de Validación / Vigencia</th>
               <th>Entidad Emisora</th>
-              <th style="text-align: center;">Estado</th>
               <th>Observación de Auditoría</th>
-              <th style="text-align: right; min-width: 110px;">Acción</th>
             </tr>
           </thead>
           <tbody>
@@ -383,6 +387,12 @@ const DocumentalEngine = {
                 </td>
                 <td>
                   <strong style="color: var(--text-main); font-size: 13px;">${item.title}</strong>
+                  ${item.soloRecursos ? '<span style="margin-left:6px;font-size:10px;background:rgba(217,119,6,0.15);color:#D97706;padding:1px 5px;border-radius:4px;font-weight:800;">RECURSOS</span>' : ''}
+                </td>
+                <td style="text-align: center; white-space: nowrap;">
+                  <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="white-space: nowrap;">
+                    ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vencido' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
+                  </span>
                 </td>
                 <td>
                   ${item.archivoDetectado ? `
@@ -396,33 +406,29 @@ const DocumentalEngine = {
                     </span>
                   `}
                 </td>
+                <td style="text-align: center; white-space: nowrap;">
+                  <div class="doc-actions-wrap" style="display: inline-flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;">
+                    ${item.archivoDetectado ? `
+                      <button class="btn-primary" style="padding:4px 10px;font-size:11px;background:#0284C7;display:inline-flex;align-items:center;gap:4px;box-shadow:0 1px 3px rgba(2,132,199,0.3);white-space:nowrap;flex-shrink:0;" onclick="DocumentalEngine.abrirDocumento(${item.id})" title="Abrir y previsualizar este documento">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        <span style="white-space:nowrap;">Abrir</span>
+                      </button>
+                    ` : ''}
+                    <button class="btn-subsanar" style="white-space:nowrap;flex-shrink:0;" onclick="App.subirSubsanacionItem(${item.id})" title="Cargar documento enviado por el municipio para subsanar o actualizar este ítem">
+                      <span style="white-space:nowrap;">📤 Subsanar</span>
+                    </button>
+                  </div>
+                </td>
                 <td>
                   <span style="font-size:11px;color:var(--text-muted)">${item.rule}</span>
                 </td>
                 <td style="font-size:11px;color:var(--text-muted)">
                   ${item.entity}
                 </td>
-                <td style="text-align: center;">
-                  <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}">
-                    ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vencido' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
-                  </span>
-                </td>
                 <td>
                   <span class="${item.conforme ? 'text-muted' : 'criterio-tag'}" style="font-size: 11px;">
                     ${item.observacion}
                   </span>
-                </td>
-                <td style="text-align: right;">
-                  <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end;">
-                    ${item.archivoDetectado ? `
-                      <button class="btn-primary" style="padding:5px 12px;font-size:11px;background:#0284C7;display:inline-flex;align-items:center;gap:4px;box-shadow:0 1px 3px rgba(2,132,199,0.3)" onclick="DocumentalEngine.abrirDocumento(${item.id})" title="Abrir y previsualizar este documento">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        Abrir
-                      </button>
-                    ` : `
-                      <span style="font-size:11px;color:var(--text-muted);font-style:italic">— Sin archivo —</span>
-                    `}
-                  </div>
                 </td>
               </tr>
             `).join("")}
@@ -430,13 +436,10 @@ const DocumentalEngine = {
         </table>
       </div>
 
-      <div style="padding: 14px 20px; background: var(--bg-subtle); border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted);">
+      <div style="padding: 14px 20px; background: var(--bg-subtle); border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted); flex-wrap:wrap; gap:10px;">
         <div>
-          Criterio vinculante: Todos los 27 ítems deben estar aportados y vigentes para aprobar la Fase 2 y habilitar la Ficha de Priorización.
+          Criterio vinculante: Todos los ${totalItems} ítems deben estar aportados y vigentes para aprobar la Fase 2 y viabilizar la Ficha de Priorización.
         </div>
-        <button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="document.getElementById('folderInput').click()">
-          📁 Cargar / Actualizar Carpeta
-        </button>
       </div>
     `;
 

@@ -15,7 +15,15 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 
   <!-- Master Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=20261026_v11">
+  <link rel="stylesheet" href="css/styles.css?v=20261104_fase1a_1c_contrast">
+
+  <!-- Suprimir encabezados y pies nativos del navegador al imprimir -->
+  <style>
+    @page {
+      size: letter;
+      margin: 0mm !important;
+    }
+  </style>
 </head>
 <body>
 
@@ -76,6 +84,15 @@
           </button>
         </div>
 
+        <div class="nav-item nav-item-1c" id="navItem1C" style="display:none;">
+          <button class="nav-link" data-tab="tab-1c" title="Fase 1C: Coherencia Presupuesto vs. Despiece">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+            <span class="nav-tooltip">Fase 1C: Coherencia Presupuestal</span>
+          </button>
+        </div>
+
         <div class="nav-item">
           <button class="nav-link" data-tab="tab-3" title="Fase 3: Salidas y Ficha de Priorización">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -102,7 +119,7 @@
       <!-- Top Header & Actions -->
       <header class="top-header">
         <div class="header-brand-block">
-          <img src="Inspo/Logo.png" alt="Gobernación de Antioquia" class="header-gov-logo" onerror="this.src='assets/Logo.png'">
+          <img src="assets/Logo.png" alt="Gobernación de Antioquia" class="header-gov-logo">
           <div class="header-titles">
             <div class="header-badge-row">
               <span class="gov-pill">Gobernación de Antioquia</span>
@@ -119,6 +136,16 @@
             Cargar Carpeta Municipio
           </button>
 
+          <!-- CONMUTADOR DE MODALIDAD DEL EXPEDIENTE (MATERIALES VS RECURSOS) -->
+          <div class="modalidad-switcher" id="headerModalidadSwitcher" title="Modalidad de cofinanciación del expediente activo">
+            <button type="button" class="btn-modalidad active" id="btnModMateriales" onclick="App.setProjectModalidad('MATERIALES')">
+              🧱 MATERIALES
+            </button>
+            <button type="button" class="btn-modalidad" id="btnModRecursos" onclick="App.setProjectModalidad('RECURSOS')">
+              💰 RECURSOS
+            </button>
+          </div>
+
           <div class="project-select-box" title="Seleccionar expediente municipal en evaluación">
             <span class="project-select-label">Expediente:</span>
             <select id="projectSelect" class="project-dropdown" aria-label="Seleccionar Expediente Municipal" onchange="cargarProyecto(this.value)"><option value="">-- Sin expedientes cargados --</option></select>
@@ -129,14 +156,19 @@
             Nombrar Expediente
           </button>
 
+          <button id="btnHeaderSaveAudit" class="btn-secondary" onclick="App.saveAuditProgress()" title="Guardar avance y trazabilidad en la carpeta física del proyecto (sipro_auditoria.json)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            💾 Guardar Avance
+          </button>
+
           <button id="btnHeaderDeleteExpediente" class="btn-danger-subtle" onclick="App.deleteCurrentExpediente()" title="Quitar o eliminar el expediente activo de la sesión">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             Quitar Proyecto
           </button>
 
-          <button class="btn-primary" onclick="ReportsEngine.imprimirInformeTecnico()">
+          <button class="btn-primary" onclick="ReportsEngine.imprimirFichaObservacionesPDF()" title="Exportar o imprimir directamente la Ficha de Observaciones Oficial en PDF">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-            Imprimir Informe
+            Ficha PDF (Fase 3)
           </button>
         </div>
       </header>
@@ -152,6 +184,7 @@
           </div>
           <div>
             <div class="expediente-tag-row">
+              <span class="badge-modalidad" id="expBannerModalidad" onclick="App.toggleProjectModalidad()" title="Haga clic para alternar entre modalidad MATERIALES y RECURSOS">🧱 MATERIALES</span>
               <span class="badge-mpio" id="expBannerMpio">MUNICIPIO: PENDIENTE DE CARGA</span>
               <span class="badge-subreg" id="expBannerSubreg">SUBREGIÓN: ANTIOQUIA</span>
               <span class="badge-code" id="expBannerCode">EXP-PH</span>
@@ -167,6 +200,9 @@
         <div class="expediente-actions-right">
           <button class="btn-secondary btn-sm" id="btnBannerEditExpediente" title="Editar nombre, municipio o radicado de este expediente">
             ✏️ Editar Expediente
+          </button>
+          <button class="btn-success-subtle btn-sm" id="btnBannerSaveAdvance" onclick="App.saveAuditProgress()" title="Guardar avance en la carpeta física (sipro_auditoria.json)">
+            💾 Guardar Avance
           </button>
           <button class="btn-danger-subtle btn-sm" id="btnBannerDeleteExpediente" onclick="App.deleteCurrentExpediente()" title="Quitar este expediente de la sesión">
             🗑️ Quitar Proyecto
@@ -186,7 +222,7 @@
             </div>
             <div>
               <div class="pipeline-title">Flujo de Compuertas Secuenciales ("Gatekeepers")</div>
-              <div style="font-size:11px;color:var(--text-muted)">Control temprano de Acero (1A) y Buffer Vial (1B) antes de validar los 27 ítems documentales</div>
+              <div style="font-size:11px;color:var(--text-muted)">Control temprano de Acero (1A), Buffer Vial (1B) y Presupuesto (1C) antes de validar los ítems documentales</div>
             </div>
           </div>
           <div id="gatekeeperStatusPill" class="gatekeeper-status-pill status-approved">
@@ -210,6 +246,15 @@
             <div class="gate-step-info">
               <div class="gate-step-tag">Compuerta 1B</div>
               <div class="gate-step-title">Contraste Espacial y Alineación Vial</div>
+            </div>
+          </div>
+
+          <!-- Gate 1C (Recursos) -->
+          <div class="gate-step" id="stepGate1C" data-target-tab="tab-1c" style="display:none;">
+            <div class="gate-step-number" style="background:rgba(217,119,6,0.15);color:#D97706;border-color:#D97706;">1C</div>
+            <div class="gate-step-info">
+              <div class="gate-step-tag" style="color:#D97706;">Compuerta 1C (Recursos)</div>
+              <div class="gate-step-title">Coherencia Presupuestal</div>
             </div>
           </div>
 
@@ -280,15 +325,15 @@
         <div class="kpi-card">
           <div class="kpi-header">
             <span class="kpi-label">Hallazgos Críticos</span>
-            <div class="kpi-icon-pill icon-danger">
+            <div class="kpi-icon-pill icon-danger" id="kpiCriticasIcon">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             </div>
           </div>
           <div class="kpi-number-row">
             <span class="kpi-number" id="kpiCriticas" style="color:var(--status-danger)">0</span>
-            <span class="kpi-unit">detenciones</span>
+            <span class="kpi-unit" id="kpiCriticasUnit">detenciones</span>
           </div>
-          <div class="kpi-footer-note">
+          <div class="kpi-footer-note" id="kpiCriticasSub">
             Subsanación inmediata exigida
           </div>
         </div>
@@ -297,7 +342,7 @@
         <div class="kpi-card">
           <div class="kpi-header">
             <span class="kpi-label">Cuantía Acero (1A)</span>
-            <div class="kpi-icon-pill icon-success">
+            <div class="kpi-icon-pill icon-success" id="kpiCuantiaIcon">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
             </div>
           </div>
@@ -313,7 +358,7 @@
         <div class="kpi-card">
           <div class="kpi-header">
             <span class="kpi-label">Alineación Red Vial (1B)</span>
-            <div class="kpi-icon-pill icon-info">
+            <div class="kpi-icon-pill icon-info" id="kpiCobIcon">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
             </div>
           </div>
@@ -328,8 +373,8 @@
         <!-- Validación Documental (Fase 2) -->
         <div class="kpi-card">
           <div class="kpi-header">
-            <span class="kpi-label">Lista 27 Ítems (F2)</span>
-            <div class="kpi-icon-pill icon-success">
+            <span class="kpi-label" id="kpiDocLabel">Lista 27 Ítems (F2)</span>
+            <div class="kpi-icon-pill icon-success" id="kpiDocIcon">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
             </div>
           </div>
@@ -353,13 +398,17 @@
             <span>Fase 1B: Contraste Espacial y Alineación Vial</span>
             <span class="tab-badge">Google Satélite</span>
           </button>
-          <button class="tab-btn" data-tab="tab-2">
-            <span>Fase 2: Validación Documental (27 Ítems)</span>
-            <span class="tab-badge">Lista 1-27</span>
+          <button class="tab-btn" id="tabBtn1C" data-tab="tab-1c" style="display:none;">
+            <span>Fase 1C: Coherencia Presupuestal</span>
+            <span class="tab-badge" style="background:#D97706;color:#FFF;">Presupuesto</span>
+          </button>
+          <button class="tab-btn" id="tabBtn2" data-tab="tab-2">
+            <span>Fase 2: Validación Documental</span>
+            <span class="tab-badge" id="tabBadgeF2">Lista 1-27</span>
           </button>
           <button class="tab-btn" data-tab="tab-3">
             <span>Fase 3: Salidas, Ficha y Dictamen</span>
-            <span class="tab-badge">Informe / Ficha</span>
+            <span class="tab-badge">Ficha / Dictamen</span>
           </button>
         </div>
 
@@ -368,8 +417,8 @@
         <!-- ========================================== -->
         <div id="tab-1a" class="tab-content active">
           
-          <!-- RESUMEN DESCRIPTIVO DE GEOMETRÍA Y ELEMENTOS (SEGÚN DOCUMENTO) -->
-          <div id="geometricSummaryContainer"></div>
+          <!-- RESUMEN DESCRIPTIVO DE GEOMETRÍA Y ELEMENTOS (REMOVIDO SEGÚN REQUERIMIENTO) -->
+          <div id="geometricSummaryContainer" style="display:none;"></div>
 
           <!-- BLOQUE 2: INFORMACIÓN DE DESPIECE CONSIGNADA EN EL DOCUMENTO (ANCHO COMPLETO) -->
           <div id="despieceExtraidoContainer"></div>
@@ -390,6 +439,9 @@
                   </span>
                   <span class="summary-pill" style="background:rgba(2,132,199,0.1);color:#0284C7;border-color:rgba(2,132,199,0.3)">
                     Cemento Requerido: <b class="font-mono" id="statCementTotal">0 sacos</b>
+                  </span>
+                  <span class="summary-pill" style="background:rgba(99,102,241,0.1);color:#6366F1;border-color:rgba(99,102,241,0.3)">
+                    Dosificación: <b class="font-mono" id="statDosificacionTotal">7.20 sacos / m³</b>
                   </span>
                 </div>
               </div>
@@ -576,6 +628,13 @@
           </div>
         </div>
 
+        <!-- ======================================================= -->
+        <!-- TAB 1C: COHERENCIA PRESUPUESTO VS. DESPIECE (RECURSOS)  -->
+        <!-- ======================================================= -->
+        <div id="tab-1c" class="tab-content">
+          <div id="presupuestoAuditContainer"></div>
+        </div>
+
         <!-- ========================================== -->
         <!-- TAB 2: VALIDACIÓN DOCUMENTAL (LISTA 1-27)  -->
         <!-- ========================================== -->
@@ -585,7 +644,7 @@
             <!-- Quick Filter Bar -->
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <button class="layer-chip doc-filter-btn active" data-filter="ALL">Todos los Ítems (01 al 27)</button>
+                <button class="layer-chip doc-filter-btn active" data-filter="ALL">Todos los Ítems</button>
                 <button class="layer-chip doc-filter-btn" data-filter="CONFORMES">Solo Conformes</button>
                 <button class="layer-chip doc-filter-btn" data-filter="SUBSANAR">Por Subsanar / Faltantes</button>
               </div>
@@ -610,17 +669,17 @@
           <div class="results-container">
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px">
               <div>
-                <h3 style="font-size:18px;font-weight:800;color:var(--color-primary)">Informe de Resultados de Revisión y Subsanación (Fase 3)</h3>
+                <h3 style="font-size:18px;font-weight:800;color:var(--color-primary)">Ficha de Observaciones Oficial y Salidas Técnicas (Fase 3)</h3>
                 <p style="font-size:12px;color:var(--text-muted)">Secretaría de Infraestructura Física - Dirección de Infraestructura Física y Apoyo Territorial</p>
               </div>
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <button class="btn-primary" style="background:#0284C7;border-color:#0284C7;box-shadow:0 2px 6px rgba(2,132,199,0.25);" onclick="ReportsEngine.descargarInformeWord()" title="Descargar informe completo en formato Word editable (.docx)">
+                <button class="btn-primary" style="background:var(--color-primary);border-color:var(--color-primary);box-shadow:0 2px 6px rgba(0,65,46,0.25);" onclick="ReportsEngine.imprimirFichaObservacionesPDF()" title="Exportar o imprimir directamente la Ficha de Observaciones Oficial en PDF">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                  📝 Descargar Informe Editable (.docx / Word)
+                  📄 Exportar / Imprimir Ficha de Observaciones (PDF)
                 </button>
-                <button class="btn-secondary" onclick="ReportsEngine.imprimirInformeTecnico()" title="Visualizar e imprimir formato oficial">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                  📄 Imprimir / Vista Previa
+                <button class="btn-secondary" onclick="App.saveAuditProgress()" title="Guardar avance en la carpeta física (sipro_auditoria.json)">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  💾 Guardar Avance en Carpeta
                 </button>
               </div>
             </div>
@@ -630,6 +689,11 @@
         </div>
 
       </section>
+
+      <!-- PIE DE PÁGINA GENERAL CON CRÉDITOS DE DESARROLLO -->
+      <footer class="app-general-footer">
+        Desarrollado por: Isabela Ramírez Restrepo &amp; Ronaldo Rubio Rodríguez — Secretaría de Infraestructura Física - Dirección de Infraestructura Física y Apoyo Territorial
+      </footer>
     </main>
   </div>
 
@@ -701,6 +765,25 @@
           </div>
         </div>
 
+        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label class="form-label" for="expModalSelectModalidad">Modalidad de Cofinanciación:</label>
+            <select id="expModalSelectModalidad" class="form-input">
+              <option value="MATERIALES">🧱 MATERIALES (Cemento y Acero - 27 Ítems)</option>
+              <option value="RECURSOS">💰 RECURSOS (Cruce Presupuestal - 28 Ítems + Fase 1C)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="expModalInputAlcalde">Alcalde(sa) Municipal:</label>
+            <input type="text" id="expModalInputAlcalde" class="form-input" placeholder="Nombre completo del Alcalde">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="expModalInputSecretario">Secretario(a) de Planeación / Obras Públicas:</label>
+          <input type="text" id="expModalInputSecretario" class="form-input" placeholder="Nombre del Secretario(a) de Planeación / Obras">
+        </div>
+
         <div class="form-group">
           <label class="form-label">Documento Ficha de Priorización Asociado:</label>
           <div id="expModalFichaStatus" style="padding:10px 14px;border-radius:8px;background:rgba(16,185,129,0.08);font-size:12px;border:1px solid rgba(16,185,129,0.2);display:flex;align-items:center;gap:8px;">
@@ -751,13 +834,14 @@
   <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 
   <!-- Application Modules -->
-  <script src="js/data.js?v=20261026_fase1b"></script>
-  <script src="js/structural.js?v=20261026_fase1b"></script>
-  <script src="js/spatial.js?v=20261026_fase1b"></script>
-  <script src="js/documental.js?v=20261026_fase1b"></script>
-  <script src="js/reports.js?v=20261026_fase1b"></script>
-  <script src="js/folderReader.js?v=20261026_fase1b"></script>
-  <script src="js/app.js?v=20261026_fase1b"></script>
+  <script src="js/data.js?v=20261104_dedup_fix"></script>
+  <script src="js/structural.js?v=20261104_dedup_fix"></script>
+  <script src="js/spatial.js?v=20261104_fase1a_1c_contrast"></script>
+  <script src="js/presupuesto.js?v=20261104_dedup_fix"></script>
+  <script src="js/documental.js?v=20261104_dedup_fix"></script>
+  <script src="js/reports.js?v=20261104_fase1a_1c_contrast"></script>
+  <script src="js/folderReader.js?v=20261104_dedup_fix"></script>
+  <script src="js/app.js?v=20261104_fase1a_1c_contrast"></script>
 
 </body>
 </html>
