@@ -85,6 +85,59 @@ const ReportsEngine = {
     const audit1B = (rec && rec.fase1B) || (auditGlobal && auditGlobal.audit1B);
     const audit2 = (rec && rec.fase2) || (auditGlobal && auditGlobal.audit2);
 
+    // 0. DOCUMENTO BASE: FICHA DE PRIORIZACIÓN MUNICIPAL
+    const fichaP = (rec && rec.fichaPriorizacion) || (project && project.fichaPriorizacion) || (rec && rec.datos && rec.datos.fichaPriorizacion);
+    const hasFicha = fichaP ? (fichaP.existe === true && fichaP.detected === true) : false;
+    const fidFicha = "FICHA_PRIORIZACION";
+
+    if (!hasFicha) {
+      const userEditFicha = this.getUserEdit(fase3State, fidFicha) || this.getUserEdit(fase3State, "ficha_priorizacion");
+      const statusFicha = userEditFicha?.estado || "Faltante";
+      const defaultMotivoFicha = "Ficha de Priorización: Documento faltante en el expediente";
+      const motivoFicha = userEditFicha?.motivo !== undefined ? userEditFicha.motivo : defaultMotivoFicha;
+
+      const objFicha = {
+        id: fidFicha,
+        itemKey: fidFicha,
+        fase: "Documento Base",
+        titulo: "Ficha de Priorización Municipal y Cierre",
+        norma: "Documento Maestro de Priorización",
+        archivo: null,
+        estado: statusFicha,
+        motivo: motivoFicha,
+        isManual: false
+      };
+
+      if (statusFicha === "Conforme") {
+        compliantItems.push(objFicha);
+      } else {
+        findings.push(objFicha);
+      }
+    } else {
+      const userEditFicha = this.getUserEdit(fase3State, fidFicha) || this.getUserEdit(fase3State, "ficha_priorizacion");
+      const statusFicha = userEditFicha?.estado || "Conforme";
+      const defaultMotivoFicha = `✓ Ficha de Priorización aportada (${fichaP.fileName || "documento detectado"}).`;
+      const motivoFicha = userEditFicha?.motivo !== undefined ? userEditFicha.motivo : defaultMotivoFicha;
+
+      const objFicha = {
+        id: fidFicha,
+        itemKey: fidFicha,
+        fase: "Documento Base",
+        titulo: "Ficha de Priorización Municipal y Cierre",
+        norma: "Documento Maestro de Priorización",
+        archivo: fichaP.fileName,
+        estado: statusFicha,
+        motivo: motivoFicha,
+        isManual: false
+      };
+
+      if (statusFicha === "Conforme") {
+        compliantItems.push(objFicha);
+      } else {
+        findings.push(objFicha);
+      }
+    }
+
     // 1. COMPUERTA 1A: CONTROL ESTRUCTURAL DE ACERO
     if (audit1A) {
       const fid = "FASE_1A_ACERO";
@@ -424,7 +477,15 @@ const ReportsEngine = {
           defaultMotivo = "Documento no aportado en la carpeta del expediente municipal.";
         }
       } else if (it.vencido) {
-        defaultMotivo = "Documento detectado pero con fecha vencida o fuera de vigencia legal.";
+        const shortTitle = (typeof DocumentalEngine !== "undefined" && DocumentalEngine.SHORT_TITLES_VIGENCIA && DocumentalEngine.SHORT_TITLES_VIGENCIA[Number(it.id)])
+          || it.shortTitle
+          || (it.title ? it.title.split("(")[0].trim() : `Ítem ${num}`);
+        const fechaStr = it.fechaDocStr || (it.meta && it.meta.fechaDocStr) || (it.fechaDoc ? `${String(it.fechaDoc.getDate()).padStart(2, '0')}/${String(it.fechaDoc.getMonth() + 1).padStart(2, '0')}/${it.fechaDoc.getFullYear()}` : "Fecha no detectada");
+        const ahora = new Date();
+        const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+        const mesActualNombre = meses[ahora.getMonth()];
+        const anioActual = ahora.getFullYear();
+        defaultMotivo = `• Ítem ${num} (${shortTitle}): ⚠️ VIGENCIA VENCIDA — Expedido el ${fechaStr}. Debe corresponder al mes de revisión en curso (${mesActualNombre} de ${anioActual}).`;
       } else {
         defaultMotivo = it.observacion || "Documento no aceptado conforme a las especificaciones.";
       }
@@ -514,8 +575,8 @@ const ReportsEngine = {
     if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
       App.actualizarKPIsEjecutivos(projectId);
     }
-    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
-      App.actualizarKPIsEjecutivos(projectId);
+    if (window.App && typeof App.actualizarBarraCompuertas === "function") {
+      App.actualizarBarraCompuertas(projectId);
     }
   },
 
@@ -612,8 +673,8 @@ const ReportsEngine = {
     if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
       App.actualizarKPIsEjecutivos(projectId);
     }
-    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
-      App.actualizarKPIsEjecutivos(projectId);
+    if (window.App && typeof App.actualizarBarraCompuertas === "function") {
+      App.actualizarBarraCompuertas(projectId);
     }
 
     setTimeout(() => {
@@ -633,8 +694,8 @@ const ReportsEngine = {
     if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
       App.actualizarKPIsEjecutivos(projectId);
     }
-    if (window.App && typeof App.actualizarKPIsEjecutivos === "function") {
-      App.actualizarKPIsEjecutivos(projectId);
+    if (window.App && typeof App.actualizarBarraCompuertas === "function") {
+      App.actualizarBarraCompuertas(projectId);
     }
   },
 
@@ -759,8 +820,57 @@ const ReportsEngine = {
     }
 
     const isRecursos = project.modalidad === "RECURSOS" || (recF2 && recF2.modalidad === "RECURSOS");
-    const alcaldeNombre = (project.alcalde && project.alcalde.nombre) || (recF2 && recF2.datos && recF2.datos.alcalde && recF2.datos.alcalde.nombre) || `Alcalde Municipal de ${project.municipio || 'Municipio'}`;
-    const secretarioNombre = (project.secretarioPlaneacion && project.secretarioPlaneacion.nombre) || (recF2 && recF2.datos && recF2.datos.secretarioPlaneacion && recF2.datos.secretarioPlaneacion.nombre) || "Secretaría de Planeación y Obras Públicas";
+    const getAlcaldeNombre = (p) => {
+      if (!p) return "";
+      if (typeof p.alcalde === "string") return p.alcalde;
+      if (p.alcalde && p.alcalde.nombre) return p.alcalde.nombre;
+      return "";
+    };
+    const getSecretarioNombre = (p) => {
+      if (!p) return "";
+      if (typeof p.secretarioPlaneacion === "string") return p.secretarioPlaneacion;
+      if (p.secretarioPlaneacion && p.secretarioPlaneacion.nombre) return p.secretarioPlaneacion.nombre;
+      return "";
+    };
+
+    const getAlcaldeOrigen = (p) => {
+      if (!p) return "";
+      if (p.alcalde && p.alcalde.origen) return p.alcalde.origen;
+      return "";
+    };
+    const getSecretarioOrigen = (p) => {
+      if (!p) return "";
+      if (p.secretarioPlaneacion && p.secretarioPlaneacion.origen) return p.secretarioPlaneacion.origen;
+      return "";
+    };
+
+    const alcaldeNombre = getAlcaldeNombre(project) ||
+      getAlcaldeNombre(recF2 && recF2.datos) ||
+      getAlcaldeNombre(recF2) ||
+      (fase3State && fase3State.datosIdentificacion && fase3State.datosIdentificacion.alcalde && fase3State.datosIdentificacion.alcalde.nombre) ||
+      `Alcalde Municipal de ${project.municipio || 'Municipio'}`;
+
+    const alcaldeOrigen = getAlcaldeOrigen(project) ||
+      getAlcaldeOrigen(recF2 && recF2.datos) ||
+      getAlcaldeOrigen(recF2) ||
+      (fase3State && fase3State.datosIdentificacion && fase3State.datosIdentificacion.alcalde && fase3State.datosIdentificacion.alcalde.origen) ||
+      "";
+
+    const secretarioNombre = getSecretarioNombre(project) ||
+      getSecretarioNombre(recF2 && recF2.datos) ||
+      getSecretarioNombre(recF2) ||
+      (fase3State && fase3State.datosIdentificacion && fase3State.datosIdentificacion.secretarioPlaneacion && fase3State.datosIdentificacion.secretarioPlaneacion.nombre) ||
+      "Secretaría de Planeación y Obras Públicas";
+
+    const secretarioOrigen = getSecretarioOrigen(project) ||
+      getSecretarioOrigen(recF2 && recF2.datos) ||
+      getSecretarioOrigen(recF2) ||
+      (fase3State && fase3State.datosIdentificacion && fase3State.datosIdentificacion.secretarioPlaneacion && fase3State.datosIdentificacion.secretarioPlaneacion.origen) ||
+      "";
+
+    const fichaData = (project && project.fichaPriorizacion) || (recF2 && recF2.fichaPriorizacion) || (recF2 && recF2.datos && recF2.datos.fichaPriorizacion) || {};
+    const fichaExiste = Boolean(fichaData && fichaData.existe);
+    const fichaFileName = (fichaData && fichaData.fileName) || "Sin archivo";
 
     const html = `
       <div class="formal-sheet">
@@ -799,9 +909,44 @@ const ReportsEngine = {
 
         <!-- BLOQUE 1 — TARJETA LIMPIA DE IDENTIFICACIÓN TERRITORIAL DEL PROYECTO -->
         <div class="sheet-territorial-card" style="background:var(--color-bg-alt);padding:18px 22px;border-radius:var(--radius-md);border:1px solid var(--border-subtle);margin-bottom:24px;">
-          <h5 style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;margin:0 0 12px 0;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">
-            <span>📍</span> Identificación Territorial del Proyecto
-          </h5>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+            <h5 style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;margin:0;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">
+              <span>📍</span> Identificación Territorial del Proyecto
+            </h5>
+            <button type="button" class="btn-primary" style="font-size:11.5px;padding:5px 14px;background:#0284C7;border-color:#0284C7;color:#fff;display:inline-flex;align-items:center;gap:6px;border-radius:6px;cursor:pointer;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.12);" onclick="DocumentalEngine.abrirFichaPriorizacion('${projectId}')" title="Abrir y verificar la Ficha de Priorización en el visor modal de Fase 2">
+              <span>👁️ Ver Ficha de Priorización</span>
+            </button>
+          </div>
+
+          <!-- BARRA DE ESTADO DE LA FICHA DE PRIORIZACIÓN -->
+          <div class="ficha-territorial-status-bar no-print" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:8px 14px;background:var(--color-bg);border:1px solid var(--border-subtle);border-radius:6px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-weight:700;font-size:11.5px;color:var(--text-main);">Documento Base:</span>
+              ${fichaExiste ? `
+                <span class="status-pill cumple" style="font-size:11px;padding:3px 9px;">
+                  ✓ Ficha detectada: <strong>${fichaFileName}</strong>
+                </span>
+              ` : `
+                <span class="status-pill no-cumple" style="font-size:11px;padding:3px 9px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;">
+                  ✗ Ficha de Priorización: Documento faltante en el expediente
+                </span>
+              `}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.abrirFichaPriorizacion('${projectId}')" title="Ver documento en el visor modal">
+                <span>👁️ Ver Ficha</span>
+              </button>
+              ${fichaExiste ? `
+                <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;" onclick="App.subirFichaPriorizacion('${projectId}')" title="Subir o reemplazar la Ficha de Priorización">
+                  <span>📤 Cambiar / Subir Ficha</span>
+                </button>
+              ` : `
+                <button type="button" class="btn-primary" style="font-size:11px;padding:4px 12px;background:#dc2626;border-color:#b91c1c;display:inline-flex;align-items:center;gap:4px;" onclick="App.subirFichaPriorizacion('${projectId}')" title="Cargar archivo de Ficha de Priorización">
+                  <span>📤 Subir Ficha de Priorización</span>
+                </button>
+              `}
+            </div>
+          </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px 24px;font-size:12.5px;">
             <div>
               <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Municipio y Subregión:</span>
@@ -821,12 +966,26 @@ const ReportsEngine = {
               <input type="text" class="print-input-text form-input" value="Vía: ${project.codigoVial || 'Terciaria'} — Longitud: ${project.longitudM || 0} metros lineales" onchange="ReportsEngine.updateProjectField('codigoVialLongitud', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;margin-top:2px;">
             </div>
             <div>
-              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Alcalde(sa) Municipal:</span>
-              <input type="text" class="print-input-text form-input" value="${alcaldeNombre}" placeholder="Nombre del Alcalde(sa) Municipal" onchange="ReportsEngine.updateProjectField('alcalde', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;margin-top:2px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:2px;">
+                <span style="color:var(--text-muted);font-size:11px;font-weight:700;">Alcalde(sa) Municipal:</span>
+                ${alcaldeOrigen ? `
+                  <span class="source-tooltip-badge" title="${this.escapeHtml(alcaldeOrigen)}" style="font-size:10px;font-weight:600;color:var(--color-primary);background:rgba(2,132,199,0.08);padding:1px 6px;border-radius:4px;border:1px solid rgba(2,132,199,0.2);cursor:help;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ℹ️ ${this.escapeHtml(alcaldeOrigen)}
+                  </span>
+                ` : ''}
+              </div>
+              <input type="text" class="print-input-text form-input" value="${alcaldeNombre}" title="${this.escapeHtml(alcaldeOrigen || 'Alcalde(sa) Municipal')}" placeholder="Nombre del Alcalde(sa) Municipal" onchange="ReportsEngine.updateProjectField('alcalde', this.value)" onblur="ReportsEngine.updateProjectField('alcalde', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;">
             </div>
             <div style="grid-column: 1 / -1;">
-              <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Secretario(a) de Planeación / Obras Públicas Municipal:</span>
-              <input type="text" class="print-input-text form-input" value="${secretarioNombre}" placeholder="Nombre del Secretario(a) de Planeación / Obras Públicas" onchange="ReportsEngine.updateProjectField('secretario', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;margin-top:2px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:2px;">
+                <span style="color:var(--text-muted);font-size:11px;font-weight:700;">Secretario(a) de Planeación / Obras Públicas Municipal:</span>
+                ${secretarioOrigen ? `
+                  <span class="source-tooltip-badge" title="${this.escapeHtml(secretarioOrigen)}" style="font-size:10px;font-weight:600;color:var(--color-primary);background:rgba(2,132,199,0.08);padding:1px 6px;border-radius:4px;border:1px solid rgba(2,132,199,0.2);cursor:help;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ℹ️ ${this.escapeHtml(secretarioOrigen)}
+                  </span>
+                ` : ''}
+              </div>
+              <input type="text" class="print-input-text form-input" value="${secretarioNombre}" title="${this.escapeHtml(secretarioOrigen || 'Secretario(a) de Planeación / Obras Públicas')}" placeholder="Nombre del Secretario(a) de Planeación / Obras Públicas" onchange="ReportsEngine.updateProjectField('secretario', this.value)" onblur="ReportsEngine.updateProjectField('secretario', this.value)" style="font-weight:700;padding:4px 8px;font-size:12px;">
             </div>
           </div>
         </div>
@@ -1005,8 +1164,38 @@ const ReportsEngine = {
     const longitudM = (project.longitudM || 0).toLocaleString("es-CO");
     const codigoVialLongitud = `Vía: ${codigoVial} — Longitud: ${longitudM} metros lineales`;
 
-    const alcaldeNombre = (project.alcalde && project.alcalde.nombre) || `Alcalde Municipal de ${municipio}`;
-    const secretarioNombre = (project.secretarioPlaneacion && project.secretarioPlaneacion.nombre) || "Secretario(a) de Planeación / Obras Públicas";
+    const getAlcaldeNombre = (p) => {
+      if (!p) return "";
+      if (typeof p.alcalde === "string") return p.alcalde;
+      if (p.alcalde && p.alcalde.nombre) return p.alcalde.nombre;
+      return "";
+    };
+    const getSecretarioNombre = (p) => {
+      if (!p) return "";
+      if (typeof p.secretarioPlaneacion === "string") return p.secretarioPlaneacion;
+      if (p.secretarioPlaneacion && p.secretarioPlaneacion.nombre) return p.secretarioPlaneacion.nombre;
+      return "";
+    };
+
+    let alcaldeNombre = getAlcaldeNombre(project) ||
+      getAlcaldeNombre(recF2 && recF2.datos) ||
+      getAlcaldeNombre(recF2) ||
+      (fase3State && fase3State.datosIdentificacion && fase3State.datosIdentificacion.alcalde && fase3State.datosIdentificacion.alcalde.nombre) ||
+      `Alcalde Municipal de ${municipio}`;
+
+    let secretarioNombre = getSecretarioNombre(project) ||
+      getSecretarioNombre(recF2 && recF2.datos) ||
+      getSecretarioNombre(recF2) ||
+      (fase3State && fase3State.datosIdentificacion && fase3State.datosIdentificacion.secretarioPlaneacion && fase3State.datosIdentificacion.secretarioPlaneacion.nombre) ||
+      "Secretario(a) de Planeación / Obras Públicas";
+
+    // Si el usuario editó en vivo los campos de texto en pantalla, tomar el valor actual del DOM
+    if (typeof document !== "undefined") {
+      const elAlc = document.querySelector('input[onchange*="updateProjectField(\'alcalde\'"]');
+      if (elAlc && elAlc.value && elAlc.value.trim()) alcaldeNombre = elAlc.value.trim();
+      const elSec = document.querySelector('input[onchange*="updateProjectField(\'secretario\'"]');
+      if (elSec && elSec.value && elSec.value.trim()) secretarioNombre = elSec.value.trim();
+    }
 
     // Sincronizar observaciones con valores editados en vivo si están presentes en la pantalla
     const processedFindings = findings.map(f => {
@@ -1042,7 +1231,7 @@ const ReportsEngine = {
           </div>
         </td>
         <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
-          <span class="${f.estado === 'Conforme' ? 'badge-conforme' : 'badge-subsanar'}">${this.escapeHtml(f.estado)}</span>
+          <span class="${f.estado === 'Conforme' ? 'badge-conforme' : (f.estado === 'Vencido' ? 'badge-vencido' : 'badge-subsanar')}">${this.escapeHtml(f.estado)}</span>
         </td>
         <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
           <div class="print-observation-text">${this.escapeHtml(f.motivo || 'Requisito pendiente de subsanación')}</div>
@@ -1179,6 +1368,17 @@ const ReportsEngine = {
       background: #ffe4e6;
       color: #be123c;
       border: 1px solid #fecdd3;
+      white-space: nowrap;
+    }
+    .badge-vencido {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 9.5px;
+      font-weight: 800;
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #f59e0b;
       white-space: nowrap;
     }
     .badge-conforme {
@@ -1884,7 +2084,7 @@ const ReportsEngine = {
         <tr>
           <td><b>${f.titulo}</b></td>
           <td style="color:#64748b;">${f.entidad || f.fase}</td>
-          <td><b style="color:#be123c;">${f.estado || 'Por Subsanar'}</b></td>
+          <td><b style="color:${f.estado === 'Vencido' ? '#b45309' : '#be123c'};">${this.escapeHtml(f.estado || 'Por Subsanar')}</b></td>
           <td>${f.motivo}</td>
         </tr>
       `).join('')}
@@ -2059,11 +2259,33 @@ const ReportsEngine = {
     if (field === "alcalde") {
       exp.datos.alcalde = exp.datos.alcalde || {};
       exp.datos.alcalde.nombre = val;
+      exp.datos.alcalde.origen = "Editado manualmente";
+      exp.alcalde = exp.datos.alcalde;
+      if (window.App && window.App.currentProject) {
+        window.App.currentProject.alcalde = exp.datos.alcalde;
+      }
+      if (exp.fase3) {
+        exp.fase3.datosIdentificacion = exp.fase3.datosIdentificacion || {};
+        exp.fase3.datosIdentificacion.alcalde = exp.datos.alcalde;
+      }
     } else if (field === "secretario") {
       exp.datos.secretarioPlaneacion = exp.datos.secretarioPlaneacion || {};
       exp.datos.secretarioPlaneacion.nombre = val;
+      exp.datos.secretarioPlaneacion.origen = "Editado manualmente";
+      exp.secretarioPlaneacion = exp.datos.secretarioPlaneacion;
+      if (window.App && window.App.currentProject) {
+        window.App.currentProject.secretarioPlaneacion = exp.datos.secretarioPlaneacion;
+      }
+      if (exp.fase3) {
+        exp.fase3.datosIdentificacion = exp.fase3.datosIdentificacion || {};
+        exp.fase3.datosIdentificacion.secretarioPlaneacion = exp.datos.secretarioPlaneacion;
+      }
     } else if (field === "nombreExpediente") {
       exp.datos.nombreExpediente = val;
+      exp.nombreExpediente = val;
+      if (window.App && window.App.currentProject) {
+        window.App.currentProject.nombreExpediente = val;
+      }
     }
 
     // Guardado silencioso de respaldo

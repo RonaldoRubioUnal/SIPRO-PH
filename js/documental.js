@@ -13,6 +13,228 @@ const DocumentalEngine = {
   currentFilter: "ALL",
   activeObjectUrls: [],
 
+  NOMBRES_MESES: [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ],
+
+  MESES_MAP: {
+    "enero": 0, "ene": 0,
+    "febrero": 1, "feb": 1,
+    "marzo": 2, "mar": 2,
+    "abril": 3, "abr": 3,
+    "mayo": 4, "may": 4,
+    "junio": 5, "jun": 5,
+    "julio": 6, "jul": 6,
+    "agosto": 7, "ago": 7,
+    "septiembre": 8, "setiembre": 8, "sep": 8, "set": 8,
+    "octubre": 9, "oct": 9,
+    "noviembre": 10, "nov": 10,
+    "diciembre": 11, "dic": 11
+  },
+
+  ITEMS_VIGENCIA_MENSUAL: [9, 10, 11, 12, 13, 14, 15, 16, 21, 22],
+
+  SHORT_TITLES_VIGENCIA: {
+    9: "Acuerdo del Concejo",
+    10: "Copia del RUT",
+    11: "Certificado Contraloría (Responsables Fiscales)",
+    12: "Certificado Medidas Correctivas (RNMC)",
+    13: "Certificado Antecedentes Judiciales",
+    14: "Certificado Antecedentes Disciplinarios",
+    15: "Certificado Seguridad Social y Parafiscales",
+    16: "Certificado REDAM",
+    21: "Constancia Consulta PACO",
+    22: "Certificado Inhabilidades Delitos Sexuales"
+  },
+
+  /**
+   * Extrae la fecha de expedición/generación de un documento a partir de su texto,
+   * nombre de archivo o metadatos de archivo (File.lastModified).
+   * Retorna { fecha: Date, fechaStr: string } o null.
+   */
+  extraerFechaDocumento(file, textSnippet = "") {
+    let fullText = (textSnippet || "") + " " + (file && file.name ? file.name : "");
+    if (!fullText.trim() && file && file.lastModified) {
+      const d = new Date(file.lastModified);
+      return {
+        fecha: d,
+        fechaStr: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`,
+        fuente: "lastModified"
+      };
+    }
+
+    const cleanText = fullText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+    // 1. Búsqueda contextual cerca de términos de expedición/generación/consulta
+    const contextRegex = /(?:fecha(?:\s+y\s+hora)?(?:\s+de)?(?:\s+expedicion|\s+generacion|\s+emision|\s+consulta)?|expedid[oa]|generad[oa]|emitid[oa]|consultad[oa]|suscrit[oa]|dado\s+en[a-z\s]{0,25}a\s+los|valido\s+hasta|mes\s+de)[\s:\._-]*([0-9]{1,2}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{4}|[0-9]{4}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{1,2}|(?:(?:a\s+los\s+)?([0-9]{1,2})\s+dias\s+del\s+mes\s+de|([0-9]{1,2})\s+de|mes\s+de)\s+([a-z]{3,12})\s+(?:de|del)?\s+([0-9]{4}))/i;
+    const mCtx = cleanText.match(contextRegex);
+
+    if (mCtx) {
+      const parsedCtx = this.parsearFechaString(mCtx[1] || mCtx[0]);
+      if (parsedCtx) return parsedCtx;
+    }
+
+    // 2. Fechas textuales en español: "15 de noviembre de 2026", "a los 15 dias del mes de noviembre del 2026"
+    const textDateRegex = /(?:(?:a\s+los\s+)?([0-9]{1,2})\s+dias\s+del\s+mes\s+de|([0-9]{1,2})\s+de|mes\s+de)\s+([a-z]{3,12})\s+(?:de|del)?\s+([0-9]{4})/i;
+    const mText = cleanText.match(textDateRegex);
+    if (mText) {
+      const day = parseInt(mText[1] || mText[2] || "1", 10);
+      const monthName = mText[3].toLowerCase();
+      const year = parseInt(mText[4], 10);
+      if (this.MESES_MAP[monthName] !== undefined && year >= 2020 && year <= 2035) {
+        const d = new Date(year, this.MESES_MAP[monthName], day, 12, 0, 0);
+        return {
+          fecha: d,
+          fechaStr: `${String(day).padStart(2, '0')}/${String(this.MESES_MAP[monthName] + 1).padStart(2, '0')}/${year}`,
+          fuente: "texto_espanol"
+        };
+      }
+    }
+
+    // 2.5 Fechas estilo DD-MES-AAAA o DD/MES/AAAA (e.g., 28-oct-2026, 28-octubre-2026, 28/nov/2026)
+    const alphaDateRegex = /\b([0-2]?[0-9]|3[01])[\s\/\-\.]([a-z]{3,12})[\s\/\-\.](202[0-9]|203[0-9])\b/i;
+    const mAlpha = cleanText.match(alphaDateRegex);
+    if (mAlpha) {
+      const day = parseInt(mAlpha[1], 10);
+      const monthName = mAlpha[2].toLowerCase();
+      const year = parseInt(mAlpha[3], 10);
+      if (this.MESES_MAP[monthName] !== undefined && year >= 2020 && year <= 2035) {
+        const d = new Date(year, this.MESES_MAP[monthName], day, 12, 0, 0);
+        return {
+          fecha: d,
+          fechaStr: `${String(day).padStart(2, '0')}/${String(this.MESES_MAP[monthName] + 1).padStart(2, '0')}/${year}`,
+          fuente: "texto_dd_mes_aaaa"
+        };
+      }
+    }
+
+    // 3. Fechas numéricas estándar: DD/MM/AAAA o DD-MM-AAAA
+    const stdDateRegex = /\b([0-2]?[0-9]|3[01])[\/\-\.](0?[1-9]|1[0-2])[\/\-\.](202[0-9]|203[0-9])\b/;
+    const mStd = fullText.match(stdDateRegex);
+    if (mStd) {
+      const day = parseInt(mStd[1], 10);
+      const month = parseInt(mStd[2], 10) - 1;
+      const year = parseInt(mStd[3], 10);
+      const d = new Date(year, month, day, 12, 0, 0);
+      return {
+        fecha: d,
+        fechaStr: `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`,
+        fuente: "numerica_dd_mm_aaaa"
+      };
+    }
+
+    // 4. Fechas ISO: AAAA-MM-DD o AAAA/MM/DD
+    const isoDateRegex = /\b(202[0-9]|203[0-9])[\/\-\.](0?[1-9]|1[0-2])[\/\-\.]([0-2]?[0-9]|3[01])\b/;
+    const mIso = fullText.match(isoDateRegex);
+    if (mIso) {
+      const year = parseInt(mIso[1], 10);
+      const month = parseInt(mIso[2], 10) - 1;
+      const day = parseInt(mIso[3], 10);
+      const d = new Date(year, month, day, 12, 0, 0);
+      return {
+        fecha: d,
+        fechaStr: `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`,
+        fuente: "numerica_iso"
+      };
+    }
+
+    // 5. Fechas compactas en nombre de archivo (e.g., 20261115)
+    if (file && file.name) {
+      const mComp = file.name.match(/(202[0-9]|203[0-9])(0[1-9]|1[0-2])([0-2][0-9]|3[01])/);
+      if (mComp) {
+        const year = parseInt(mComp[1], 10);
+        const month = parseInt(mComp[2], 10) - 1;
+        const day = parseInt(mComp[3], 10);
+        const d = new Date(year, month, day, 12, 0, 0);
+        return {
+          fecha: d,
+          fechaStr: `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`,
+          fuente: "nombre_compacto"
+        };
+      }
+    }
+
+    // 6. Fallback final a fecha de modificación del archivo
+    if (file && file.lastModified && file.lastModified > 0) {
+      const d = new Date(file.lastModified);
+      return {
+        fecha: d,
+        fechaStr: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`,
+        fuente: "lastModified"
+      };
+    }
+
+    return null;
+  },
+
+  parsearFechaString(str) {
+    if (!str) return null;
+    const clean = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+    // Textual
+    const textM = clean.match(/(?:(?:a\s+los\s+)?([0-9]{1,2})\s+dias\s+del\s+mes\s+de|([0-9]{1,2})\s+de|mes\s+de)\s+([a-z]{3,12})\s+(?:de|del)?\s+([0-9]{4})/i);
+    if (textM) {
+      const day = parseInt(textM[1] || textM[2] || "1", 10);
+      const mName = textM[3].toLowerCase();
+      const year = parseInt(textM[4], 10);
+      if (this.MESES_MAP[mName] !== undefined) {
+        const d = new Date(year, this.MESES_MAP[mName], day, 12, 0, 0);
+        return {
+          fecha: d,
+          fechaStr: `${String(day).padStart(2, '0')}/${String(this.MESES_MAP[mName] + 1).padStart(2, '0')}/${year}`,
+          fuente: "contextual_texto"
+        };
+      }
+    }
+
+    // DD-MES-AAAA o DD/MES/AAAA (e.g. 28-oct-2026, 28-octubre-2026)
+    const alphaM = clean.match(/([0-2]?[0-9]|3[01])[\s\/\-\.]([a-z]{3,12})[\s\/\-\.](202[0-9]|203[0-9])/i);
+    if (alphaM) {
+      const day = parseInt(alphaM[1], 10);
+      const mName = alphaM[2].toLowerCase();
+      const year = parseInt(alphaM[3], 10);
+      if (this.MESES_MAP[mName] !== undefined) {
+        const d = new Date(year, this.MESES_MAP[mName], day, 12, 0, 0);
+        return {
+          fecha: d,
+          fechaStr: `${String(day).padStart(2, '0')}/${String(this.MESES_MAP[mName] + 1).padStart(2, '0')}/${year}`,
+          fuente: "contextual_alpha"
+        };
+      }
+    }
+
+    // DD/MM/AAAA
+    const stdM = clean.match(/([0-2]?[0-9]|3[01])[\/\-\.](0?[1-9]|1[0-2])[\/\-\.](202[0-9]|203[0-9])/);
+    if (stdM) {
+      const day = parseInt(stdM[1], 10);
+      const month = parseInt(stdM[2], 10) - 1;
+      const year = parseInt(stdM[3], 10);
+      const d = new Date(year, month, day, 12, 0, 0);
+      return {
+        fecha: d,
+        fechaStr: `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`,
+        fuente: "contextual_std"
+      };
+    }
+
+    // ISO AAAA-MM-DD
+    const isoM = clean.match(/(202[0-9]|203[0-9])[\/\-\.](0?[1-9]|1[0-2])[\/\-\.]([0-2]?[0-9]|3[01])/);
+    if (isoM) {
+      const year = parseInt(isoM[1], 10);
+      const month = parseInt(isoM[2], 10) - 1;
+      const day = parseInt(isoM[3], 10);
+      const d = new Date(year, month, day, 12, 0, 0);
+      return {
+        fecha: d,
+        fechaStr: `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`,
+        fuente: "contextual_iso"
+      };
+    }
+
+    return null;
+  },
+
   /**
    * Ejecuta la auditoría documental completa del proyecto basada en los archivos reales
    */
@@ -54,6 +276,9 @@ const DocumentalEngine = {
           conforme: false,
           faltante: true,
           vencido: false,
+          esVigente: false,
+          fechaDoc: null,
+          fechaDocStr: null,
           observacion: observation,
           diasRestantes: null,
           archivoDetectado: null,
@@ -61,23 +286,66 @@ const DocumentalEngine = {
         };
       }
 
-      // 2. Si el archivo SÍ existe, verificar regla de vigencia (< 30 días para certificados y antecedentes)
-      if (item.daysMax === 30) {
-        const itemKey = `item${item.id}`;
-        let daysElapsed = diasVigencias[itemKey];
+      // 2. Si el archivo SÍ existe, verificar regla de vigencia estricta por Mes Calendario en Curso
+      // Documentos obligados a vigencia mensual: 9, 10, 11, 12, 13, 14, 15, 16, 21, 22
+      let fechaDoc = null;
+      let fechaDocStr = null;
+      let esVigente = true;
 
-        if (daysElapsed === undefined && meta && meta.lastModified) {
-          const diffMs = Date.now() - meta.lastModified;
-          daysElapsed = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      if (this.ITEMS_VIGENCIA_MENSUAL.includes(item.id)) {
+        if (meta && meta.fechaDoc instanceof Date) {
+          fechaDoc = meta.fechaDoc;
+          fechaDocStr = meta.fechaDocStr || `${String(fechaDoc.getDate()).padStart(2, '0')}/${String(fechaDoc.getMonth() + 1).padStart(2, '0')}/${fechaDoc.getFullYear()}`;
+        } else if (meta && meta.fechaDoc) {
+          const dParsed = new Date(meta.fechaDoc);
+          if (!isNaN(dParsed.getTime())) {
+            fechaDoc = dParsed;
+            fechaDocStr = meta.fechaDocStr || `${String(dParsed.getDate()).padStart(2, '0')}/${String(dParsed.getMonth() + 1).padStart(2, '0')}/${dParsed.getFullYear()}`;
+          }
+        } else if (meta && meta.fechaDocStr) {
+          const parsedMeta = this.parsearFechaString(meta.fechaDocStr);
+          if (parsedMeta) {
+            fechaDoc = parsedMeta.fecha;
+            fechaDocStr = parsedMeta.fechaStr;
+          }
         }
 
-        if (daysElapsed === undefined) daysElapsed = 10;
-        daysRemaining = 30 - daysElapsed;
-        
-        if (daysElapsed > 30) {
+        if (!fechaDoc) {
+          const realFile = this.getFileForItem(item.id);
+          const snippet = (meta && meta.textSnippet) || (project.itemTextsMap && project.itemTextsMap[item.id]) || "";
+          const extRes = this.extraerFechaDocumento(realFile, snippet);
+          if (extRes) {
+            fechaDoc = extRes.fecha;
+            fechaDocStr = extRes.fechaStr;
+            if (meta) {
+              meta.fechaDoc = fechaDoc;
+              meta.fechaDocStr = fechaDocStr;
+            }
+          }
+        }
+
+        // Lógica estricta de validación por mes y año calendario en curso (eliminando cualquier cálculo por 30 días corridos)
+        const ahora = new Date();
+        const mesActual = ahora.getMonth(); // 0 a 11
+        const anioActual = ahora.getFullYear();
+
+        esVigente = Boolean(fechaDoc && fechaDoc.getFullYear() === anioActual && fechaDoc.getMonth() === mesActual);
+
+        const shortTitle = this.SHORT_TITLES_VIGENCIA[item.id] || item.title.split("(")[0].trim();
+        const nombreMesActual = this.NOMBRES_MESES[mesActual];
+
+        if (!esVigente) {
           isCompliant = false;
           isExpired = true;
-          observation = `Documento vencido: expedido hace ${daysElapsed} días (vigencia máxima permitida: 30 días).`;
+          const displayFecha = fechaDocStr || "Fecha no detectada";
+          observation = `Documento con vigencia vencida: expedido el ${displayFecha}. Debe corresponder al mes de revisión en curso (${nombreMesActual} de ${anioActual}).`;
+          criticalIssues.push({
+            criterio: `Ítem ${item.num}: ${item.title}`,
+            observacion: `• Ítem ${item.num} (${shortTitle}): ⚠️ VIGENCIA VENCIDA — Expedido el ${displayFecha}. Debe corresponder al mes de revisión en curso (${nombreMesActual} de ${anioActual}).`,
+            accion_requerida: `Aportar nuevo certificado expedido en el mes de ${nombreMesActual} de ${anioActual}.`
+          });
+        } else {
+          observation = `Documento verificado y vigente: expedido el ${fechaDocStr} (mes en curso: ${nombreMesActual} de ${anioActual}).`;
         }
       }
       
@@ -94,7 +362,7 @@ const DocumentalEngine = {
         if (observation === "-") {
           observation = `Documento verificado y vigente en la carpeta: ${detectedFile}`;
         }
-      } else {
+      } else if (!isExpired) {
         criticalIssues.push({
           criterio: `Ítem ${item.num}: ${item.title}`,
           observacion: observation,
@@ -107,12 +375,25 @@ const DocumentalEngine = {
         conforme: isCompliant,
         faltante: isMissing,
         vencido: isExpired,
+        esVigente: isExpired ? false : (this.ITEMS_VIGENCIA_MENSUAL.includes(item.id) ? true : null),
+        fechaDoc: fechaDoc,
+        fechaDocStr: fechaDocStr,
         observacion: observation,
-        diasRestantes: daysRemaining,
+        diasRestantes: null,
         archivoDetectado: detectedFile,
         meta: meta
       };
     });
+
+    // 4. Verificación de Ficha de Priorización (Documento Base)
+    const fichaP = project.fichaPriorizacion || (project.datos && project.datos.fichaPriorizacion);
+    if (!fichaP || fichaP.existe === false || fichaP.detected === false) {
+      criticalIssues.unshift({
+        criterio: "Ficha de Priorización (Documento Base)",
+        observacion: "Ficha de Priorización: Documento faltante en el expediente",
+        accion_requerida: "Aportar la Ficha de Priorización oficial suscrita por el Alcalde y el Secretario."
+      });
+    }
 
     const passed = criticalIssues.length === 0;
 
@@ -193,6 +474,50 @@ const DocumentalEngine = {
     }
 
     this.openViewerModal(itemId, item, file, fileUrl);
+  },
+
+  /**
+   * ABRE Y VISUALIZA LA FICHA DE PRIORIZACIÓN EN EL VISOR MODAL
+   */
+  abrirFichaPriorizacion(proyectoId, openInNewTab = false) {
+    if (!proyectoId) proyectoId = App.currentProjectId;
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[proyectoId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[proyectoId]) ||
+                App.currentAuditRecord;
+    const ficha = (exp && exp.fichaPriorizacion) || (exp && exp.datos && exp.datos.fichaPriorizacion);
+    if (!ficha || !ficha.existe) {
+      if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+        FolderReader.showToast("⚠️ No se ha detectado el archivo de Ficha de Priorización en el expediente.");
+      } else {
+        alert("⚠️ No se ha detectado el archivo de Ficha de Priorización en el expediente.");
+      }
+      return;
+    }
+
+    const file = ficha.archivoVisualizacion || ficha.archivoPdf || ficha.archivoExcel;
+    if (!file) {
+      alert("⚠️ Archivo físico de la Ficha no disponible en memoria. Puede volver a cargarlo usando 'Subir Ficha'.");
+      return;
+    }
+
+    const itemFicha = {
+      id: "FICHA_PRIORIZACION",
+      num: "FP",
+      title: "Ficha de Priorización y Cierre de Proyecto",
+      entity: "Alcaldía Municipal - Secretaría de Infraestructura Física",
+      rule: "Documento oficial debidamente suscrito con anexos"
+    };
+
+    const fileUrl = URL.createObjectURL(file);
+    this.activeObjectUrls = this.activeObjectUrls || [];
+    this.activeObjectUrls.push(fileUrl);
+
+    if (openInNewTab) {
+      window.open(fileUrl, "_blank");
+      return;
+    }
+
+    this.openViewerModal("FICHA_PRIORIZACION", itemFicha, file, fileUrl);
   },
 
   /**
@@ -304,6 +629,55 @@ const DocumentalEngine = {
           </div>
         </div>
       `;
+    } else if (ext === ".xlsx" || ext === ".xls" || ext === ".xlsm" || ext === ".xlsb") {
+      viewerHtml = `
+        <div style="display:flex;flex-direction:column;gap:12px;height:100%;">
+          <div style="background:var(--color-bg-alt);padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;border:1px solid var(--border-subtle);">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:18px;">📊</span>
+              <div>
+                <div style="font-size:13px;font-weight:800;color:var(--color-primary);">${fileName}</div>
+                <div style="font-size:11px;color:var(--text-muted);">Hoja de cálculo Excel oficial &bull; ${sizeKb}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <a href="${fileUrl}" download="${fileName}" class="btn-primary" style="padding:4px 12px;font-size:11px;text-decoration:none;">
+                📥 Descargar Excel
+              </a>
+            </div>
+          </div>
+          <div id="modalExcelPreviewContainer" style="flex:1;overflow:auto;background:#fff;border:1px solid var(--border-subtle);border-radius:6px;padding:12px;min-height:350px;">
+            <div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px;">Cargando vista previa de la hoja de cálculo...</div>
+          </div>
+        </div>
+      `;
+
+      setTimeout(async () => {
+        try {
+          if (typeof XLSX !== "undefined") {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: "array" });
+            const previewEl = document.getElementById("modalExcelPreviewContainer");
+            if (previewEl && wb && wb.SheetNames && wb.SheetNames.length > 0) {
+              const firstSheetName = wb.SheetNames[0];
+              const htmlTable = XLSX.utils.sheet_to_html(wb.Sheets[firstSheetName]);
+              previewEl.innerHTML = `
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;">
+                  Hoja activa: <strong>${firstSheetName}</strong> (${wb.SheetNames.length} hojas en el libro)
+                </div>
+                <div style="max-height:55vh;overflow:auto;font-size:11.5px;">
+                  ${htmlTable}
+                </div>
+              `;
+            }
+          }
+        } catch (eXlsx) {
+          const previewEl = document.getElementById("modalExcelPreviewContainer");
+          if (previewEl) {
+            previewEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);">Vista previa no disponible para este archivo. Puede descargarlo directamente usando el botón superior.</div>`;
+          }
+        }
+      }, 50);
     } else {
       // Documento de texto u otros formatos
       viewerHtml = `
@@ -324,7 +698,7 @@ const DocumentalEngine = {
   /**
    * Renderiza la lista numérica unificada del 1 al 27 en el contenedor de Fase 2
    */
-  renderDocumentalMatrix(auditResult, container, filter = "ALL") {
+  renderDocumentalMatrix(auditResult, container, filter = "ALL", projectId = null) {
     if (!container) return;
     this.currentFilter = filter;
     container.innerHTML = "";
@@ -342,6 +716,14 @@ const DocumentalEngine = {
 
     const totalItems = (auditResult && auditResult.totalItems) || 27;
     const isRecursos = totalItems === 28;
+
+    const pId = projectId || (typeof App !== "undefined" && App.currentProjectId);
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
+                App.currentAuditRecord;
+    const fichaData = (exp && exp.fichaPriorizacion) || (exp && exp.datos && exp.datos.fichaPriorizacion) || {};
+    const fichaExiste = Boolean(fichaData && fichaData.existe);
+    const fichaFileName = (fichaData && fichaData.fileName) || "Sin archivo";
 
     cardEl.innerHTML = `
       <div class="documental-header">
@@ -362,6 +744,41 @@ const DocumentalEngine = {
               ${auditResult.itemsNoConformes} por Subsanar / Faltantes
             </span>
           ` : ''}
+        </div>
+      </div>
+
+      <!-- BARRA DE ESTADO DEL DOCUMENTO BASE (FICHA DE PRIORIZACIÓN) -->
+      <div class="ficha-priorizacion-banner" style="background:var(--color-bg-alt);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 18px;margin:14px 0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:20px;">📋</span>
+          <div>
+            <div style="font-size:13px;font-weight:800;color:var(--color-primary);">Ficha de Priorización (Documento Maestro del Expediente)</div>
+            <div style="font-size:11px;color:var(--text-muted);">Documento base suscrito por las autoridades territoriales con el acta de cierre y 27 anexos.</div>
+          </div>
+          ${fichaExiste ? `
+            <span class="status-pill cumple" style="font-size:11.5px;padding:3px 10px;">
+              ✓ Ficha detectada: <strong>${fichaFileName}</strong>
+            </span>
+          ` : `
+            <span class="status-pill no-cumple" style="font-size:11.5px;padding:3px 10px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;">
+              ✗ Ficha de Priorización No Encontrada
+            </span>
+          `}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${fichaExiste ? `
+            <button class="btn-primary" style="padding:4px 12px;font-size:11px;background:#0284C7;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.abrirFichaPriorizacion()" title="Abrir y visualizar la Ficha de Priorización en visor modal">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              <span>👁️ Ver Ficha de Priorización</span>
+            </button>
+            <button class="btn-subsanar" style="font-size:11px;padding:4px 10px;" onclick="App.subirFichaPriorizacion()" title="Reemplazar o volver a cargar la Ficha de Priorización">
+              <span>📤 Cambiar / Subir Ficha</span>
+            </button>
+          ` : `
+            <button class="btn-subsanar" style="font-size:11px;padding:5px 14px;background:#dc2626;color:#fff;border-color:#b91c1c;" onclick="App.subirFichaPriorizacion()" title="Cargar archivo de la Ficha de Priorización">
+              <span>📤 Subir Ficha de Priorización</span>
+            </button>
+          `}
         </div>
       </div>
 
@@ -390,9 +807,18 @@ const DocumentalEngine = {
                   ${item.soloRecursos ? '<span style="margin-left:6px;font-size:10px;background:rgba(217,119,6,0.15);color:#D97706;padding:1px 5px;border-radius:4px;font-weight:800;">RECURSOS</span>' : ''}
                 </td>
                 <td style="text-align: center; white-space: nowrap;">
-                  <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="white-space: nowrap;">
-                    ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vencido' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
+                  <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="white-space: nowrap; ${item.vencido ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;' : ''}">
+                    ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vigencia Vencida' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
                   </span>
+                  ${item.fechaDocStr ? `
+                    <div style="font-size:10.5px;color:${item.vencido ? '#b45309' : '#059669'};font-weight:700;margin-top:3px;" title="Fecha de expedición detectada">
+                      Exp: ${item.fechaDocStr}
+                    </div>
+                  ` : (DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(item.id) && item.archivoDetectado ? `
+                    <div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:3px;" title="No se detectó fecha en el texto ni metadatos">
+                      Fecha no detectada
+                    </div>
+                  ` : '')}
                 </td>
                 <td>
                   ${item.archivoDetectado ? `
@@ -420,7 +846,14 @@ const DocumentalEngine = {
                   </div>
                 </td>
                 <td>
-                  <span style="font-size:11px;color:var(--text-muted)">${item.rule}</span>
+                  ${DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(item.id) ? `
+                    <div style="font-size:11px;font-weight:700;color:var(--color-primary);margin-bottom:3px;display:flex;align-items:center;gap:4px;">
+                      <span>📅</span> Mes en curso (${DocumentalEngine.NOMBRES_MESES[new Date().getMonth()]} de ${new Date().getFullYear()})
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);line-height:1.35;">${item.rule}</div>
+                  ` : `
+                    <span style="font-size:11px;color:var(--text-muted);line-height:1.35;">${item.rule}</span>
+                  `}
                 </td>
                 <td style="font-size:11px;color:var(--text-muted)">
                   ${item.entity}
@@ -450,8 +883,15 @@ const DocumentalEngine = {
    * Despliega la ficha de auditoría y cotejo normativo del ítem
    */
   openItemModal(itemId) {
-    const item = SIPRO_DATA.items27.find(i => i.id === itemId);
-    if (!item) return;
+    const pId = App.currentProjectId;
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
+                App.currentAuditRecord;
+    const baseItem = SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId));
+    if (!baseItem) return;
+
+    const auditedItem = (exp && exp.fase2 && exp.fase2.items) ? exp.fase2.items.find(i => Number(i.id) === Number(itemId)) : null;
+    const item = { ...baseItem, ...(auditedItem || {}) };
 
     const modal = document.getElementById("documentModal");
     const modalWin = document.getElementById("documentModalWindow") || (modal ? modal.querySelector(".modal-window") : null);
@@ -467,11 +907,11 @@ const DocumentalEngine = {
     // Resetear a tamaño estándar si estaba en visor grande
     if (modalWin) modalWin.classList.remove("modal-xl");
 
-    const p = App.currentProject || {};
-    const detectedFile = (p.documentosStatus && p.documentosStatus.archivosDetectados) 
-      ? p.documentosStatus.archivosDetectados[itemId] 
-      : null;
-    const meta = (p.archivosMetadata && p.archivosMetadata[itemId]) ? p.archivosMetadata[itemId] : null;
+    const p = App.currentProject || (exp && exp.datos) || {};
+    const detectedFile = (item && item.archivoDetectado)
+      || (p.documentosStatus && p.documentosStatus.archivosDetectados && (p.documentosStatus.archivosDetectados[itemId] || p.documentosStatus.archivosDetectados[String(itemId)]))
+      || null;
+    const meta = (item && item.meta) || (p.archivosMetadata && (p.archivosMetadata[itemId] || p.archivosMetadata[String(itemId)])) || null;
     const file = this.getFileForItem(itemId);
 
     modalTitle.innerHTML = `Ítem ${item.num}: ${item.title}`;
@@ -480,8 +920,17 @@ const DocumentalEngine = {
     if (downloadBtn) downloadBtn.style.display = "none";
     if (statusBadge) {
       statusBadge.style.display = "inline-flex";
-      statusBadge.className = `status-pill ${detectedFile ? 'cumple' : 'no-cumple'}`;
-      statusBadge.innerHTML = detectedFile ? '&#10003; Aportado' : '&#10007; No Aportado';
+      if (!detectedFile) {
+        statusBadge.className = "status-pill no-cumple";
+        statusBadge.innerHTML = "&#10007; No Aportado";
+      } else if (item.vencido) {
+        statusBadge.className = "status-pill alerta";
+        statusBadge.style.cssText = "display:inline-flex;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;";
+        statusBadge.innerHTML = "&#9888; Vigencia Vencida";
+      } else {
+        statusBadge.className = "status-pill cumple";
+        statusBadge.innerHTML = "&#10003; Aportado y Vigente";
+      }
     }
     if (footerMeta) {
       footerMeta.innerHTML = `<span style="font-weight:700">Municipio:</span> ${p.municipio || 'Expediente'}`;
@@ -527,13 +976,15 @@ const DocumentalEngine = {
 
       modalBody.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:16px;">
-          <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);padding:14px 18px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+          <div style="${item.vencido ? 'background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);' : 'background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);'}padding:14px 18px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
             <div>
-              <div style="font-size:11px;font-weight:700;color:#047857;text-transform:uppercase">Archivo Aportado y Cotejado</div>
+              <div style="font-size:11px;font-weight:700;color:${item.vencido ? '#b45309' : '#047857'};text-transform:uppercase">${item.vencido ? '⚠️ Vigencia Vencida' : 'Archivo Aportado y Cotejado'}</div>
               <div style="font-size:14px;font-weight:800;color:var(--color-primary);margin-top:2px">📄 ${detectedFile}</div>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
-              <span class="status-pill cumple">&#10003; Presente en Carpeta</span>
+              <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="${item.vencido ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;' : ''}">
+                ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '⚠️ Vigencia Vencida' : '&#10007; Subsanar')}
+              </span>
               ${file ? `
                 <button class="btn-primary" style="background:#0284C7;padding:6px 14px;font-size:12px;display:inline-flex;align-items:center;gap:6px;" onclick="DocumentalEngine.abrirDocumento(${itemId})">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
@@ -549,12 +1000,12 @@ const DocumentalEngine = {
               <div style="font-size:12px;font-weight:700">${sizeKb}</div>
             </div>
             <div style="background:var(--color-surface);border:1px solid var(--border-strong);padding:10px;border-radius:var(--radius-sm)">
-              <div style="font-size:10px;font-weight:700;color:var(--text-light);text-transform:uppercase">Última Modificación</div>
-              <div style="font-size:12px;font-weight:700">${modDate}</div>
+              <div style="font-size:10px;font-weight:700;color:var(--text-light);text-transform:uppercase">Fecha Expedición</div>
+              <div style="font-size:12px;font-weight:700;${item.vencido ? 'color:#b45309;' : 'color:#059669;'}">${item.fechaDocStr || (DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(Number(itemId)) ? 'Fecha no detectada' : modDate)}</div>
             </div>
             <div style="background:var(--color-surface);border:1px solid var(--border-strong);padding:10px;border-radius:var(--radius-sm)">
-              <div style="font-size:10px;font-weight:700;color:var(--text-light);text-transform:uppercase">Vigencia Máxima</div>
-              <div style="font-size:12px;font-weight:700">${item.validity}</div>
+              <div style="font-size:10px;font-weight:700;color:var(--text-light);text-transform:uppercase">Vigencia Exigida</div>
+              <div style="font-size:12px;font-weight:700;color:var(--color-primary);">${DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(Number(itemId)) ? `Mes en curso (${DocumentalEngine.NOMBRES_MESES[new Date().getMonth()]} ${new Date().getFullYear()})` : item.validity}</div>
             </div>
           </div>
 
@@ -562,6 +1013,34 @@ const DocumentalEngine = {
             <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase">Regla Normativa Exigida</div>
             <div style="font-size:12px;color:var(--text-main);margin-top:4px">${item.rule}</div>
           </div>
+
+          ${item.vencido ? `
+            <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);padding:12px 16px;border-radius:var(--radius-sm);font-size:12px;color:#991b1b;">
+              <b>⚠️ Criterio de Rechazo:</b> Este documento fue expedido el <b>${item.fechaDocStr || 'fecha no detectada'}</b> y no corresponde al mes de revisión en curso (<b>${DocumentalEngine.NOMBRES_MESES[new Date().getMonth()]} de ${new Date().getFullYear()}</b>). Para subsanar, adjunte un certificado expedido durante el mes en curso.
+            </div>
+          ` : (DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(Number(itemId)) && item.conforme ? `
+            <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);padding:12px 16px;border-radius:var(--radius-sm);font-size:12px;color:#065f46;">
+              <b>✓ Criterio de Vigencia Superado:</b> Expedido el <b>${item.fechaDocStr}</b> dentro del mes de revisión en curso (<b>${DocumentalEngine.NOMBRES_MESES[new Date().getMonth()]} de ${new Date().getFullYear()}</b>).
+            </div>
+          ` : '')}
+
+          ${(itemId === 1 && (p.alcalde && (p.alcalde.nombre || typeof p.alcalde === 'string'))) ? `
+            <div style="background:rgba(5, 150, 105, 0.08);border:1px solid rgba(5, 150, 105, 0.25);padding:10px 14px;border-radius:var(--radius-sm);font-size:12px;color:var(--text-main);display:flex;align-items:center;gap:8px;">
+              <span>🏛️</span>
+              <div>
+                <b>Alcalde(sa) Municipal Identificado(a):</b> ${typeof p.alcalde === 'string' ? p.alcalde : p.alcalde.nombre} ${(p.alcalde && p.alcalde.cargo) ? `(${p.alcalde.cargo})` : ''} ${(p.alcalde && p.alcalde.origen) ? `<span style="font-size:10px;color:var(--color-primary);margin-left:6px;background:rgba(2,132,199,0.08);padding:1px 6px;border-radius:4px;border:1px solid rgba(2,132,199,0.2);" title="${p.alcalde.origen}">ℹ️ ${p.alcalde.origen}</span>` : ''}
+              </div>
+            </div>
+          ` : ''}
+
+          ${((itemId === 1 || itemId === 2) && (p.secretarioPlaneacion && (p.secretarioPlaneacion.nombre || typeof p.secretarioPlaneacion === 'string'))) ? `
+            <div style="background:rgba(2, 132, 199, 0.08);border:1px solid rgba(2, 132, 199, 0.25);padding:10px 14px;border-radius:var(--radius-sm);font-size:12px;color:var(--text-main);display:flex;align-items:center;gap:8px;">
+              <span>📐</span>
+              <div>
+                <b>Secretario(a) de Planeación / Obras Públicas:</b> ${typeof p.secretarioPlaneacion === 'string' ? p.secretarioPlaneacion : p.secretarioPlaneacion.nombre} ${(p.secretarioPlaneacion && p.secretarioPlaneacion.cargo) ? `(${p.secretarioPlaneacion.cargo})` : ''} ${(p.secretarioPlaneacion && p.secretarioPlaneacion.origen) ? `<span style="font-size:10px;color:var(--color-primary);margin-left:6px;background:rgba(2,132,199,0.08);padding:1px 6px;border-radius:4px;border:1px solid rgba(2,132,199,0.2);" title="${p.secretarioPlaneacion.origen}">ℹ️ ${p.secretarioPlaneacion.origen}</span>` : ''}
+              </div>
+            </div>
+          ` : ''}
 
           <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:14px;background:var(--color-surface)">
             <div style="font-size:11px;font-weight:800;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase">Extracto Digital de Contenido (PDF.js):</div>

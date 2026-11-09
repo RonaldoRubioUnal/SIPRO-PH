@@ -299,7 +299,10 @@ const App = {
     if (bannerSubreg) bannerSubreg.innerText = `SUBREGIÓN: ${project.subregion}`;
 
     const bannerCode = document.getElementById("expBannerCode");
-    if (bannerCode) bannerCode.innerText = project.codigo;
+    if (bannerCode) {
+      bannerCode.innerText = project.codigo;
+      bannerCode.style.display = "none";
+    }
 
     const bannerCount = document.getElementById("expBannerFilesCount");
     if (bannerCount) {
@@ -351,86 +354,230 @@ const App = {
   },
 
   /**
-   * Renderiza el banner del pipeline de compuertas secuenciales
+   * Actualización Reactiva Centralizada del Flujo de Compuertas Secuenciales ("Gatekeepers")
+   * Evalúa en vivo el estado real de cada compuerta (1A, 1B, 1C, F2, F3) y actualiza
+   * el banner superior, los badges de estado y las tarjetas del pipeline.
+   * @param {string} [proyectoId] ID o slug del proyecto a evaluar
    */
-  renderPipelineBanner(g) {
-    if (!g) return;
+  actualizarBarraCompuertas(proyectoId) {
+    proyectoId = proyectoId || this.currentProjectId;
+    if (!proyectoId) return;
 
-    const bannerStatusPill = document.getElementById("gatekeeperStatusPill");
-    if (bannerStatusPill) {
-      if (g.isApproved) {
-        bannerStatusPill.className = "gatekeeper-status-pill status-approved";
-        bannerStatusPill.innerHTML = `&#10003; 100% CONFORME - VIABLE PARA CONVENIO`;
-      } else {
-        bannerStatusPill.className = "gatekeeper-status-pill status-rejected";
-        const ak = g.activeGatekeeper;
-        const hasKmzCheck = Boolean(g.audit1B && g.audit1B.tieneKMZ === true && g.audit1B.tieneGeorreferenciacionValida !== false);
-        const gateName = (ak === "1A" || ak === "1A_DISENO") ? "FASE 1A (CONTROL ESTRUCTURAL DE ACERO)"
-          : ((ak === "1B" || ak === "1B_ESPACIAL") ? (!hasKmzCheck ? "FASE 1B (✕ DETENIDO / SIN KMZ)" : "FASE 1B (CONTRASTE ESPACIAL Y ALINEACIÓN VIAL)")
-            : ((ak === "1C" || ak === "1C_PRESUPUESTO") ? "FASE 1C (COHERENCIA PRESUPUESTAL)"
-              : "FASE 2 (DOCUMENTAL)"));
-        bannerStatusPill.innerHTML = `&#9888; DETENIDO EN COMPUERTA: ${gateName}`;
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    let exp = expedientesMap[proyectoId];
+    if (!exp) {
+      exp = Object.values(expedientesMap).find(r => r.id === proyectoId || r.slug === proyectoId || (r.datos && r.datos.id === proyectoId));
+    }
+    if (!exp) return;
+
+    const isRecursos = exp.modalidad === "RECURSOS" || (exp.datos && exp.datos.modalidad === "RECURSOS");
+
+    // =========================================================================
+    // 1. EVALUAR EN VIVO EL ESTADO REAL DE CADA COMPUERTA
+    // =========================================================================
+
+    // Compuerta 1A (Control Estructural de Acero)
+    const f1A = exp.fase1A || {};
+    const cuantia1A = Number(f1A.cuantiaRealKgM || f1A.cuantiaKgM || 0);
+    const hasDoc1A = f1A.tieneDocumento === true && Boolean(
+      (f1A.pesoTotalKg && f1A.pesoTotalKg > 0) ||
+      (f1A.marcas && f1A.marcas.length > 0) ||
+      (f1A.archivoDetectado && f1A.archivoDetectado !== "Sin archivo")
+    );
+    const conforme1A = Boolean(hasDoc1A && (cuantia1A >= 26.25 || f1A.aprobado === true));
+
+    // Compuerta 1B (Contraste Espacial y Alineación Vial)
+    const f1B = exp.fase1B || (exp.datos && exp.datos.georreferenciacion) || {};
+    const hasGeoms1B = Boolean(
+      (f1B.tramos && f1B.tramos.length > 0) ||
+      (f1B.puntos && f1B.puntos.length > 0) ||
+      (f1B.puntosInspeccion && f1B.puntosInspeccion.length > 0)
+    );
+    const hasKmz1B = Boolean(f1B.tieneKMZ === true && f1B.tieneGeorreferenciacionValida !== false && hasGeoms1B);
+    const pct1B = Number(f1B.porcentajeAlineacion || f1B.coberturaBufferPct || 0);
+    const sinFallas1B = Number(f1B.puntosAnomalia || 0) === 0 && hasGeoms1B;
+    const conforme1B = Boolean(hasKmz1B && (f1B.aprobado === true || f1B.coberturaConforme === true || pct1B >= 95.0 || sinFallas1B || f1B.subsanado === true));
+
+    // Sincronizar estado booleano de 1B para consistencia interna
+    if (conforme1B && f1B) {
+      f1B.aprobado = true;
+      f1B.coberturaConforme = true;
+      if (exp.fase1B) {
+        exp.fase1B.aprobado = true;
+        exp.fase1B.coberturaConforme = true;
+      }
+      if (exp.datos && exp.datos.georreferenciacion) {
+        exp.datos.georreferenciacion.aprobado = true;
+        exp.datos.georreferenciacion.coberturaConforme = true;
       }
     }
 
+    // Compuerta 1C (Coherencia Presupuestal — Solo en RECURSOS)
+    const f1C = exp.fase1C || {};
+    const conforme1C = !isRecursos || Boolean(f1C && f1C.aprobado === true);
+
+    // Compuertas Previas Superadas
+    const previasOk = conforme1A && conforme1B && conforme1C;
+
+    // Compuerta F2 (Lista Numérica 27/28 Ítems)
+    const fichaP = exp.fichaPriorizacion || (exp.datos && exp.datos.fichaPriorizacion);
+    const hasFicha = Boolean(fichaP && fichaP.existe === true && fichaP.detected === true);
+    const totalItemsF2 = isRecursos ? 28 : 27;
+    let conformesF2 = 0;
+    if (exp.fase2 && Array.isArray(exp.fase2.items)) {
+      conformesF2 = exp.fase2.items.filter(it => it && (it.conforme || it.subsanado) && !it.vencido).length;
+    } else if (exp.kpis) {
+      conformesF2 = exp.kpis.itemsConformes || 0;
+    }
+    const faltantesF2 = Math.max(0, totalItemsF2 - conformesF2);
+    const conformeF2 = faltantesF2 === 0 && hasFicha;
+
+    // Sincronizar auditGlobal en memoria
+    if (!exp.auditGlobal) exp.auditGlobal = {};
+    exp.auditGlobal.audit1A = exp.fase1A;
+    exp.auditGlobal.audit1B = exp.fase1B;
+    exp.auditGlobal.audit2 = exp.fase2;
+    exp.auditGlobal.isApproved = previasOk && conformeF2;
+
+    if (!conforme1A) {
+      exp.auditGlobal.activeGatekeeper = "1A_DISENO";
+    } else if (!conforme1B) {
+      exp.auditGlobal.activeGatekeeper = "1B_ESPACIAL";
+    } else if (!conforme1C) {
+      exp.auditGlobal.activeGatekeeper = "1C_PRESUPUESTO";
+    } else if (!conformeF2) {
+      exp.auditGlobal.activeGatekeeper = "2_DOCUMENTAL";
+    } else {
+      exp.auditGlobal.activeGatekeeper = "3_APROBADO";
+    }
+
+    // =========================================================================
+    // 2. ACTUALIZACIÓN VISUAL DE LAS TARJETAS DEL PIPELINE
+    // =========================================================================
     const step1A = document.getElementById("stepGate1A");
     const step1B = document.getElementById("stepGate1B");
     const step1C = document.getElementById("stepGate1C");
     const step2 = document.getElementById("stepGate2");
     const step3 = document.getElementById("stepGate3");
 
+    // Limpiar clases base
     [step1A, step1B, step1C, step2, step3].forEach(s => {
       if (s) s.className = "gate-step";
     });
 
-    const isRecursos = (this.currentAuditRecord && this.currentAuditRecord.modalidad === "RECURSOS") ||
-      (this.currentProject && this.currentProject.modalidad === "RECURSOS");
-
-    if (step1C) step1C.style.display = isRecursos ? "inline-flex" : "none";
-
-    const tag1A = step1A ? step1A.querySelector(".gate-step-tag") : null;
-    if (g.audit1A && g.audit1A.aprobado) {
-      if (step1A) step1A.classList.add("gate-passed");
-      if (tag1A) tag1A.innerHTML = `&#10003; Acero Conforme`;
-    } else if (step1A) {
-      step1A.classList.add("gate-failed", "gate-active");
-      if (tag1A) tag1A.innerHTML = `&#10007; Detenido / Sin Despiece`;
-    }
-
-    const hasKmz1B = Boolean(g.audit1B && g.audit1B.tieneKMZ === true && g.audit1B.tieneGeorreferenciacionValida !== false);
-    const tag1B = step1B ? step1B.querySelector(".gate-step-tag") : null;
-    if (g.audit1B && g.audit1B.aprobado && hasKmz1B) {
-      if (step1B) step1B.classList.add("gate-passed");
-      if (tag1B) tag1B.innerHTML = `&#10003; Alineación Conforme`;
-    } else if (step1B) {
-      step1B.classList.add("gate-failed", "gate-active");
-      if (tag1B) {
-        tag1B.innerHTML = !hasKmz1B ? `&#10007; Detenido / Sin KMZ` : `&#10007; Desfase Espacial`;
+    // --- TARJETA 1A ---
+    if (step1A) {
+      const tag1A = step1A.querySelector(".gate-step-tag");
+      if (conforme1A) {
+        step1A.classList.add("gate-passed");
+        if (tag1A) tag1A.innerHTML = `✓ ACERO CONFORME`;
+      } else {
+        step1A.classList.add("gate-failed", "gate-active");
+        if (tag1A) tag1A.innerHTML = !hasDoc1A ? `✗ SIN DESPIECE` : `✗ DÉFICIT ACERO`;
       }
     }
 
-    const f1C = this.currentAuditRecord && this.currentAuditRecord.fase1C;
-    const f1CPassed = !isRecursos || (f1C && f1C.aprobado);
-
-    if (isRecursos && step1C) {
-      if (f1C && f1C.aprobado) {
-        step1C.classList.add("gate-passed");
-      } else if (f1C && !f1C.aprobado) {
-        step1C.classList.add("gate-failed", "gate-active");
+    // --- TARJETA 1B ---
+    if (step1B) {
+      const tag1B = step1B.querySelector(".gate-step-tag");
+      if (conforme1B) {
+        step1B.classList.add("gate-passed");
+        if (tag1B) tag1B.innerHTML = `✓ ALINEACIÓN CONFORME`;
+      } else {
+        step1B.classList.add("gate-failed");
+        if (conforme1A) step1B.classList.add("gate-active");
+        if (tag1B) tag1B.innerHTML = !hasKmz1B ? `✗ SIN ARCHIVO KMZ` : `✗ DESFASE ESPACIAL`;
       }
     }
 
-    if (g.audit1A && g.audit1A.aprobado && g.audit1B && g.audit1B.aprobado && f1CPassed) {
-      if (g.audit2 && g.audit2.aprobado) {
-        if (step2) step2.classList.add("gate-passed");
-      } else if (step2) {
-        step2.classList.add("gate-failed", "gate-active");
+    // --- TARJETA 1C ---
+    if (step1C) {
+      step1C.style.display = isRecursos ? "inline-flex" : "none";
+      if (isRecursos) {
+        const tag1C = step1C.querySelector(".gate-step-tag");
+        if (conforme1C) {
+          step1C.classList.add("gate-passed");
+          if (tag1C) tag1C.innerHTML = `✓ PRESUPUESTO CONFORME`;
+        } else {
+          step1C.classList.add("gate-failed");
+          if (conforme1A && conforme1B) step1C.classList.add("gate-active");
+          if (tag1C) tag1C.innerHTML = (f1C && f1C.tienePresupuesto) ? `✗ DESCUADRE PRESUPUESTAL` : `✗ SIN PRESUPUESTO`;
+        }
       }
     }
 
-    if (g.isApproved && step3) {
-      step3.classList.add("gate-passed", "gate-active");
+    // --- TARJETA F2 (Lista Numérica) ---
+    if (step2) {
+      const tag2 = step2.querySelector(".gate-step-tag");
+      const title2 = step2.querySelector(".gate-step-title");
+      if (title2) title2.textContent = `Lista Numérica (${totalItemsF2} Ítems)`;
+
+      if (!previasOk) {
+        // Bloqueado en gris cuando compuertas 1A, 1B o 1C no cumplen
+        step2.className = "gate-step";
+        if (tag2) tag2.innerHTML = `Compuerta 2`;
+      } else {
+        // Compuertas previas superadas: desbloquear F2
+        if (conformeF2) {
+          step2.classList.add("gate-passed");
+          if (tag2) tag2.innerHTML = `✓ DOCUMENTACIÓN COMPLETA`;
+        } else {
+          step2.classList.add("gate-warning", "gate-active");
+          if (tag2) {
+            tag2.innerHTML = !hasFicha
+              ? `✗ FALTA FICHA PRIORIZACIÓN`
+              : `⚠️ ${faltantesF2} ÍTEMS PENDIENTES`;
+          }
+        }
+      }
     }
+
+    // --- TARJETA F3 (Salida Final) ---
+    if (step3) {
+      const tag3 = step3.querySelector(".gate-step-tag");
+      if (previasOk && conformeF2) {
+        step3.classList.add("gate-passed", "gate-active");
+        if (tag3) tag3.innerHTML = `✓ APTO PARA CONVENIO`;
+      } else if (previasOk && !conformeF2) {
+        step3.classList.add("gate-active");
+        if (tag3) tag3.innerHTML = `En Revisión Técnica`;
+      } else {
+        step3.className = "gate-step";
+        if (tag3) tag3.innerHTML = `Salida Final`;
+      }
+    }
+
+    // =========================================================================
+    // 3. BADGE SUPERIOR DERECHO (#gatekeeperStatusPill)
+    // =========================================================================
+    const pill = document.getElementById("gatekeeperStatusPill");
+    if (pill) {
+      if (!conforme1A) {
+        pill.className = "gatekeeper-status-pill status-rejected";
+        pill.innerHTML = `⚠️ DETENIDO EN COMPUERTA: FASE 1A (CONTROL ESTRUCTURAL DE ACERO)`;
+      } else if (!conforme1B) {
+        pill.className = "gatekeeper-status-pill status-rejected";
+        pill.innerHTML = `⚠️ DETENIDO EN COMPUERTA: FASE 1B (CONTRASTE ESPACIAL Y ALINEACIÓN VIAL)`;
+      } else if (!conforme1C) {
+        pill.className = "gatekeeper-status-pill status-rejected";
+        pill.innerHTML = `⚠️ DETENIDO EN COMPUERTA: FASE 1C (COHERENCIA PRESUPUESTAL)`;
+      } else if (!conformeF2) {
+        pill.className = "gatekeeper-status-pill status-warning";
+        pill.innerHTML = !hasFicha
+          ? `⚠️ EN REVISIÓN DOCUMENTAL: FASE 2 (FICHA DE PRIORIZACIÓN FALTANTE)`
+          : `⚠️ EN REVISIÓN DOCUMENTAL: FASE 2 (${faltantesF2} ÍTEMS POR SUBSANAR)`;
+      } else {
+        pill.className = "gatekeeper-status-pill status-approved";
+        pill.innerHTML = `✓ FLUJO DE COMPUERTAS SUPERADO — EXPEDIENTE CONFORME`;
+      }
+    }
+  },
+
+  /**
+   * Renderiza el banner del pipeline de compuertas secuenciales (Delegado a actualizarBarraCompuertas)
+   */
+  renderPipelineBanner(g) {
+    this.actualizarBarraCompuertas(this.currentProjectId);
   },
 
   /**
@@ -473,7 +620,7 @@ const App = {
 
     const item3 = (f2.items && Array.isArray(f2.items)) ? f2.items.find(it => it.id === 3 || it.num === 3) : null;
     const hasItem3Doc = item3 ? (!!item3.archivoDetectado && !item3.faltante) : false;
-    const hasDespieceDoc = (f1A.tieneDoc !== false && f1A.hasDespieceDoc !== false && (pesoTotalKg > 0 || hasItem3Doc));
+    const hasDespieceDoc = (f1A.tieneDocumento !== false && f1A.tieneDoc !== false && f1A.hasDespieceDoc !== false && (pesoTotalKg > 0 || hasItem3Doc));
 
     let cuantiaReal = 0;
     let score1A = 0;
@@ -486,10 +633,11 @@ const App = {
       cuantiaReal = 0;
       score1A = 0;
       if (kpiCuantia) {
-        kpiCuantia.innerText = "0.00 kg/m";
+        kpiCuantia.innerText = "-";
         kpiCuantia.style.color = "var(--status-danger)";
       }
       if (kpiCuantiaSub) {
+        kpiCuantiaSub.style.display = "block";
         kpiCuantiaSub.innerHTML = '<span class="kpi-tag-bad">⚠️ Sin documento de despiece aportado</span>';
       }
       if (kpiCuantiaIcon) {
@@ -504,7 +652,8 @@ const App = {
         score1A = 100;
         if (kpiCuantia) kpiCuantia.style.color = "var(--status-success)";
         if (kpiCuantiaSub) {
-          kpiCuantiaSub.innerHTML = '<span class="kpi-tag-good">&#10003; Cumple criterio técnico (&ge; 26.25 kg/m)</span>';
+          kpiCuantiaSub.innerHTML = "";
+          kpiCuantiaSub.style.display = "none";
         }
         if (kpiCuantiaIcon) {
           kpiCuantiaIcon.className = "kpi-icon-pill icon-success";
@@ -514,6 +663,7 @@ const App = {
         const deficit = (26.25 - cuantiaReal).toFixed(2);
         if (kpiCuantia) kpiCuantia.style.color = "var(--status-danger)";
         if (kpiCuantiaSub) {
+          kpiCuantiaSub.style.display = "block";
           kpiCuantiaSub.innerHTML = `<span class="kpi-tag-bad">&#9660; -${deficit} kg/m DÉFICIT ESTRUCTURAL</span>`;
         }
         if (kpiCuantiaIcon) {
@@ -596,10 +746,18 @@ const App = {
     // -------------------------------------------------------------------------
     // 3. TARJETA 6 — LISTA DE ÍTEMS (F2)
     // -------------------------------------------------------------------------
+    const fichaP = exp.fichaPriorizacion || (exp.datos && exp.datos.fichaPriorizacion);
+    const hasFicha = Boolean(fichaP && fichaP.existe === true && fichaP.detected === true);
+
     const f2Items = (f2 && Array.isArray(f2.items)) ? f2.items : [];
-    const itemsConformes = f2Items.filter(it => it.conforme || it.estado === "Conforme" || it.subsanado === true).length;
+    const vencidosF2 = f2Items.filter(it => it.vencido === true);
+    const rawConformes = f2Items.filter(it => (it.conforme || it.estado === "Conforme" || it.subsanado === true) && !it.vencido).length;
+    // Si la Ficha de Priorización no existe, se descuenta de los requisitos conformes en los KPIs
+    const itemsConformes = hasFicha ? rawConformes : Math.max(0, rawConformes - 1);
     const faltantes = Math.max(0, totalItemsRequeridos - itemsConformes);
-    const scoreF2 = totalItemsRequeridos > 0 ? (itemsConformes / totalItemsRequeridos) * 100 : 0;
+    const scoreF2 = (totalItemsRequeridos > 0 && hasFicha) 
+      ? (itemsConformes / totalItemsRequeridos) * 100 
+      : (totalItemsRequeridos > 0 ? (itemsConformes / totalItemsRequeridos) * 75 : 0);
 
     const kpiDocLabel = document.getElementById("kpiDocLabel");
     if (kpiDocLabel) {
@@ -613,7 +771,7 @@ const App = {
     if (kpiDoc) {
       kpiDoc.innerText = `${itemsConformes} / ${totalItemsRequeridos}`;
     }
-    if (faltantes === 0 && itemsConformes === totalItemsRequeridos) {
+    if (faltantes === 0 && itemsConformes === totalItemsRequeridos && hasFicha) {
       if (kpiDoc) kpiDoc.style.color = "var(--status-success)";
       if (kpiDocSub) {
         kpiDocSub.innerHTML = '<span class="kpi-tag-good">&#10003; Documentación completa</span>';
@@ -624,7 +782,15 @@ const App = {
     } else {
       if (kpiDoc) kpiDoc.style.color = "var(--status-danger)";
       if (kpiDocSub) {
-        kpiDocSub.innerHTML = `<span class="kpi-tag-bad">&#9888; ${faltantes} ${faltantes === 1 ? 'ítem' : 'ítems'} por subsanar</span>`;
+        if (!hasFicha) {
+          kpiDocSub.innerHTML = '<span class="kpi-tag-bad">✗ Falta Ficha de Priorización (Documento Base)</span>';
+        } else if (vencidosF2.length > 0 && faltantes === vencidosF2.length) {
+          kpiDocSub.innerHTML = `<span class="kpi-tag-bad">⚠️ ${vencidosF2.length} ${vencidosF2.length === 1 ? 'ítem con vigencia vencida' : 'ítems con vigencia vencida'}</span>`;
+        } else if (vencidosF2.length > 0) {
+          kpiDocSub.innerHTML = `<span class="kpi-tag-bad">⚠️ ${faltantes} por subsanar (${vencidosF2.length} con vigencia vencida)</span>`;
+        } else {
+          kpiDocSub.innerHTML = `<span class="kpi-tag-bad">&#9888; ${faltantes} ${faltantes === 1 ? 'ítem' : 'ítems'} por subsanar</span>`;
+        }
       }
       if (kpiDocIcon) {
         kpiDocIcon.className = "kpi-icon-pill icon-danger";
@@ -659,6 +825,11 @@ const App = {
       conformidadGeneral = (0.25 * (Number(score1A) || 0)) +
         (0.25 * (Number(score1B) || 0)) +
         (0.50 * (Number(scoreF2) || 0));
+    }
+
+    // Descuento en KPI de Conformidad General si no se aportó la Ficha de Priorización
+    if (!hasFicha) {
+      conformidadGeneral = Math.min(conformidadGeneral * 0.8, 75);
     }
     conformidadGeneral = Math.max(0, Math.min(100, Math.round(conformidadGeneral)));
 
@@ -712,6 +883,7 @@ const App = {
 
     const totalHallazgos = findings.length;
     let compuertasConAlerta = 0;
+    if (findings.some(f => f.fase === "Documento Base")) compuertasConAlerta++;
     if (findings.some(f => f.fase === "Fase 1A")) compuertasConAlerta++;
     if (findings.some(f => f.fase === "Fase 1B")) compuertasConAlerta++;
     if (isRecursos && findings.some(f => f.fase === "Fase 1C")) compuertasConAlerta++;
@@ -770,6 +942,9 @@ const App = {
     exp.kpis.itemsNoConformes = faltantes;
     exp.kpis.itemsTotal = totalItemsRequeridos;
     exp.kpis.coberturaBufferPct = coberturaVal;
+
+    // Sincronizar reactivamente el flujo secuencial de compuertas
+    this.actualizarBarraCompuertas(proyectoId);
   },
 
   /**
@@ -808,24 +983,27 @@ const App = {
     const spanIng = document.getElementById("paramIngenieroName");
     if (spanIng) spanIng.innerText = `${ing.nombre} (${ing.matricula})`;
 
+    const tieneDoc = (fase1A && fase1A.tieneDocumento !== false) && ((d.tieneDocumento !== false) || (fase1A && fase1A.pesoTotalKg > 0));
     const pesoDeclarado = (fase1A && fase1A.pesoTotalDeclaradoKg !== undefined) ? fase1A.pesoTotalDeclaradoKg : (d.pesoTotalDeclaradoKg || 0);
+    const hasAceroData = tieneDoc && (pesoDeclarado > 0);
+
     const spanWeight = document.getElementById("statWeightTotal");
-    if (spanWeight) spanWeight.innerText = `${pesoDeclarado.toLocaleString("es-CO")} kg`;
+    if (spanWeight) spanWeight.innerText = hasAceroData ? `${pesoDeclarado.toLocaleString("es-CO")} kg` : "-";
 
     const spanCuantia = document.getElementById("statCuantiaPill");
-    if (spanCuantia && fase1A) {
-      const cuantiaVal = fase1A.cuantiaRealKgM || 0;
-      if (pesoDeclarado === 0) {
+    if (spanCuantia) {
+      if (!tieneDoc) {
+        spanCuantia.className = "status-pill";
+        spanCuantia.innerText = "- (Sin documento de despiece)";
+      } else if (pesoDeclarado === 0) {
         spanCuantia.className = "status-pill";
         spanCuantia.innerText = "- (Sin acero reportado)";
       } else {
+        const cuantiaVal = (fase1A && fase1A.cuantiaRealKgM) || 0;
         const isOk = cuantiaVal >= 26.25;
         spanCuantia.className = `status-pill ${isOk ? 'cumple' : 'no-cumple'}`;
         spanCuantia.innerText = `${cuantiaVal} kg/m (Mínimo Requerido: 26.25)`;
       }
-    } else if (spanCuantia) {
-      spanCuantia.className = "status-pill";
-      spanCuantia.innerText = "26.25 kg/m (Estándar de Referencia)";
     }
 
     const spanLong = document.getElementById("statSidebarLongitud");
@@ -833,19 +1011,19 @@ const App = {
     if (spanLong) spanLong.innerText = longVal > 0 ? `${longVal.toLocaleString("es-CO")} m` : "-";
 
     const spanConc21 = document.getElementById("statSidebarConc21");
-    if (spanConc21) spanConc21.innerText = `${(cv.totalConcreto21M3 || 0).toLocaleString("es-CO", { minimumFractionDigits: 1 })} m³`;
+    if (spanConc21) spanConc21.innerText = (tieneDoc && cv.totalConcreto21M3 > 0) ? `${(cv.totalConcreto21M3 || 0).toLocaleString("es-CO", { minimumFractionDigits: 1 })} m³` : "-";
 
     const spanConcCicl = document.getElementById("statSidebarConcCicl");
-    if (spanConcCicl) spanConcCicl.innerText = `${(cv.totalConcretoCiclopeoM3 || 0).toLocaleString("es-CO", { minimumFractionDigits: 1 })} m³`;
+    if (spanConcCicl) spanConcCicl.innerText = (tieneDoc && cv.totalConcretoCiclopeoM3 > 0) ? `${(cv.totalConcretoCiclopeoM3 || 0).toLocaleString("es-CO", { minimumFractionDigits: 1 })} m³` : "-";
 
     const spanSacos = document.getElementById("statSidebarSacos");
-    if (spanSacos) spanSacos.innerText = `${(cv.sacosCemento || 0).toLocaleString("es-CO")} sacos`;
+    if (spanSacos) spanSacos.innerText = (tieneDoc && cv.sacosCemento > 0) ? `${(cv.sacosCemento || 0).toLocaleString("es-CO")} sacos` : "-";
 
     const spanConcTot = document.getElementById("statConcreteTotal");
-    if (spanConcTot) spanConcTot.innerText = `${(cv.totalConcretoGlobalM3 || 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })} m³`;
+    if (spanConcTot) spanConcTot.innerText = (tieneDoc && cv.totalConcretoGlobalM3 > 0) ? `${(cv.totalConcretoGlobalM3 || 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })} m³` : "-";
 
     const spanCemTot = document.getElementById("statCementTotal");
-    if (spanCemTot) spanCemTot.innerText = `${(cv.sacosCemento || 0).toLocaleString("es-CO")} sacos`;
+    if (spanCemTot) spanCemTot.innerText = (tieneDoc && cv.sacosCemento > 0) ? `${(cv.sacosCemento || 0).toLocaleString("es-CO")} sacos` : "-";
   },
 
   updateSpatialSidebar() {
@@ -869,7 +1047,10 @@ const App = {
     if (bannerSubreg) bannerSubreg.innerText = "SUBREGIÓN: ANTIOQUIA";
 
     const bannerCode = document.getElementById("expBannerCode");
-    if (bannerCode) bannerCode.innerText = "EXP-PH";
+    if (bannerCode) {
+      bannerCode.innerText = "EXP-PH";
+      bannerCode.style.display = "none";
+    }
 
     const bannerCount = document.getElementById("expBannerFilesCount");
     if (bannerCount) bannerCount.innerText = "0 Archivos";
@@ -1150,11 +1331,20 @@ const App = {
       rec.subregion = p.subregion;
       rec.modalidad = newMod;
       rec.datos = p;
+      rec.alcalde = p.alcalde;
+      rec.secretarioPlaneacion = p.secretarioPlaneacion;
+      if (rec.fase3) {
+        rec.fase3.datosIdentificacion = rec.fase3.datosIdentificacion || {};
+        rec.fase3.datosIdentificacion.alcalde = p.alcalde;
+        rec.fase3.datosIdentificacion.secretarioPlaneacion = p.secretarioPlaneacion;
+      }
     }
 
     // Sincronizar catálogo global
     SIPRO_DATA.expedientesMap = window.proyectosAuditados;
     SIPRO_DATA.proyectos = Object.values(window.proyectosAuditados).map(r => r.datos);
+
+    this.saveAuditProgress(true);
 
     this.closeExpedienteModal();
     this.populateProjectSelect();
@@ -1868,13 +2058,58 @@ const App = {
           exp.datos.archivosMetadata[String(numItemId)] = exp.datos.archivosMetadata[numItemId];
         }
 
-        // 3. Registrar en historial de subsanaciones
+        // 3. Extracción de fecha y verificación de vigencia mensual en subsanación
+        let subFechaDoc = null;
+        let subFechaDocStr = null;
+        let subEsVigente = true;
+
+        if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(numItemId)) {
+          let snippet = "";
+          try {
+            const ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+            if (ext === "pdf" && typeof FolderReader !== "undefined" && typeof FolderReader.readPdfOrText === "function") {
+              snippet = await FolderReader.readPdfOrText(file, 2);
+            } else if (["txt", "csv", "json"].includes(ext) && typeof file.text === "function") {
+              snippet = await file.text();
+            }
+          } catch (eSnip) {
+            console.warn("Aviso leyendo snippet de subsanación:", eSnip);
+          }
+
+          const extDate = DocumentalEngine.extraerFechaDocumento(file, snippet);
+          subFechaDoc = extDate ? extDate.fecha : null;
+          subFechaDocStr = extDate ? extDate.fechaStr : null;
+
+          const ahora = new Date();
+          const mesActual = ahora.getMonth();
+          const anioActual = ahora.getFullYear();
+          subEsVigente = Boolean(subFechaDoc && subFechaDoc.getFullYear() === anioActual && subFechaDoc.getMonth() === mesActual);
+
+          if (exp.datos) {
+            exp.datos.archivosMetadata = exp.datos.archivosMetadata || {};
+            exp.datos.archivosMetadata[numItemId] = exp.datos.archivosMetadata[numItemId] || {};
+            exp.datos.archivosMetadata[numItemId].fileName = file.name;
+            exp.datos.archivosMetadata[numItemId].fechaDoc = subFechaDoc;
+            exp.datos.archivosMetadata[numItemId].fechaDocStr = subFechaDocStr;
+            exp.datos.archivosMetadata[numItemId].esVigente = subEsVigente;
+            exp.datos.archivosMetadata[numItemId].textSnippet = snippet;
+
+            exp.datos.documentosStatus = exp.datos.documentosStatus || { archivosDetectados: {} };
+            exp.datos.documentosStatus.archivosDetectados = exp.datos.documentosStatus.archivosDetectados || {};
+            exp.datos.documentosStatus.archivosDetectados[numItemId] = file.name;
+          }
+        }
+
+        // Registrar en historial de subsanaciones
         exp.historialSubsanaciones = exp.historialSubsanaciones || [];
         exp.historialSubsanaciones.push({
           itemId: numItemId,
           fileName: file.name,
           fecha: new Date().toLocaleString("es-CO"),
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          fechaDoc: subFechaDoc,
+          fechaDocStr: subFechaDocStr,
+          esVigente: subEsVigente
         });
 
         // 4. Identificar ítem en la lista documental de Fase 2
@@ -1882,14 +2117,48 @@ const App = {
         if (exp.fase2 && exp.fase2.items) {
           itemObj = exp.fase2.items.find(i => Number(i.id) === numItemId || i.id === itemId);
           if (itemObj) {
-            itemObj.conforme = true;
-            itemObj.faltante = false;
-            itemObj.vencido = false;
-            itemObj.estado = "Conforme (Subsanado)";
-            itemObj.archivoDetectado = file.name;
-            itemObj.subsanado = true;
-            itemObj.fechaSubsanacion = new Date().toLocaleDateString("es-CO");
-            itemObj.motivo = `Subsanado con archivo ${file.name} el ${new Date().toLocaleDateString("es-CO")}`;
+            if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(numItemId)) {
+              const ahora = new Date();
+              const mesActual = ahora.getMonth();
+              const anioActual = ahora.getFullYear();
+              const mesNombre = DocumentalEngine.NOMBRES_MESES[mesActual];
+              const shortTitle = DocumentalEngine.SHORT_TITLES_VIGENCIA[numItemId] || itemObj.title;
+              const displayFecha = subFechaDocStr || "Fecha no detectada";
+
+              if (subEsVigente) {
+                itemObj.conforme = true;
+                itemObj.faltante = false;
+                itemObj.vencido = false;
+                itemObj.esVigente = true;
+                itemObj.estado = "Conforme (Subsanado)";
+                itemObj.archivoDetectado = file.name;
+                itemObj.subsanado = true;
+                itemObj.fechaDoc = subFechaDoc;
+                itemObj.fechaDocStr = subFechaDocStr;
+                itemObj.fechaSubsanacion = new Date().toLocaleDateString("es-CO");
+                itemObj.motivo = `Subsanado con archivo ${file.name} expedido el ${displayFecha} (vigente para ${mesNombre} de ${anioActual})`;
+              } else {
+                itemObj.conforme = false;
+                itemObj.faltante = false;
+                itemObj.vencido = true;
+                itemObj.esVigente = false;
+                itemObj.estado = "⚠️ Vigencia Vencida";
+                itemObj.archivoDetectado = file.name;
+                itemObj.subsanado = false;
+                itemObj.fechaDoc = subFechaDoc;
+                itemObj.fechaDocStr = subFechaDocStr;
+                itemObj.motivo = `• Ítem ${numItemId} (${shortTitle}): ⚠️ VIGENCIA VENCIDA — Expedido el ${displayFecha}. Debe corresponder al mes de revisión en curso (${mesNombre} de ${anioActual}).`;
+              }
+            } else {
+              itemObj.conforme = true;
+              itemObj.faltante = false;
+              itemObj.vencido = false;
+              itemObj.estado = "Conforme (Subsanado)";
+              itemObj.archivoDetectado = file.name;
+              itemObj.subsanado = true;
+              itemObj.fechaSubsanacion = new Date().toLocaleDateString("es-CO");
+              itemObj.motivo = `Subsanado con archivo ${file.name} el ${new Date().toLocaleDateString("es-CO")}`;
+            }
           }
         }
 
@@ -1975,6 +2244,15 @@ const App = {
                   if (typeof SpatialEngine.auditProject === "function") {
                     const audit1B = SpatialEngine.auditProject(exp.datos);
                     exp.fase1B = { ...exp.fase1B, ...audit1B };
+                    const pctSub = Number(exp.fase1B.porcentajeAlineacion || exp.fase1B.coberturaBufferPct || 0);
+                    if (pctSub >= 95.0 || exp.fase1B.puntosAnomalia === 0) {
+                      exp.fase1B.aprobado = true;
+                      exp.fase1B.coberturaConforme = true;
+                      exp.fase1B.subsanado = true;
+                      exp.fase1B.estado = "Cumple";
+                      exp.fase1B.estadoCompuerta = "APROBADO";
+                      exp.fase1B.motivoRechazo = null;
+                    }
                     if (exp.auditGlobal) exp.auditGlobal.audit1B = exp.fase1B;
                   }
                   if (typeof SpatialEngine.initOrUpdateMap === "function") {
@@ -2039,19 +2317,44 @@ const App = {
         if (exp.datos) {
           exp.fase2 = DocumentalEngine.auditProject(exp.datos);
           if (exp.fase2 && exp.fase2.items && exp.historialSubsanaciones) {
+            const latestSubMap = {};
             exp.historialSubsanaciones.forEach(sub => {
+              latestSubMap[Number(sub.itemId)] = sub;
+            });
+
+            Object.values(latestSubMap).forEach(sub => {
               const it = exp.fase2.items.find(i => Number(i.id) === Number(sub.itemId));
               if (it) {
-                it.conforme = true;
-                it.faltante = false;
-                it.vencido = false;
-                it.estado = "Conforme (Subsanado)";
-                it.subsanado = true;
-                it.archivoDetectado = sub.fileName;
-                it.motivo = `Subsanado con archivo ${sub.fileName}`;
+                if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(Number(sub.itemId))) {
+                  if (sub.esVigente === false) {
+                    it.conforme = false;
+                    it.vencido = true;
+                    it.esVigente = false;
+                    it.estado = "⚠️ Vigencia Vencida";
+                    it.subsanado = false;
+                    it.archivoDetectado = sub.fileName;
+                  } else {
+                    it.conforme = true;
+                    it.faltante = false;
+                    it.vencido = false;
+                    it.esVigente = true;
+                    it.estado = "Conforme (Subsanado)";
+                    it.subsanado = true;
+                    it.archivoDetectado = sub.fileName;
+                    it.motivo = `Subsanado con archivo ${sub.fileName}`;
+                  }
+                } else {
+                  it.conforme = true;
+                  it.faltante = false;
+                  it.vencido = false;
+                  it.estado = "Conforme (Subsanado)";
+                  it.subsanado = true;
+                  it.archivoDetectado = sub.fileName;
+                  it.motivo = `Subsanado con archivo ${sub.fileName}`;
+                }
               }
             });
-            exp.fase2.itemsConformes = exp.fase2.items.filter(it => it.conforme || it.subsanado).length;
+            exp.fase2.itemsConformes = exp.fase2.items.filter(it => it.conforme || (it.subsanado && !it.vencido)).length;
             exp.fase2.itemsNoConformes = exp.fase2.items.length - exp.fase2.itemsConformes;
           }
           if (exp.kpis) {
@@ -2064,9 +2367,10 @@ const App = {
 
         // 7. Actualizar Gatekeepers globales
         if (!exp.auditGlobal) exp.auditGlobal = {};
-        const a1A = exp.fase1A ? exp.fase1A.aprobado : true;
+        const a1A = exp.fase1A ? (exp.fase1A.tieneDocumento === true && (exp.fase1A.cuantiaRealKgM >= 26.25 || exp.fase1A.aprobado === true)) : true;
         const hasKmz1B = exp.fase1B ? (exp.fase1B.tieneKMZ === true && exp.fase1B.tieneGeorreferenciacionValida !== false) : false;
-        const a1B = exp.fase1B ? (exp.fase1B.aprobado && hasKmz1B) : false;
+        const pct1B = Number((exp.fase1B && (exp.fase1B.porcentajeAlineacion || exp.fase1B.coberturaBufferPct)) || 0);
+        const a1B = exp.fase1B ? (hasKmz1B && (exp.fase1B.aprobado === true || exp.fase1B.coberturaConforme === true || pct1B >= 95.0 || exp.fase1B.subsanado === true)) : false;
         const a2 = exp.fase2 ? (exp.fase2.aprobado || (exp.fase2.itemsConformes >= (exp.modalidad === "RECURSOS" ? 28 : 27))) : true;
         const a1C = exp.modalidad !== "RECURSOS" || (exp.fase1C ? exp.fase1C.aprobado : true);
 
@@ -2092,20 +2396,22 @@ const App = {
           exp.fase3.observacionesEditadas = exp.fase3.observacionesEditadas || {};
           exp.fase3.matrizObservaciones = exp.fase3.matrizObservaciones || {};
 
-          const cleanKeys = [`doc_item_${numItemId}`, `FASE_2_ITEM_${numItemId}`, `item_${numItemId}`];
-          if (isItem28) {
-            cleanKeys.push("doc_item_28", "FASE_2_ITEM_28", "item_28", "FASE_1C_PTO", "fase_1c_presupuesto");
+          if (subEsVigente !== false) {
+            const cleanKeys = [`doc_item_${numItemId}`, `FASE_2_ITEM_${numItemId}`, `item_${numItemId}`];
+            if (isItem28) {
+              cleanKeys.push("doc_item_28", "FASE_2_ITEM_28", "item_28", "FASE_1C_PTO", "fase_1c_presupuesto");
+            }
+            if (isItem3) {
+              cleanKeys.push("doc_item_3", "FASE_2_ITEM_3", "item_3", "FASE_1A_DISENO", "FASE_1A_ACERO", "fase_1a_acero");
+            }
+            if (isItem24) {
+              cleanKeys.push("doc_item_24", "FASE_2_ITEM_24", "item_24", "FASE_1B_GEO", "fase_1b_espacial");
+            }
+            cleanKeys.forEach(k => {
+              delete exp.fase3.observacionesEditadas[k];
+              delete exp.fase3.matrizObservaciones[k];
+            });
           }
-          if (isItem3) {
-            cleanKeys.push("doc_item_3", "FASE_2_ITEM_3", "item_3", "FASE_1A_DISENO", "FASE_1A_ACERO", "fase_1a_acero");
-          }
-          if (isItem24) {
-            cleanKeys.push("doc_item_24", "FASE_2_ITEM_24", "item_24", "FASE_1B_GEO", "fase_1b_espacial");
-          }
-          cleanKeys.forEach(k => {
-            delete exp.fase3.observacionesEditadas[k];
-            delete exp.fase3.matrizObservaciones[k];
-          });
         }
 
         // 9. Auto-guardar avance en sipro_auditoria.json
@@ -2145,7 +2451,17 @@ const App = {
           }
         }
 
-        if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+        if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(numItemId) && !subEsVigente) {
+          const ahora = new Date();
+          const mesNombre = DocumentalEngine.NOMBRES_MESES[ahora.getMonth()];
+          const anioActual = ahora.getFullYear();
+          const msgVenc = `⚠️ Documento aportado tiene fecha ${subFechaDocStr || 'no detectada'} y no corresponde al mes en curso (${mesNombre} de ${anioActual}). Ítem sigue no conforme.`;
+          if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+            FolderReader.showToast(msgVenc);
+          } else {
+            alert(msgVenc);
+          }
+        } else if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
           FolderReader.showToast(`✓ Subsanación cargada para Ítem ${numItemId}: ${file.name}`);
         } else {
           alert(`✓ Subsanación cargada con éxito para el Ítem ${numItemId}`);
@@ -2179,6 +2495,218 @@ const App = {
         }
       };
 
+      fileInput.click();
+    }
+  },
+
+  /**
+   * Carga o subsana el documento maestro Ficha de Priorización (.pdf o .xlsx/.xls)
+   * Extrayendo de inmediato Municipio, Subregión, Longitud, Código Vial, Alcalde y Secretario
+   */
+  async subirFichaPriorizacion(proyectoId, directFile = null) {
+    const projectId = proyectoId || this.currentProjectId;
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[projectId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[proyectoId]) ||
+                this.currentAuditRecord;
+
+    if (!exp) {
+      alert("Por favor seleccione un expediente municipal antes de cargar la Ficha de Priorización.");
+      return;
+    }
+
+    const processFicha = async (file) => {
+      try {
+        this.currentProjectId = projectId;
+        this.currentAuditRecord = exp;
+        this.currentProject = exp.datos;
+
+        const ext = file.name.slice(file.name.lastIndexOf(".") + 1).toLowerCase();
+        if (!["pdf", "xlsx", "xls", "xlsm"].includes(ext)) {
+          alert("El archivo de Ficha de Priorización debe ser un documento en formato .pdf o .xlsx / .xls.");
+          return;
+        }
+
+        // 1. Lectura de contenido estructurado y firmas
+        let text = "";
+        let firmas = null;
+
+        if (ext === "pdf") {
+          text = await FolderReader.readPdfOrText(file);
+          firmas = await FolderReader.extraerFirmasPdf(file);
+        } else {
+          text = await FolderReader.readExcelAsText(file);
+          firmas = await FolderReader.extraerFirmasExcel(file);
+        }
+
+        // 2. Extraer datos territoriales y viales si text existe
+        let extractedMpio = null;
+        let extractedSubreg = null;
+        let extractedCod = null;
+        let extractedLongitud = null;
+        let extractedVias = [];
+
+        if (text) {
+          const mpiosList = (window.SIPRO_DATA && (SIPRO_DATA.municipiosAntioquia || SIPRO_DATA.municipios)) || [];
+          const normText = FolderReader.normalizeText(text).toUpperCase();
+          for (const m of mpiosList) {
+            const normM = FolderReader.normalizeText(m.nombre).toUpperCase();
+            if (normText.includes(normM)) {
+              extractedMpio = m.nombre;
+              extractedSubreg = m.subregion;
+              extractedCod = m.codigo;
+              break;
+            }
+          }
+          const mLong = text.match(/(?:LONGITUD|METROS|ML)[\s:\._-]*([0-9\.\,]+)/i);
+          if (mLong) {
+            const parsedL = parseFloat(mLong[1].replace(/,/g, ''));
+            if (!isNaN(parsedL) && parsedL > 0) extractedLongitud = parsedL;
+          }
+          const matchedCodes = text.match(/\b05\d{3}VT\d{2,3}\b/gi);
+          if (matchedCodes) extractedVias = [...new Set(matchedCodes.map(c => c.toUpperCase()))];
+        }
+
+        // 3. Extracción de firmas mediante Motor Heurístico y Respaldo Multi-Documento
+        const allFiles = exp.archivos || (exp.archivosFiles ? Object.values(exp.archivosFiles) : []);
+        const detectedMap = exp.archivosFiles || {};
+        const mpioTarget = extractedMpio || exp.municipio;
+
+        if (!firmas || !firmas.alcalde || !firmas.secretario) {
+          firmas = await FolderReader.extraerFirmasFichaPriorizacion(
+            allFiles,
+            file,
+            [file],
+            detectedMap,
+            exp.archivosMetadata || {},
+            mpioTarget
+          );
+        }
+
+        const isExcel = ["xlsx", "xls", "xlsm"].includes(ext);
+        const isPdf = ext === "pdf";
+
+        const fichaState = {
+          existe: true,
+          detected: true,
+          archivoPdf: isPdf ? file : (exp.fichaPriorizacion?.archivoPdf || null),
+          archivoExcel: isExcel ? file : (exp.fichaPriorizacion?.archivoExcel || null),
+          archivoVisualizacion: file,
+          fileName: file.name,
+          municipio: extractedMpio || exp.municipio,
+          codMunicipio: extractedCod || exp.codMunicipio,
+          subregion: extractedSubreg || exp.subregion,
+          vias: extractedVias.length > 0 ? extractedVias : (exp.datos?.vias || []),
+          codigosViales: extractedVias.length > 0 ? extractedVias : (exp.datos?.codigosViales || []),
+          longitudTotalM: extractedLongitud || exp.datos?.longitudM || 0,
+          textoExtraido: text
+        };
+
+        exp.fichaPriorizacion = fichaState;
+        if (exp.datos) {
+          exp.datos.fichaPriorizacion = fichaState;
+          if (extractedMpio) {
+            exp.municipio = extractedMpio;
+            exp.datos.municipio = extractedMpio;
+          }
+          if (extractedSubreg) {
+            exp.subregion = extractedSubreg;
+            exp.datos.subregion = extractedSubreg;
+          }
+          if (extractedCod) {
+            exp.codMunicipio = extractedCod;
+            exp.datos.codMunicipio = extractedCod;
+          }
+          if (extractedLongitud) {
+            exp.datos.longitudM = extractedLongitud;
+          }
+          if (firmas) {
+            if (firmas.alcalde && firmas.alcalde.nombre) {
+              exp.datos.alcalde = {
+                nombre: firmas.alcalde.nombre,
+                cargo: firmas.alcalde.cargo || "ALCALDE MUNICIPAL",
+                cedula: firmas.alcalde.cedula || "",
+                origen: firmas.alcalde.origen || "Extraído de: Ficha de Priorización"
+              };
+              exp.alcalde = exp.datos.alcalde;
+            }
+            if (firmas.secretario && firmas.secretario.nombre) {
+              exp.datos.secretarioPlaneacion = {
+                nombre: firmas.secretario.nombre,
+                cargo: firmas.secretario.cargo || "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS",
+                cedula: firmas.secretario.cedula || "",
+                origen: firmas.secretario.origen || "Extraído de: Ficha de Priorización"
+              };
+              exp.secretarioPlaneacion = exp.datos.secretarioPlaneacion;
+            }
+          }
+        }
+
+        // Limpiar alertas de Ficha Faltante en Fase 3
+        if (exp.fase3) {
+          exp.fase3.observacionesEditadas = exp.fase3.observacionesEditadas || {};
+          exp.fase3.matrizObservaciones = exp.fase3.matrizObservaciones || {};
+          delete exp.fase3.observacionesEditadas["FICHA_PRIORIZACION"];
+          delete exp.fase3.observacionesEditadas["ficha_priorizacion"];
+          delete exp.fase3.matrizObservaciones["FICHA_PRIORIZACION"];
+          delete exp.fase3.matrizObservaciones["ficha_priorizacion"];
+        }
+
+        // Sincronizar en mapas globales
+        if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[projectId]) {
+          SIPRO_DATA.expedientesMap[projectId].fichaPriorizacion = fichaState;
+          if (exp.datos) SIPRO_DATA.expedientesMap[projectId].datos = exp.datos;
+        }
+        if (window.proyectosAuditados && window.proyectosAuditados[projectId]) {
+          window.proyectosAuditados[projectId].fichaPriorizacion = fichaState;
+          if (exp.datos) window.proyectosAuditados[projectId].datos = exp.datos;
+        }
+
+        // Re-evaluar Fase 2, compuertas y KPIs
+        if (exp.datos) {
+          exp.fase2 = DocumentalEngine.auditProject(exp.datos);
+        }
+        if (typeof this.actualizarBarraCompuertas === "function") {
+          this.actualizarBarraCompuertas(projectId);
+        }
+        if (typeof this.actualizarKPIsEjecutivos === "function") {
+          this.actualizarKPIsEjecutivos(projectId);
+        }
+
+        await this.saveAuditProgress(true);
+
+        // Refrescar vistas
+        const docCont = document.getElementById("documentalMatrixContainer");
+        if (docCont && exp.fase2) {
+          DocumentalEngine.renderDocumentalMatrix(exp.fase2, docCont, this.currentFilterCluster || "ALL", projectId);
+        }
+        const repCont = document.getElementById("officialReportContainer");
+        if (repCont && exp.datos) {
+          ReportsEngine.renderOfficialReport(exp.datos, exp.auditGlobal, repCont);
+        }
+
+        if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+          FolderReader.showToast(`✓ Ficha de Priorización procesada con éxito: ${file.name}`);
+        } else {
+          alert(`✓ Ficha de Priorización procesada con éxito: ${file.name}`);
+        }
+      } catch (err) {
+        console.error("Error al procesar Ficha de Priorización:", err);
+        alert("Error al procesar la Ficha de Priorización: " + err.message);
+      }
+    };
+
+    if (directFile) {
+      await processFicha(directFile);
+    } else {
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = ".xlsx,.xls,.xlsm,.pdf";
+      fileInput.onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) {
+          await processFicha(file);
+        }
+      };
       fileInput.click();
     }
   },
@@ -2229,6 +2757,9 @@ window.saveAuditProgress = function (silent) {
 };
 window.actualizarKPIsEjecutivos = function (proyectoId) {
   return App.actualizarKPIsEjecutivos(proyectoId);
+};
+window.actualizarBarraCompuertas = function (proyectoId) {
+  return App.actualizarBarraCompuertas(proyectoId);
 };
 
 window.subirSubsanacionItem = function (arg1, arg2, arg3) {

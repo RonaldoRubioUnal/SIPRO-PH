@@ -213,6 +213,18 @@ const FolderReader = {
   },
 
   /**
+   * Determina si un archivo corresponde estrictamente a la Ficha de Priorización:
+   * Requiere extensión .pdf, .xlsx, .xlsm, .xls o .xlsb y contener las raíces 'ficha' + 'prioriz' o 'acta' + 'prioriz'
+   */
+  isFichaPriorizacionFile(file) {
+    if (!file || !file.name) return false;
+    const ext = this.getFileExtension(file);
+    if (!["pdf", "xlsx", "xlsm", "xls", "xlsb"].includes(ext)) return false;
+    const clean = this.cleanFileNameForSemanticMatch(file.name);
+    return (clean.includes("ficha") || clean.includes("acta")) && clean.includes("prioriz");
+  },
+
+  /**
    * Evalúa la coincidencia semántica flexible por raíces para clasificar un archivo en uno o varios ítems
    */
   matchFileToItems(file) {
@@ -243,13 +255,13 @@ const FolderReader = {
     // 4. Reglas semánticas individuales para cada ítem (usando raíces flexibles y raíz 'alcald'):
     // Item 1: Solicitud
     if (["solicitud", "carta", "oficio", "intencion", "formal", "peticion"].some(k => clean.includes(k)) &&
-        !["despiece", "especificac", "cedula", "rut", "posesion"].some(e => clean.includes(e))) {
+      !["despiece", "especificac", "cedula", "rut", "posesion"].some(e => clean.includes(e))) {
       matchedItemIds.push(1);
     }
 
     // Item 2: Especificaciones y diseño
     if (["especificac", "especif", "esquema", "memoria tecnica", "estudios", "diseno"].some(k => clean.includes(k)) &&
-        !["despiece", "presupuesto", "apu"].some(e => clean.includes(e))) {
+      !["despiece", "presupuesto", "apu"].some(e => clean.includes(e))) {
       matchedItemIds.push(2);
     }
 
@@ -270,28 +282,28 @@ const FolderReader = {
 
     // Item 4: Certificado vías a cargo / terciarias
     if ((["vias a cargo", "terciaria", "red vial", "vias terciarias"].some(k => clean.includes(k)) ||
-         (clean.includes("certificado") && clean.includes("via"))) &&
-        !["especificac", "despiece", "posesion"].some(e => clean.includes(e))) {
+      (clean.includes("certificado") && clean.includes("via"))) &&
+      !["especificac", "despiece", "posesion"].some(e => clean.includes(e))) {
       matchedItemIds.push(4);
     }
 
     // Item 5: Socialización
     if ((["socializ", "concertacion"].some(k => clean.includes(k)) ||
-         (clean.includes("comunitaria") && clean.includes("asistencia")) ||
-         (clean.includes("acta") && ["comunidad", "asistencia", "reunion", "participacion"].some(k => clean.includes(k)))) &&
-        !["posesion", "especificac", "despiece"].some(e => clean.includes(e))) {
+      (clean.includes("comunitaria") && clean.includes("asistencia")) ||
+      (clean.includes("acta") && ["comunidad", "asistencia", "reunion", "participacion"].some(k => clean.includes(k)))) &&
+      !["posesion", "especificac", "despiece"].some(e => clean.includes(e))) {
       matchedItemIds.push(5);
     }
 
     // Item 6: Registro fotográfico
     if (["fotograf", "fotos", "foto", "evidencia"].some(k => clean.includes(k)) &&
-        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      !["especificac", "despiece"].some(e => clean.includes(e))) {
       matchedItemIds.push(6);
     }
 
     // Item 7: Cédula Alcalde / Alcaldesa
     if ((["cedula", "identidad", "identificacion"].some(k => clean.includes(k)) || /\bcc\b/.test(cleanNorm)) &&
-        !["rut", "foto"].some(e => clean.includes(e))) {
+      !["rut", "foto"].some(e => clean.includes(e))) {
       matchedItemIds.push(7);
     }
 
@@ -302,19 +314,19 @@ const FolderReader = {
 
     // Item 9: Concejo / Facultades para contratar
     if (["facultad", "facultades", "concejo", "acuerdo", "autorizacion"].some(k => clean.includes(k)) &&
-        !["posesion", "socializ", "especificac"].some(e => clean.includes(e))) {
+      !["posesion", "socializ", "especificac"].some(e => clean.includes(e))) {
       matchedItemIds.push(9);
     }
 
     // Item 10: RUT
     if (["rut", "tributario", "dian"].some(k => clean.includes(k)) &&
-        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      !["especificac", "despiece"].some(e => clean.includes(e))) {
       matchedItemIds.push(10);
     }
 
     // Item 11: Contraloría (Alcalde/Alcaldesa y Municipio)
     if ((["contralor", "sirec", "boletin"].some(k => clean.includes(k)) || (clean.includes("fiscal") && !clean.includes("parafiscal"))) &&
-        !["procurad", "policia"].some(e => clean.includes(e))) {
+      !["procurad", "policia"].some(e => clean.includes(e))) {
       matchedItemIds.push(11);
     }
 
@@ -325,21 +337,21 @@ const FolderReader = {
 
     // Item 13: Antecedentes judiciales policía
     if (["judicial", "policia", "pasado judicial"].some(k => clean.includes(k)) &&
-        !["rnmc", "correctivas", "sexuales"].some(e => clean.includes(e))) {
+      !["rnmc", "correctivas", "sexuales"].some(e => clean.includes(e))) {
       matchedItemIds.push(13);
     }
 
     // Item 14: Procuraduría (Alcalde/Alcaldesa y Municipio)
     if (["procurad", "disciplinario", "siri"].some(k => clean.includes(k)) &&
-        !["contralor", "policia"].some(e => clean.includes(e))) {
+      !["contralor", "policia"].some(e => clean.includes(e))) {
       matchedItemIds.push(14);
     }
 
     // Item 15: Parafiscales y seguridad social
     if ((["parafiscal", "seguridad social", "aportes"].some(k => clean.includes(k)) ||
-         (clean.includes("seguridad") && !clean.includes("policia")) ||
-         (clean.includes("paz y salvo") && !clean.includes("alimento"))) &&
-        !["despiece", "especificac"].some(e => clean.includes(e))) {
+      (clean.includes("seguridad") && !clean.includes("policia")) ||
+      (clean.includes("paz y salvo") && !clean.includes("alimento"))) &&
+      !["despiece", "especificac"].some(e => clean.includes(e))) {
       matchedItemIds.push(15);
     }
 
@@ -350,7 +362,7 @@ const FolderReader = {
 
     // Item 17: Compromiso anticorrupción
     if (!isBundle && (["anticorrupcion", "pacto"].some(k => clean.includes(k)) || (clean.includes("compromiso") && clean.includes("corrupcion"))) &&
-        !clean.includes("paco")) {
+      !clean.includes("paco")) {
       matchedItemIds.push(17);
     }
 
@@ -366,7 +378,7 @@ const FolderReader = {
 
     // Item 20: No multas ni sanciones
     if (!isBundle && ["multas", "sancion", "no multas", "incumplimiento"].some(k => clean.includes(k)) &&
-        !["rnmc", "correctivas"].some(e => clean.includes(e))) {
+      !["rnmc", "correctivas"].some(e => clean.includes(e))) {
       matchedItemIds.push(20);
     }
 
@@ -382,27 +394,27 @@ const FolderReader = {
 
     // Item 23: Banco de proyectos / BPIN
     if (((clean.includes("banco") && clean.includes("proyecto")) || ["bpin", "radicacion"].some(k => clean.includes(k))) &&
-        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      !["especificac", "despiece"].some(e => clean.includes(e))) {
       matchedItemIds.push(23);
     }
 
     // Item 25: Cronograma de obra
     if (["cronograma", "plan de trabajo"].some(k => clean.includes(k)) &&
-        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      !["especificac", "despiece"].some(e => clean.includes(e))) {
       matchedItemIds.push(25);
     }
 
     // Item 26: Plan de Desarrollo Municipal
     if ((["plan desarrollo", "pdd", "plan de desarrollo"].some(k => clean.includes(k)) ||
-         (clean.includes("desarrollo") && !clean.includes("social") && !clean.includes("trabajo"))) &&
-        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      (clean.includes("desarrollo") && !clean.includes("social") && !clean.includes("trabajo"))) &&
+      !["especificac", "despiece"].some(e => clean.includes(e))) {
       matchedItemIds.push(26);
     }
 
     // Item 27: Cofinanciación / CDP / Contrapartida
     if ((["cofinanc", "cofianc", "vigencias futuras", "cdp", "disponibilidad presupuestal", "disponibilidad", "contrapartida"].some(k => clean.includes(k)) ||
-         (clean.includes("compromiso") && ["junta", "jac", "comunitario", "aporte"].some(j => clean.includes(j)))) &&
-        !["especificac", "despiece", "anticorrupcion"].some(e => clean.includes(e))) {
+      (clean.includes("compromiso") && ["junta", "jac", "comunitario", "aporte"].some(j => clean.includes(j)))) &&
+      !["especificac", "despiece", "anticorrupcion"].some(e => clean.includes(e))) {
       matchedItemIds.push(27);
     }
 
@@ -492,7 +504,7 @@ const FolderReader = {
               console.log("Ítem 3 detectado por inspección interna de tabla de despiece en Excel:", file.name);
               break;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -510,7 +522,7 @@ const FolderReader = {
               console.log("Ítem 28 detectado por inspección interna de hoja PRESUPUESTO:", file.name);
               break;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -590,28 +602,42 @@ const FolderReader = {
   async triggerFolderPicker() {
     if (window.showDirectoryPicker) {
       try {
-        const dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-        const files = [];
-        async function readDir(handle, currentPath = "") {
-          for await (const entry of handle.values()) {
-            if (entry.kind === "file") {
-              const file = await entry.getFile();
-              Object.defineProperty(file, "webkitRelativePath", {
-                value: currentPath ? `${currentPath}/${file.name}` : file.name,
-                configurable: true
-              });
-              file._handle = entry;
-              files.push(file);
-            } else if (entry.kind === "directory") {
-              await readDir(entry, currentPath ? `${currentPath}/${entry.name}` : entry.name);
-            }
+        let dirHandle = null;
+        try {
+          dirHandle = await window.showDirectoryPicker({ mode: "read" });
+        } catch (eDir) {
+          if (eDir.name === "AbortError") return;
+          console.warn("showDirectoryPicker con read falló, reintentando básico:", eDir);
+          try {
+            dirHandle = await window.showDirectoryPicker();
+          } catch (eBasic) {
+            if (eBasic.name === "AbortError") return;
+            throw eBasic;
           }
         }
-        await readDir(dirHandle, dirHandle.name);
-        if (files.length > 0) {
-          const exp = await this.readFolder(files, dirHandle);
-          if (exp) exp.dirHandle = dirHandle;
-          return;
+        if (dirHandle) {
+          const files = [];
+          async function readDir(handle, currentPath = "") {
+            for await (const entry of handle.values()) {
+              if (entry.kind === "file") {
+                const file = await entry.getFile();
+                Object.defineProperty(file, "webkitRelativePath", {
+                  value: currentPath ? `${currentPath}/${file.name}` : file.name,
+                  configurable: true
+                });
+                file._handle = entry;
+                files.push(file);
+              } else if (entry.kind === "directory") {
+                await readDir(entry, currentPath ? `${currentPath}/${entry.name}` : entry.name);
+              }
+            }
+          }
+          await readDir(dirHandle, dirHandle.name);
+          if (files.length > 0) {
+            const exp = await this.readFolder(files, dirHandle);
+            if (exp) exp.dirHandle = dirHandle;
+            return;
+          }
         }
       } catch (err) {
         if (err.name === "AbortError") return;
@@ -876,7 +902,7 @@ const FolderReader = {
                     const kmlTxt = await extractedFile.text();
                     extractedFile._cachedKmlText = kmlTxt;
                     file._cachedKmlText = kmlTxt;
-                  } catch (kErr) {}
+                  } catch (kErr) { }
                 }
                 Object.defineProperty(extractedFile, 'webkitRelativePath', {
                   value: `${parentFolder}/${cleanEntryName}`,
@@ -959,10 +985,7 @@ const FolderReader = {
       const files = await this.expandirArchivosComprimidos(rawFiles);
 
       // 1. Detectar si los archivos pertenecen a múltiples proyectos (por Fichas de priorización en distintas subcarpetas)
-      const fichas = files.filter(f => {
-        const norm = this.cleanForRegex(f.name);
-        return norm.includes("ficha") && norm.includes("prioriz");
-      });
+      const fichas = files.filter(f => this.isFichaPriorizacionFile(f));
 
       // Deduplicar fichas que estén en la misma carpeta física (ej. .pdf y .xlsx de la misma ficha en la misma carpeta)
       const seenDirs = new Map();
@@ -972,9 +995,11 @@ const FolderReader = {
         if (!seenDirs.has(dir)) {
           seenDirs.set(dir, f);
         } else {
-          // Preferir .pdf sobre .xlsx si ambos existen en el mismo directorio
+          // Si ambos existen en el mismo directorio, priorizar Excel para extracción de datos
           const current = seenDirs.get(dir);
-          if (this.getFileExtension(current) !== 'pdf' && this.getFileExtension(f) === 'pdf') {
+          const isCurrentExcel = ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(this.getFileExtension(current));
+          const isNewExcel = ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(this.getFileExtension(f));
+          if (!isCurrentExcel && isNewExcel) {
             seenDirs.set(dir, f);
           }
         }
@@ -1000,14 +1025,11 @@ const FolderReader = {
         }
         this.showToast(`✓ Se auditaron ${projectGroups.length} proyectos de manera independiente.`);
       } else {
-        // Procesamiento de un solo proyecto
-        let fichaFile = uniqueFichas[0] || fichas.find(f => this.getFileExtension(f) === 'pdf')
-          || fichas.find(f => ['xlsx', 'xls', 'xlsm'].includes(this.getFileExtension(f)))
+        // Procesamiento de un solo proyecto: asignación estricta de Ficha de Priorización (sin falsos positivos)
+        let fichaFile = uniqueFichas[0] || fichas.find(f => ['xlsx', 'xls', 'xlsm'].includes(this.getFileExtension(f)))
+          || fichas.find(f => this.getFileExtension(f) === 'pdf')
           || fichas[0]
-          || files.find(f => {
-            const norm = this.cleanForRegex(f.name);
-            return norm.includes("ficha") || norm.includes("prioriz");
-          });
+          || null;
 
         const rec = await this.processSingleProjectFiles(files, fichaFile, dirHandle);
         if (rec) {
@@ -1032,7 +1054,7 @@ const FolderReader = {
       const relPath = f.webkitRelativePath || "";
       const dir = relPath.includes("/") ? relPath.slice(0, relPath.lastIndexOf("/")) : "";
       const fichaTop = relPath.split('/')[0];
-      
+
       const relatedFiles = files.filter(item => {
         const itemPath = item.webkitRelativePath || "";
         if (dir && (itemPath.startsWith(dir + "/") || itemPath === dir)) return true;
@@ -1067,9 +1089,26 @@ const FolderReader = {
     // =========================================================================
     // PASO 1: DETECCIÓN Y LECTURA BLINDADA DE "FICHA DE PRIORIZACIÓN"
     // =========================================================================
+    const mpiosList = SIPRO_DATA.municipiosAntioquia || SIPRO_DATA.municipios || [];
+
+    // Localizar Ficha de Priorización estrictamente (nomenclatura 'ficha' + 'prioriz')
+    const allFichas = files.filter(f => this.isFichaPriorizacionFile(f));
+    const archivoExcel = allFichas.find(f => ["xlsx", "xlsm", "xls"].includes(this.getFileExtension(f))) || null;
+    const archivoPdf = allFichas.find(f => this.getFileExtension(f) === "pdf") || null;
+    const existeFicha = Boolean(archivoExcel || archivoPdf);
+
+    // Prioridad 1 para extracción de datos estructurados: Excel (las celdas nunca pierden texto)
+    // Para visualización: preferir PDF si existe, de lo contrario Excel
+    fichaFile = existeFicha ? (archivoExcel || archivoPdf) : null;
+    const archivoVisualizacion = existeFicha ? (archivoPdf || archivoExcel) : null;
+
     let fichaData = {
-      detected: false,
-      fileName: null,
+      existe: existeFicha,
+      detected: existeFicha,
+      archivoPdf: archivoPdf,
+      archivoExcel: archivoExcel,
+      archivoVisualizacion: archivoVisualizacion,
+      fileName: fichaFile ? fichaFile.name : null,
       municipio: null,
       codMunicipio: null,
       subregion: null,
@@ -1082,26 +1121,7 @@ const FolderReader = {
       textoExtraido: ""
     };
 
-    const mpiosList = SIPRO_DATA.municipiosAntioquia || SIPRO_DATA.municipios || [];
-
-    // Localizar ficha si no vino suministrada o buscar alternativas (.pdf vs .xlsx)
-    const allFichas = files.filter(f => {
-      const norm = this.cleanForRegex(f.name);
-      return norm.includes("ficha") && norm.includes("prioriz");
-    });
-    if (!fichaFile || allFichas.length > 1) {
-      fichaFile = allFichas.find(f => this.getFileExtension(f) === "pdf")
-        || allFichas.find(f => ["xlsx", "xls", "xlsm"].includes(this.getFileExtension(f)))
-        || allFichas[0]
-        || files.find(f => {
-          const norm = this.cleanForRegex(f.name);
-          return norm.includes("ficha") || norm.includes("prioriz");
-        });
-    }
-
     if (fichaFile) {
-      fichaData.detected = true;
-      fichaData.fileName = fichaFile.name;
       let text = "";
       try {
         const ext = this.getFileExtension(fichaFile);
@@ -1178,7 +1198,7 @@ const FolderReader = {
 
           // C. Extraer Longitud de la sección 1 (ej: "420 m", "1000 m")
           const longMatch = normSec.match(/(?:CONSTRUCCION DE PLACA HUELLAS?|VIAS TERCIARIAS|LONGITUD|META)[\s\S]{0,120}?([0-9\.\,]+)\s*(?:M\b|METROS)/i)
-                         || normSec.match(/\b([0-9]{2,5})\s*M\b/);
+            || normSec.match(/\b([0-9]{2,5})\s*M\b/);
           if (longMatch) {
             const lVal = parseFloat(longMatch[1].replace(/\./g, "").replace(",", "."));
             if (lVal >= 40 && lVal <= 25000) fichaData.longitudTotalM = lVal;
@@ -1186,7 +1206,7 @@ const FolderReader = {
 
           // D. Extraer Aporte del Departamento
           const aporteMatch = sectionText.match(/(?:VALOR|APORTADO POR EL DEPARTAMENTO)[\s\S]{0,120}?\$\s*([0-9\.\,]{6,15})/i)
-                           || sectionText.match(/\$\s*([0-9\.\,]{6,15})/);
+            || sectionText.match(/\$\s*([0-9\.\,]{6,15})/);
           if (aporteMatch) {
             const valNum = parseInt(aporteMatch[1].replace(/[\.\,]/g, ""), 10);
             if (valNum > 10000000) {
@@ -1284,74 +1304,118 @@ const FolderReader = {
     // PASO 3: METADATOS Y TEXTO DE LOS ARCHIVOS DETECTADOS (BLINDADO CON TRY/CATCH)
     // =========================================================================
     const archivosMetadata = {};
+    const itemTextsMap = {};
     let extractedEngineer = null;
     let extractedMatricula = null;
     let extractedAlcalde = null;
+    let extractedCargoAlcalde = null;
+    let extractedCcAlcalde = null;
+    let extractedOrigenAlcalde = null;
     let extractedSecretario = null;
+    let extractedCargoSecretario = null;
+    let extractedCcSecretario = null;
+    let extractedOrigenSecretario = null;
 
+    // Indexación ágil de metadatos de los 28 ítems sin bloqueo de hilo
     for (let i = 1; i <= 28; i++) {
       const file = detectedMap[i];
       if (file) {
-        let textSnippet = "";
-        try {
-          const ext = this.getFileExtension(file);
-          if (ext === "pdf" && (i === 1 || i === 2 || i === 3 || i === 4 || i === 8 || i === 11 || i === 12)) {
-            textSnippet = await this.readPdfOrText(file);
-          } else if (["xlsx", "xls", "xlsm"].includes(ext) && (i === 2 || i === 3 || i === 28)) {
-            textSnippet = await this.readExcelAsText(file);
-          }
-        } catch (eSnippet) {
-          console.warn("Error leyendo snippet de " + file.name + ":", eSnippet);
-        }
-
         const allMatched = detectedFilesMap[i] || [file];
         archivosMetadata[i] = {
           fileName: allMatched.map(f => f.name).join(", "),
           sizeBytes: file.size,
           lastModified: file.lastModified,
-          textSnippet: textSnippet ? textSnippet.slice(0, 500) : "Documento digital verificado en la carpeta."
+          textSnippet: "Documento digital verificado en la carpeta."
         };
+      }
+    }
 
-        if (textSnippet) {
-          // Extraer Alcalde (en Item 1 o cualquier documento municipal)
-          if (!extractedAlcalde && (i === 1 || i === 4 || i === 8 || i === 11)) {
-            const alcMatch = textSnippet.match(/(?:ALCALDE(?:SA)?(?:\s+MUNICIPAL)?[\s:\._-]*)([A-ZÁÉÍÓÚÑ\s]{4,35})/i)
-                          || textSnippet.match(/([A-ZÁÉÍÓÚÑ\s]{4,35})\s*\n[\s\S]{0,35}?ALCALDE(?:SA)?(?:\s+MUNICIPAL)?/i);
-            if (alcMatch) {
-              const c = alcMatch[1].trim().replace(/\n/g, ' ');
-              if (c.length > 3 && !c.toLowerCase().includes("antioquia") && !c.toLowerCase().includes("gobernador")) {
-                extractedAlcalde = c;
-              }
-            }
+    // Extracción rápida de Matrícula e Ingeniero Proyectista (Ítems 2 y 3, máximo 2 páginas)
+    for (const i of [2, 3]) {
+      const file = detectedMap[i];
+      if (file && (!extractedMatricula || !extractedEngineer)) {
+        try {
+          const ext = this.getFileExtension(file);
+          let quickSnippet = "";
+          if (ext === "pdf") {
+            quickSnippet = await this.readPdfOrText(file, 2);
+          } else if (["xlsx", "xls", "xlsm", "xlsb"].includes(ext)) {
+            quickSnippet = await this.readExcelAsText(file);
           }
+          if (quickSnippet) {
+            itemTextsMap[i] = quickSnippet;
+            if (archivosMetadata[i]) archivosMetadata[i].textSnippet = quickSnippet.slice(0, 500);
+            const matMatch = quickSnippet.match(/mat[\s\.:]*([0-9A-Z\-\s]+ANT)/i) || quickSnippet.match(/(05202-[0-9A-Z]+)/i);
+            if (matMatch && !extractedMatricula) extractedMatricula = matMatch[1].trim();
 
-          // Extraer Secretario(a) de Planeación / Obras Públicas
-          if (!extractedSecretario && (i === 2 || i === 4 || i === 8 || i === 11 || i === 12 || i === 28)) {
-            const secMatch = textSnippet.match(/(?:SECRETARI[OA]\s+DE\s+(?:PLANEACI[OÓ]N|INFRAESTRUCTURA|OBRAS(?:\s+P[UÚ]BLICAS)?))[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{4,35})/i)
-                          || textSnippet.match(/([A-ZÁÉÍÓÚÑ\s]{4,35})\s*\n[\s\S]{0,45}?(?:SECRETARI[OA]\s+DE\s+(?:PLANEACI[OÓ]N|INFRAESTRUCTURA|OBRAS))/i);
-            if (secMatch) {
-              const s = secMatch[1].trim().replace(/\n/g, ' ');
-              if (s.length > 3 && !s.toLowerCase().includes("antioquia")) {
-                extractedSecretario = s;
-              }
-            }
+            const ingMatch = quickSnippet.match(/ING(?:ENIERO|ENIERA)?[\.\s]+([A-Z\s]{8,35})/i);
+            if (ingMatch && !extractedEngineer) extractedEngineer = ingMatch[0].trim();
           }
-
-          // Matrícula e Ingeniero
-          if (i === 2 || i === 3) {
-            const matMatch = textSnippet.match(/mat[\s\.:]*([0-9A-Z\-\s]+ANT)/i) || textSnippet.match(/(05202-[0-9A-Z]+)/i);
-            if (matMatch) extractedMatricula = matMatch[1].trim();
-
-            const ingMatch = textSnippet.match(/ING(?:ENIERO|ENIERA)?[\.\s]+([A-Z\s]{8,35})/i);
-            if (ingMatch) extractedEngineer = ingMatch[0].trim();
-          }
+        } catch (eSnippet) {
+          console.warn("Aviso leyendo snippet de ítem " + i + ":", eSnippet);
         }
       }
     }
 
-    if (!extractedAlcalde && fichaData.textoExtraido) {
-      const alcFichaMatch = fichaData.textoExtraido.match(/(?:NOMBRE\s+DEL\s+ALCALDE|ALCALDE(?:SA)?(?:\s+MUNICIPAL)?)[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{4,35})/i);
-      if (alcFichaMatch) extractedAlcalde = alcFichaMatch[1].trim();
+    // Extracción de fecha para ítems sujetos a vigencia mensual estricta (9, 10, 11, 12, 13, 14, 15, 16, 21, 22)
+    const itemsVigencia = [9, 10, 11, 12, 13, 14, 15, 16, 21, 22];
+    for (const i of itemsVigencia) {
+      const file = detectedMap[i] || detectedMap[String(i)];
+      if (file) {
+        try {
+          const ext = this.getFileExtension(file);
+          let snippet = "";
+          if (ext === "pdf") {
+            snippet = await this.readPdfOrText(file, 5);
+          } else if (["txt", "csv", "json"].includes(ext)) {
+            snippet = await file.text();
+          } else if (["xlsx", "xls", "xlsm", "xlsb"].includes(ext)) {
+            snippet = await this.readExcelAsText(file);
+          }
+          if (snippet) {
+            itemTextsMap[i] = snippet;
+            itemTextsMap[String(i)] = snippet;
+            if (archivosMetadata[i]) archivosMetadata[i].textSnippet = snippet.slice(0, 500);
+            if (archivosMetadata[String(i)]) archivosMetadata[String(i)].textSnippet = snippet.slice(0, 500);
+          }
+          if (typeof DocumentalEngine !== "undefined" && typeof DocumentalEngine.extraerFechaDocumento === "function") {
+            const extDate = DocumentalEngine.extraerFechaDocumento(file, snippet);
+            if (extDate) {
+              if (archivosMetadata[i]) {
+                archivosMetadata[i].fechaDoc = extDate.fecha;
+                archivosMetadata[i].fechaDocStr = extDate.fechaStr;
+              }
+              if (archivosMetadata[String(i)]) {
+                archivosMetadata[String(i)].fechaDoc = extDate.fecha;
+                archivosMetadata[String(i)].fechaDocStr = extDate.fechaStr;
+              }
+            }
+          }
+        } catch (eDate) {
+          console.warn("Aviso extrayendo fecha de ítem " + i + ":", eDate);
+        }
+      }
+    }
+
+    // Extracción de firmas mediante Motor Heurístico y Recursivo de 5 Capas (Ficha + Fallback Multi-Documento)
+    try {
+      const firmasFicha = await this.extraerFirmasFichaPriorizacion(files, fichaFile, allFichas, detectedMap, itemTextsMap, fichaData.municipio);
+      if (firmasFicha) {
+        if (firmasFicha.alcalde && firmasFicha.alcalde.nombre) {
+          extractedAlcalde = firmasFicha.alcalde.nombre;
+          extractedCargoAlcalde = firmasFicha.alcalde.cargo || "ALCALDE MUNICIPAL";
+          extractedCcAlcalde = firmasFicha.alcalde.cedula || "";
+          extractedOrigenAlcalde = firmasFicha.alcalde.origen || "Extraído de: Ficha de Priorización";
+        }
+        if (firmasFicha.secretario && firmasFicha.secretario.nombre) {
+          extractedSecretario = firmasFicha.secretario.nombre;
+          extractedCargoSecretario = firmasFicha.secretario.cargo || "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS";
+          extractedCcSecretario = firmasFicha.secretario.cedula || "";
+          extractedOrigenSecretario = firmasFicha.secretario.origen || "Extraído de: Ficha de Priorización";
+        }
+      }
+    } catch (eFirmas) {
+      console.warn("Aviso al extraer firmas con motor heurístico:", eFirmas);
     }
 
     const matchedCount = Object.keys(archivosDetectadosMap).length;
@@ -1378,6 +1442,8 @@ const FolderReader = {
         longitudIntervencionM: fichaData.longitudTotalM || 0,
         cuantiaKgM: 0,
         cumpleCuantia: false,
+        marcas: [],
+        concreto: [],
         despieceExtraido: {
           tieneDocumento: false,
           archivoNombre: null,
@@ -1388,9 +1454,12 @@ const FolderReader = {
             totalKg: 0,
             cuantiaKgM: 0,
             filasDespiece: []
-          }
+          },
+          standardTemplate: null,
+          marcas: [],
+          concreto: []
         },
-        concretoVolumes: { totalConcretoGlobalM3: 0, totalCementoSacos: 0 }
+        concretoVolumes: { totalConcretoGlobalM3: 0, totalCementoSacos: 0, sacosCemento: 0, totalConcreto21M3: 0, totalConcretoCiclopeoM3: 0, dosificacionGlobal: 0, elementos: {} }
       };
     }
 
@@ -1413,8 +1482,8 @@ const FolderReader = {
       } else if (["zip", "7z", "rar"].includes(ext)) {
         const clean = this.cleanForRegex(f.name);
         if (clean.includes("georref") || clean.includes("trazado") || clean.includes("track") ||
-            clean.includes("tramo") || clean.includes("placa") || clean.includes("kml") || clean.includes("kmz") ||
-            clean.includes("anexo") || clean.includes("item24") || clean.includes("24")) {
+          clean.includes("tramo") || clean.includes("placa") || clean.includes("kml") || clean.includes("kmz") ||
+          clean.includes("anexo") || clean.includes("item24") || clean.includes("24")) {
           georefCandidates.push(f);
         }
       }
@@ -1442,25 +1511,26 @@ const FolderReader = {
         geoConfig &&
         geoConfig.tieneKMZ === true &&
         ((geoConfig.tramos && geoConfig.tramos.length > 0) ||
-         (geoConfig.puntos && geoConfig.puntos.length > 0) ||
-         (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
+          (geoConfig.puntos && geoConfig.puntos.length > 0) ||
+          (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
       );
 
       if (hasValidGeom) {
-        if (!detectedMap[24]) {
-          const primaryFile = georefCandidates.find(f => {
-            const ext = this.getFileExtension(f);
-            return ext === "kml" || ext === "kmz";
-          }) || georefCandidates[0];
-          detectedMap[24] = primaryFile;
-          archivosDetectadosMap[24] = primaryFile.name;
-          archivosMetadata[24] = {
-            fileName: primaryFile.name,
-            sizeBytes: primaryFile.size,
-            lastModified: primaryFile.lastModified,
-            textSnippet: `Georreferenciación verificada en contenedor digital. ${geoConfig.tramos.length} tramos independientes procesados.`
-          };
-        }
+        const primaryFile = detectedMap[24] || detectedMap["24"] || georefCandidates.find(f => {
+          const ext = this.getFileExtension(f);
+          return ext === "kml" || ext === "kmz";
+        }) || georefCandidates[0];
+        detectedMap[24] = primaryFile;
+        detectedMap["24"] = primaryFile;
+        archivosDetectadosMap[24] = primaryFile.name;
+        archivosDetectadosMap["24"] = primaryFile.name;
+        archivosMetadata[24] = {
+          fileName: primaryFile.name,
+          sizeBytes: primaryFile.size,
+          lastModified: primaryFile.lastModified,
+          textSnippet: `Georreferenciación verificada en contenedor digital. ${geoConfig.tramos.length} tramos independientes procesados.`
+        };
+        archivosMetadata["24"] = archivosMetadata[24];
       } else {
         // Garantizar que no quede registrado como detectado si no hay geometrías válidas
         delete detectedMap[24];
@@ -1480,8 +1550,8 @@ const FolderReader = {
       geoConfig &&
       geoConfig.tieneKMZ === true &&
       ((geoConfig.tramos && geoConfig.tramos.length > 0) ||
-       (geoConfig.puntos && geoConfig.puntos.length > 0) ||
-       (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
+        (geoConfig.puntos && geoConfig.puntos.length > 0) ||
+        (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
     );
 
     if (!hasValidGeomConfig) {
@@ -1551,7 +1621,7 @@ const FolderReader = {
         localStorage.removeItem(`sipro_auditoria_${slug}`);
         localStorage.removeItem(`sipro_auditoria_${newExpedienteId}`);
         localStorage.removeItem(`sipro_auditoria_${rawFolderName}`);
-      } catch (e) {}
+      } catch (e) { }
       savedAuditData = null;
     }
 
@@ -1582,9 +1652,9 @@ const FolderReader = {
       modalidad: modalidad,
       vereda: (geoConfig.tramos && geoConfig.tramos.length > 0)
         ? geoConfig.tramos.slice(0, 4).map(t => t.nombrePlacemark).join(", ")
-        : (geoConfig.puntosContraste.length > 0 
-            ? geoConfig.puntosContraste.slice(0, 4).map(p => p.sector).join(", ") 
-            : "Tramos según expediente cargado"),
+        : (geoConfig.puntosContraste.length > 0
+          ? geoConfig.puntosContraste.slice(0, 4).map(p => p.sector).join(", ")
+          : "Tramos según expediente cargado"),
       nombreTramo: `Placa Huella ${fichaData.municipio} (${finalLength}m)`,
       codigoVial: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.codigoVial)
         || geoConfig.codigoViaDeclarado || fichaData.codigosViales[0] || `${fichaData.codMunicipio || '05000'}VT01`,
@@ -1598,15 +1668,32 @@ const FolderReader = {
         nombre: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.alcalde && savedAuditData.datosIdentificacion.alcalde.nombre)
           || extractedAlcalde
           || `ALCALDE MUNICIPAL DE ${fichaData.municipio}`,
-        cedula: "71.000.000",
+        cargo: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.alcalde && savedAuditData.datosIdentificacion.alcalde.cargo)
+          || extractedCargoAlcalde
+          || "ALCALDE MUNICIPAL",
+        cedula: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.alcalde && savedAuditData.datosIdentificacion.alcalde.cedula)
+          || extractedCcAlcalde
+          || "71.000.000",
+        origen: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.alcalde && savedAuditData.datosIdentificacion.alcalde.origen)
+          || extractedOrigenAlcalde
+          || (extractedAlcalde ? "Extraído de: Ficha de Priorización" : "Sin firma detectada"),
         periodo: "2024 - 2027"
       },
       secretarioPlaneacion: {
         nombre: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.secretarioPlaneacion && savedAuditData.datosIdentificacion.secretarioPlaneacion.nombre)
           || extractedSecretario
           || "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS",
-        cargo: "Secretario(a) de Planeación / Obras Públicas",
-        entidad: `Municipio de ${fichaData.municipio}`
+        cargo: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.secretarioPlaneacion && savedAuditData.datosIdentificacion.secretarioPlaneacion.cargo)
+          || extractedCargoSecretario
+          || "Secretario(a) de Planeación / Obras Públicas",
+        cedula: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.secretarioPlaneacion && savedAuditData.datosIdentificacion.secretarioPlaneacion.cedula)
+          || extractedCcSecretario
+          || "",
+        origen: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.secretarioPlaneacion && savedAuditData.datosIdentificacion.secretarioPlaneacion.origen)
+          || extractedOrigenSecretario
+          || (extractedSecretario ? "Extraído de: Ficha de Priorización" : "Sin firma detectada"),
+        entidad: `Municipio de ${fichaData.municipio}`,
+        periodo: "2024 - 2027"
       },
       ingenieroProyectista: {
         nombre: extractedEngineer || "INGENIERO CIVIL PROYECTISTA",
@@ -1632,7 +1719,10 @@ const FolderReader = {
         itemsCumplidos: Object.keys(archivosDetectadosMap).map(Number),
         itemsSubsanar: items27.filter(i => !archivosDetectadosMap[i.id]).map(i => i.id),
         archivosDetectados: archivosDetectadosMap,
-        diasVigencias: { item9: 10, item10: 8, item11: 4, item12: 12, item13: 12, item14: 6, item15: 1, item16: 8, item21: 8, item22: 8 }
+        fechasDocumentos: Object.fromEntries(
+          itemsVigencia.filter(i => archivosMetadata[i] && archivosMetadata[i].fechaDoc)
+            .map(i => [i, archivosMetadata[i].fechaDoc])
+        )
       }
     };
 
@@ -1663,8 +1753,8 @@ const FolderReader = {
       geoConfig &&
       geoConfig.tieneKMZ === true &&
       ((geoConfig.tramos && geoConfig.tramos.length > 0) ||
-       (geoConfig.puntos && geoConfig.puntos.length > 0) ||
-       (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
+        (geoConfig.puntos && geoConfig.puntos.length > 0) ||
+        (geoConfig.puntosInspeccion && geoConfig.puntosInspeccion.length > 0))
     );
 
     audit1B.tieneKMZ = hasValidKmz;
@@ -1729,13 +1819,23 @@ const FolderReader = {
       subregion: fichaData.subregion,
       modalidad: modalidad,
       dirHandle: dirHandle || null,
+      fichaPriorizacion: fichaData,
       historialSubsanaciones: (savedAuditData && savedAuditData.historialSubsanaciones) || [],
       datos: proyectoData,
+      alcalde: proyectoData.alcalde,
+      secretarioPlaneacion: proyectoData.secretarioPlaneacion,
       archivos: files,
       archivosFileMap: detectedMap,
       archivosFilesMap: detectedFilesMap,
       despieceExtraido: despieceConfig.despieceExtraido || despieceConfig,
-      fase1A: { ...audit1A, longitudTramo: finalLength, longitudIntervencionM: finalLength },
+      fase1A: {
+        ...audit1A,
+        longitudTramo: finalLength,
+        longitudIntervencionM: finalLength,
+        tieneDocumento: audit1A.tieneDocumento !== false && despieceConfig.tieneDocumento !== false,
+        marcas: (audit1A.tieneDocumento !== false && despieceConfig.tieneDocumento !== false) ? (audit1A.marcas || []) : [],
+        concreto: (audit1A.tieneDocumento !== false && despieceConfig.tieneDocumento !== false) ? (audit1A.concreto || []) : []
+      },
       concretoVolumes: despieceConfig.concretoVolumes,
       fase1B: {
         ...audit1B,
@@ -2079,6 +2179,7 @@ const FolderReader = {
     let tramoCounter = 1;
     let puntoCounter = 1;
     let totalLengthM = 0;
+    var tramosConformes = 0;
 
     const parser = new DOMParser();
 
@@ -2124,7 +2225,7 @@ const FolderReader = {
 
                 let lenM = 0;
                 for (let j = 0; j < coords.length - 1; j++) {
-                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j+1].lat, coords[j+1].lng);
+                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
                 }
                 totalLengthM += lenM;
 
@@ -2175,7 +2276,7 @@ const FolderReader = {
 
                 let lenM = 0;
                 for (let j = 0; j < coords.length - 1; j++) {
-                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j+1].lat, coords[j+1].lng);
+                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
                 }
                 totalLengthM += lenM;
 
@@ -2457,7 +2558,7 @@ const FolderReader = {
     });
 
     // Cobertura calculada por longitud lineal exacta de subsegmentos si existen tramos
-    const tramosConformes = tramos.filter(t => t.cumple).length;
+    var tramosConformes = Array.isArray(tramos) ? tramos.filter(t => t && t.cumple).length : 0;
     let sumEnViaM = 0;
     let sumTotalTrackM = 0;
     let hasTrackSubAnalysis = false;
@@ -2521,7 +2622,7 @@ const FolderReader = {
         : 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) con geometrías válidas en el expediente.',
       longitudKmlM: lengthKmzM,
       desviacionLongitudPct: 0.8,
-      puntosAnomalia: tramos.length > 0 ? Math.max(0, tramos.length - tramosConformes) : Math.max(0, puntosInspeccion.length - puntosInspeccion.filter(p => p.cumple).length),
+      puntosAnomalia: tramos.length > 0 ? Math.max(0, tramos.length - (typeof tramosConformes !== 'undefined' ? tramosConformes : 0)) : Math.max(0, puntosInspeccion.length - puntosInspeccion.filter(p => p.cumple).length),
       tramos: tramos,
       puntos: puntosInspeccion,
       puntosInspeccion: puntosInspeccion,
@@ -2622,10 +2723,10 @@ const FolderReader = {
     const R = 6371000;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   },
 
@@ -2706,7 +2807,7 @@ const FolderReader = {
     // Rieles / Huellas
     let rielesDim = "No especificado en este documento";
     const rMatch = text.match(/rieles?[\s\S]{0,40}?([0-9\.,]+\s*m?\s*[x×]\s*[0-9\.,]+\s*m?)/i)
-                || text.match(/seccion de placahuella de ([0-9\.,]+ m\s*x\s*[0-9\.,]+ m)/i);
+      || text.match(/seccion de placahuella de ([0-9\.,]+ m\s*x\s*[0-9\.,]+ m)/i);
     if (rMatch) {
       rielesDim = rMatch[1].trim();
     } else if (/\b(?:rieles?|huellas?)\b/i.test(text)) {
@@ -2808,7 +2909,7 @@ const FolderReader = {
       for (const m of dMatches) {
         const masa = m[3];
         const diam = (Math.abs(parseFloat(masa.replace(',', '.')) - 0.56) < 0.05) ? '#3 (3/8")'
-                   : ((Math.abs(parseFloat(masa.replace(',', '.')) - 0.25) < 0.05) ? '#2 (1/4")' : masa);
+          : ((Math.abs(parseFloat(masa.replace(',', '.')) - 0.25) < 0.05) ? '#2 (1/4")' : masa);
         const pNum = parseFloat(m[7].replace(/\./g, '').replace(',', '.'));
         totalKg += (pNum || 0);
 
@@ -2837,7 +2938,7 @@ const FolderReader = {
     else if (/LOCALIZACION/i.test(text) && /TRAMO/i.test(text)) {
       formatoDetectado = "TABLA_DETALLADA";
       columnasDetectadas = ["#", "Componente / Figura", "Longitud (m)", "Diámetro", "Masa (kg/m)", "Total Metros", "Varillas 6m", "Peso Consignado"];
-      
+
       const cleanLines = text.split('\n').map(l => l.trim()).filter(Boolean);
       const reconstructed = cleanLines.join(' ');
       const hispRegex = /(Refuerzo\s+[^\d]+?|Traslapos\s+[^\d]+?)\s+([0-9\.\,]+)\s+(1\/2|3\/8|1\/4|5\/8)\s+([0-9\.\,]+)\s+([0-9\.\,]+)\s+([0-9\.\,]+)\s+([0-9\.\,]+)\s+([0-9\.\,]+)\s+([0-9\.\,]+)/gi;
@@ -3075,64 +3176,66 @@ const FolderReader = {
       const keywordsDespiece = ["despiece", "acero", "placa huella", "rieles", "riostra", "refuerzo", "calculo"];
       const keywordsConcreto = ["concreto", "cemento", "materiales", "volumenes"];
 
+      const isNonDataSheet = (name) => /instructivo|manual|gu[ií]a|read.?me/i.test(name);
+      const dataSheetNames = workbook.SheetNames.filter(name => !isNonDataSheet(name));
+      const searchSheetNames = dataSheetNames.length > 0 ? dataSheetNames : workbook.SheetNames;
+
       let targetSheetName = null;
       let targetSheet = null;
       let concreteSheetName = null;
       let concreteSheet = null;
 
-      // Paso 1: Búsqueda inteligente por nombre de hoja
-      for (const name of workbook.SheetNames) {
+      // Paso 1: Búsqueda inteligente por nombre de hoja (priorizando ACERO y CONCRETO)
+      for (const name of searchSheetNames) {
         const cleanName = this.cleanForRegex(name);
         if (!targetSheetName) {
-          for (const kw of keywordsDespiece) {
-            if (cleanName.includes(kw)) {
-              targetSheetName = name;
-              targetSheet = workbook.Sheets[name];
-              break;
-            }
+          if (cleanName === "acero" || cleanName.includes("despiece") || cleanName.includes("acero")) {
+            targetSheetName = name;
+            targetSheet = workbook.Sheets[name];
           }
         }
         if (!concreteSheetName) {
-          for (const kw of keywordsConcreto) {
-            if (cleanName.includes(kw)) {
-              concreteSheetName = name;
-              concreteSheet = workbook.Sheets[name];
-              break;
-            }
+          if (cleanName === "concreto" || cleanName.includes("concreto") || cleanName.includes("cemento") || cleanName.includes("materiales")) {
+            concreteSheetName = name;
+            concreteSheet = workbook.Sheets[name];
           }
         }
       }
 
-      // Paso 2: Si no se identificó por nombre, inspeccionar contenido interno de celdas
-      if (!targetSheet) {
-        let bestScore = 0;
-        let bestSheetName = null;
-        for (const name of workbook.SheetNames) {
+      // Paso 2: Si falta alguna hoja, inspeccionar contenido interno de secciones en celdas
+      if (!targetSheet || !concreteSheet) {
+        for (const name of searchSheetNames) {
           const ws = workbook.Sheets[name];
           if (!ws) continue;
           const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
-          let score = 0;
+          let hasSteelSec = false;
+          let hasConcreteSec = false;
+
           for (const r of rows) {
             if (!Array.isArray(r)) continue;
             const rText = this.cleanForRegex(r.join(" "));
-            for (const kw of keywordsDespiece) {
-              if (rText.includes(kw)) score++;
+            if (rText.includes("cuadro detallado de despiece") || (rText.includes("despiece") && rText.includes("acero"))) {
+              hasSteelSec = true;
+            }
+            if (rText.includes("cuadro detallado de concreto") || rText.includes("materiales petreos") || (rText.includes("dosificacion") && rText.includes("cemento"))) {
+              hasConcreteSec = true;
             }
           }
-          if (score > bestScore) {
-            bestScore = score;
-            bestSheetName = name;
+
+          if (!targetSheet && hasSteelSec) {
+            targetSheetName = name;
+            targetSheet = ws;
           }
-        }
-        if (bestSheetName) {
-          targetSheetName = bestSheetName;
-          targetSheet = workbook.Sheets[targetSheetName];
+          if (!concreteSheet && hasConcreteSec && name !== targetSheetName) {
+            concreteSheetName = name;
+            concreteSheet = ws;
+          }
         }
       }
 
-      // Fallback a primera hoja si no se encontró coincidencia
+      // Fallback a primera hoja de datos si no se encontró coincidencia de acero
       if (!targetSheet) {
-        targetSheetName = workbook.SheetNames[0];
+        targetSheetName = searchSheetNames[0] || workbook.SheetNames[0];
         targetSheet = workbook.Sheets[targetSheetName];
       }
 
@@ -3411,23 +3514,120 @@ const FolderReader = {
     if (infoGeneral.longitudM === 0 && fichaData.longitudTotalM) infoGeneral.longitudM = fichaData.longitudTotalM;
     if (infoGeneral.anchoM === 0) infoGeneral.anchoM = 5.0;
 
+    // 2.1 Extracción de Sub-tabla 1.1 (Desglose Multitramo)
+    let sec11Start = -1;
+    let sec11End = matrizFilas.length;
+    for (let i = 0; i < matrizFilas.length; i++) {
+      const r = matrizFilas[i];
+      if (!Array.isArray(r)) continue;
+      const t = this.cleanForRegex(r.join(" "));
+      if (sec11Start === -1) {
+        if (t.includes("1.1 desglose de tramos") || t.includes("desglose de tramos")) {
+          sec11Start = i;
+        }
+      } else {
+        if (t.includes("2. cuadro detallado") || t.includes("cuadro detallado de despiece") || t.includes("directriz tecnica")) {
+          sec11End = i;
+          break;
+        }
+      }
+    }
+
+    const tramosMultitramo = [];
+    if (sec11Start !== -1) {
+      let h11Idx = -1;
+      let cTr = -1, cSec = -1, cCod = -1, cL = -1, cA = -1, cObs = -1;
+      for (let rIdx = sec11Start; rIdx < Math.min(sec11Start + 5, sec11End); rIdx++) {
+        const r = matrizFilas[rIdx];
+        if (!Array.isArray(r)) continue;
+        for (let c = 0; c < r.length; c++) {
+          const ct = this.cleanForRegex(String(r[c] || ""));
+          if (ct.includes("tramo") && cTr === -1) cTr = c;
+          else if ((ct.includes("sector") || ct.includes("vereda") || ct.includes("nombre")) && cSec === -1) cSec = c;
+          else if ((ct.includes("codigo") || ct.includes("via")) && cCod === -1) cCod = c;
+          else if (ct.includes("longitud") && cL === -1) cL = c;
+          else if (ct.includes("ancho") && cA === -1) cA = c;
+          else if ((ct.includes("observacion") || ct.includes("localizacion")) && cObs === -1) cObs = c;
+        }
+        if (cL !== -1) {
+          h11Idx = rIdx;
+          break;
+        }
+      }
+      if (h11Idx !== -1) {
+        for (let rIdx = h11Idx + 1; rIdx < sec11End; rIdx++) {
+          const r = matrizFilas[rIdx];
+          if (!Array.isArray(r) || r.length === 0) continue;
+          const rt = this.cleanForRegex(r.join(" "));
+          if (rt.includes("total longitud") || rt.includes("2. cuadro")) break;
+          const lVal = cL !== -1 ? this.cleanNumber(r[cL]) : 0;
+          if (lVal > 0) {
+            const trVal = cTr !== -1 ? String(r[cTr] || "").trim() : `Tramo ${tramosMultitramo.length + 1}`;
+            const secVal = cSec !== -1 ? String(r[cSec] || "").trim() : "";
+            const codVal = cCod !== -1 ? String(r[cCod] || "").trim() : "";
+            const aVal = cA !== -1 ? this.cleanNumber(r[cA]) : 5.0;
+            const obsVal = cObs !== -1 ? String(r[cObs] || "").trim() : "";
+            tramosMultitramo.push({
+              tramo: trVal,
+              codigoVia: codVal,
+              sector: secVal,
+              longitudM: lVal,
+              anchoM: aVal,
+              observaciones: obsVal
+            });
+          }
+        }
+      }
+    }
+    infoGeneral.tramosMultitramo = tramosMultitramo;
+    if (tramosMultitramo.length > 0) {
+      const sumTramosL = tramosMultitramo.reduce((acc, t) => acc + (t.longitudM || 0), 0);
+      if (infoGeneral.longitudM === 0 && sumTramosL > 0) {
+        infoGeneral.longitudM = sumTramosL;
+      }
+      const firstCode = tramosMultitramo.find(t => t.codigoVia && !t.codigoVia.includes("EJ:") && !t.codigoVia.includes("05XXX"))?.codigoVia;
+      if (firstCode && (!infoGeneral.codigoVia || infoGeneral.codigoVia.includes("MULTITRAMO") || infoGeneral.codigoVia.includes("EJ:"))) {
+        infoGeneral.codigoVia = firstCode;
+      }
+    }
+
     // 3. TABLA DE DESPIECE DE ACERO POR ELEMENTO (12 MARCAS OFICIALES)
-    // Prohibición absoluta de fallback/mock: piezas = 0 si no está físicamente diligenciada
-    // 3. TABLA DE DESPIECE DE ACERO POR ELEMENTO (12 MARCAS OFICIALES)
-    // Longitudes de corte dinámicas leídas del documento (cero valores fijos preconfigurados)
+    // Detección estricta de límites de bloque para la Sección 2 (evita que Secciones 3, 4 o 5 sobrescriban marcas)
+    let sec2StartRow = -1;
+    let sec2EndRow = matrizFilas.length;
+
+    for (let rIdx = 0; rIdx < matrizFilas.length; rIdx++) {
+      const r = matrizFilas[rIdx];
+      if (!Array.isArray(r)) continue;
+      const rowText = this.cleanForRegex(r.join(" "));
+      if (sec2StartRow === -1) {
+        if (rowText.includes("2. cuadro detallado") || rowText.includes("cuadro detallado de despiece")) {
+          sec2StartRow = rIdx;
+        }
+      } else {
+        if (rowText.includes("subtotal") || rowText.includes("3. consolidado") || rowText.includes("consolidado general por diametro") || rowText.includes("consolidado por diametro")) {
+          sec2EndRow = rIdx;
+          break;
+        }
+      }
+    }
+
+    const startSearchRow = sec2StartRow !== -1 ? sec2StartRow : 0;
+    const endSearchRow = sec2EndRow !== -1 ? sec2EndRow : matrizFilas.length;
+
     const defaultElements = [
-      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Empalmes escalonados" },
-      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Separación cada 0.20 m" },
-      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Longitud empalme según norma" },
-      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras superiores corridas" },
-      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras inferiores corridas" },
-      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Estribos cerrados c/ 0.20 m" },
-      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "3 barras longitudinales" },
-      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Flejes en U cada 0.25 m" },
-      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "1 barra superior corrida" },
-      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0, obs: "Ganchos de anclaje cada 0.30 m" },
-      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla de refuerzo en extremos" },
-      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla transversal en extremos" }
+      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '', pesoLin: 0, corte: 0, obs: "Empalmes escalonados" },
+      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '', pesoLin: 0, corte: 0, obs: "Separación cada 0.20 m" },
+      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '', pesoLin: 0, corte: 0, obs: "Longitud empalme según norma" },
+      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '', pesoLin: 0, corte: 0, obs: "2 barras superiores corridas" },
+      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '', pesoLin: 0, corte: 0, obs: "2 barras inferiores corridas" },
+      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '', pesoLin: 0, corte: 0, obs: "Estribos cerrados c/ 0.20 m" },
+      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '', pesoLin: 0, corte: 0, obs: "3 barras longitudinales" },
+      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '', pesoLin: 0, corte: 0, obs: "Flejes en U cada 0.25 m" },
+      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '', pesoLin: 0, corte: 0, obs: "1 barra superior corrida" },
+      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '', pesoLin: 0, corte: 0, obs: "Ganchos de anclaje cada 0.30 m" },
+      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '', pesoLin: 0, corte: 0, obs: "Malla de refuerzo en extremos" },
+      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '', pesoLin: 0, corte: 0, obs: "Malla transversal en extremos" }
     ];
 
     const filasResultado = defaultElements.map(d => ({
@@ -3444,7 +3644,7 @@ const FolderReader = {
       obs: d.obs
     }));
 
-    // Detección dinámica de índices de columnas en encabezados de la tabla de despiece
+    // Detección dinámica de índices de columnas en encabezados dentro de la Sección 2
     let colCorteDetectada = -1;
     let colPzasDetectada = -1;
     let colLtDetectada = -1;
@@ -3452,8 +3652,9 @@ const FolderReader = {
     let colVarDetectada = -1;
     let colDiamDetectada = -1;
     let colObsDetectada = -1;
+    let headerSec2Row = -1;
 
-    for (let rIdx = 0; rIdx < Math.min(matrizFilas.length, 30); rIdx++) {
+    for (let rIdx = startSearchRow; rIdx < Math.min(startSearchRow + 6, endSearchRow); rIdx++) {
       const r = matrizFilas[rIdx];
       if (!Array.isArray(r)) continue;
       for (let c = 0; c < r.length; c++) {
@@ -3468,55 +3669,75 @@ const FolderReader = {
           if (colPtDetectada === -1) colPtDetectada = c;
         } else if (hText.includes("varillas") || hText.includes("varilla")) {
           if (colVarDetectada === -1) colVarDetectada = c;
-        } else if (hText.includes("diametro") || hText.includes("diámetro")) {
+        } else if (hText.includes("diametro") || hText.includes("diámetro") || hText.includes("nominal")) {
           if (colDiamDetectada === -1) colDiamDetectada = c;
         } else if (hText.includes("observacion") || hText.includes("detalle")) {
           if (colObsDetectada === -1) colObsDetectada = c;
         }
       }
+      if (colCorteDetectada !== -1 || colPzasDetectada !== -1) {
+        headerSec2Row = rIdx;
+        break;
+      }
     }
 
+    const firstDataRow = headerSec2Row !== -1 ? headerSec2Row + 1 : startSearchRow;
     let currentCategory = null;
 
-    for (let rIdx = 0; rIdx < matrizFilas.length; rIdx++) {
+    for (let rIdx = firstDataRow; rIdx < endSearchRow; rIdx++) {
       const row = matrizFilas[rIdx];
       if (!Array.isArray(row) || row.length === 0) continue;
 
       const fullRowText = row.map(c => String(c || '').trim()).join(" ");
       const normRow = this.cleanForRegex(fullRowText);
 
-      if (normRow.includes("subtotal") || normRow.includes("consolidado por diametro") || normRow.includes("soportes tecnicos")) {
-        currentCategory = null;
-        continue;
+      if (normRow.includes("subtotal") || normRow.includes("3. consolidado") || normRow.includes("consolidado general")) {
+        break;
       }
 
-      if (normRow.includes("rieles") || normRow.includes("huellas")) {
+      const elemCell = row.length > 0 ? this.cleanForRegex(String(row[0] || "")) : "";
+      const tipoCell = row.length > 1 ? this.cleanForRegex(String(row[1] || "")) : "";
+      const matchText = (elemCell + " " + tipoCell).trim() || normRow;
+
+      if (elemCell.includes("rieles") || elemCell.includes("huellas") || normRow.includes("rieles") || normRow.includes("huellas")) {
         currentCategory = "RIELES";
-      } else if (normRow.includes("viga riostra") || normRow.includes("riostras") || normRow.includes("riostra")) {
+      } else if (elemCell.includes("viga riostra") || elemCell.includes("riostras") || elemCell.includes("riostra") || normRow.includes("viga riostra")) {
         currentCategory = "VIGA RIOSTRA";
-      } else if (normRow.includes("cunetas y bordillos") || normRow.includes("cuneta") || normRow.includes("bordillo")) {
+      } else if (elemCell.includes("cunetas y bordillos") || elemCell.includes("cuneta") || elemCell.includes("bordillo") || normRow.includes("cunetas y bordillos")) {
         currentCategory = "CUNETAS Y BORDILLOS";
-      } else if (normRow.includes("losa de transicion") || normRow.includes("transicion")) {
+      } else if (elemCell.includes("losa de transicion") || elemCell.includes("transicion") || normRow.includes("losa de transicion")) {
         currentCategory = "LOSA DE TRANSICIÓN";
       }
 
       let matchedItemId = null;
       if (currentCategory === "RIELES") {
-        if (normRow.includes("longitudinal")) matchedItemId = 1;
-        else if (normRow.includes("transversal")) matchedItemId = 2;
-        else if (normRow.includes("traslapo") || normRow.includes("empalme") || normRow.includes("opcional")) matchedItemId = 3;
+        if (tipoCell.includes("traslapo") || tipoCell.includes("empalme") || tipoCell.includes("opcional")) matchedItemId = 3;
+        else if (tipoCell.includes("transversal")) matchedItemId = 2;
+        else if (tipoCell.includes("longitudinal")) matchedItemId = 1;
+        else if (matchText.includes("traslapo") || matchText.includes("empalme")) matchedItemId = 3;
+        else if (matchText.includes("transversal")) matchedItemId = 2;
+        else if (matchText.includes("longitudinal")) matchedItemId = 1;
       } else if (currentCategory === "VIGA RIOSTRA") {
-        if (normRow.includes("superior")) matchedItemId = 4;
-        else if (normRow.includes("inferior")) matchedItemId = 5;
-        else if (normRow.includes("estribo") || normRow.includes("transversal") || normRow.includes("fleje")) matchedItemId = 6;
+        if (tipoCell.includes("superior")) matchedItemId = 4;
+        else if (tipoCell.includes("inferior")) matchedItemId = 5;
+        else if (tipoCell.includes("estribo") || tipoCell.includes("transversal") || tipoCell.includes("fleje")) matchedItemId = 6;
+        else if (matchText.includes("superior")) matchedItemId = 4;
+        else if (matchText.includes("inferior")) matchedItemId = 5;
+        else if (matchText.includes("estribo") || matchText.includes("transversal")) matchedItemId = 6;
       } else if (currentCategory === "CUNETAS Y BORDILLOS") {
-        if (normRow.includes("cuneta") && normRow.includes("longitudinal")) matchedItemId = 7;
-        else if (normRow.includes("cuneta") && (normRow.includes("transversal") || normRow.includes("fleje"))) matchedItemId = 8;
-        else if (normRow.includes("bordillo") && (normRow.includes("long") || normRow.includes("superior"))) matchedItemId = 9;
-        else if (normRow.includes("gancho") || (normRow.includes("bordillo") && normRow.includes("transversal"))) matchedItemId = 10;
+        if (tipoCell.includes("cuneta") && tipoCell.includes("longitudinal")) matchedItemId = 7;
+        else if (tipoCell.includes("cuneta") && (tipoCell.includes("transversal") || tipoCell.includes("fleje"))) matchedItemId = 8;
+        else if (tipoCell.includes("bordillo") && (tipoCell.includes("long") || tipoCell.includes("superior"))) matchedItemId = 9;
+        else if (tipoCell.includes("gancho") || (tipoCell.includes("bordillo") && tipoCell.includes("transversal"))) matchedItemId = 10;
+        else if (matchText.includes("cuneta") && matchText.includes("longitudinal")) matchedItemId = 7;
+        else if (matchText.includes("cuneta") && matchText.includes("transversal")) matchedItemId = 8;
+        else if (matchText.includes("bordillo") && matchText.includes("long")) matchedItemId = 9;
+        else if (matchText.includes("gancho") || matchText.includes("bordillo")) matchedItemId = 10;
       } else if (currentCategory === "LOSA DE TRANSICIÓN") {
-        if (normRow.includes("longitudinal")) matchedItemId = 11;
-        else if (normRow.includes("transversal")) matchedItemId = 12;
+        if (tipoCell.includes("longitudinal")) matchedItemId = 11;
+        else if (tipoCell.includes("transversal")) matchedItemId = 12;
+        else if (matchText.includes("longitudinal")) matchedItemId = 11;
+        else if (matchText.includes("transversal")) matchedItemId = 12;
       }
 
       // Coincidencia complementaria si el nombre del elemento viene en la misma fila
@@ -3560,10 +3781,13 @@ const FolderReader = {
           }
         }
 
-        // Asignación de peso lineal nominal según diámetro
-        if (target.diam.includes("1/2")) target.pesoLin = 0.994;
-        else if (target.diam.includes("1/4")) target.pesoLin = 0.250;
-        else target.pesoLin = 0.560;
+        // Asignación de peso lineal nominal según diámetro detectado
+        if (target.diam && target.diam.includes("1/2")) target.pesoLin = 0.994;
+        else if (target.diam && target.diam.includes("1/4")) target.pesoLin = 0.250;
+        else if (target.diam && target.diam.includes("3/8")) target.pesoLin = 0.560;
+        else if (target.diam && target.diam.includes("5/8")) target.pesoLin = 1.552;
+        else if (target.diam && target.diam.includes("3/4")) target.pesoLin = 2.235;
+        else target.pesoLin = 0;
 
         // Determinar índices de corte, piezas, longTotal, pesoTotal, varillas:
         let corteIdx = colCorteDetectada >= 0 ? colCorteDetectada : 4;
@@ -3596,7 +3820,7 @@ const FolderReader = {
         if (row.length > corteIdx) {
           const rawCorte = row[corteIdx];
           const corteVal = this.cleanNumber(rawCorte);
-          if (corteVal !== null && !isNaN(corteVal) && corteVal >= 0) {
+          if (corteVal !== null && !isNaN(corteVal) && (corteVal > 0 || (target.corte === 0 && corteVal >= 0))) {
             target.corte = corteVal;
             target.hasCorteInDoc = true;
           }
@@ -3755,8 +3979,8 @@ const FolderReader = {
       tieneDocumento: true,
       archivoNombre: fileName,
       isStandardTemplate: isStandard,
-      mensajeAlerta: subtotalPesoKg === 0 
-        ? "Documento cargado sin cantidades registradas (0 kg reportados en celdas). Campos en espera de diligenciamiento oficial." 
+      mensajeAlerta: subtotalPesoKg === 0
+        ? "Documento cargado sin cantidades registradas (0 kg reportados en celdas). Campos en espera de diligenciamiento oficial."
         : null,
       geometria: {
         longitudM: infoGeneral.longitudM,
@@ -3836,16 +4060,75 @@ const FolderReader = {
       transicion: 7.5
     };
 
-    for (const r of matrizConcreto) {
+    let cSec2Start = -1;
+    let cSec2End = matrizConcreto.length;
+
+    for (let rIdx = 0; rIdx < matrizConcreto.length; rIdx++) {
+      const r = matrizConcreto[rIdx];
+      if (!Array.isArray(r)) continue;
+      const rowText = this.cleanForRegex(r.join(" "));
+      if (cSec2Start === -1) {
+        if (rowText.includes("2. cuadro detallado") || rowText.includes("cuadro detallado de concreto") || rowText.includes("materiales petreos")) {
+          cSec2Start = rIdx;
+        }
+      } else {
+        if (rowText.includes("subtotal") || rowText.includes("total concreto") || rowText.includes("3. materiales") || rowText.includes("materiales de cemento")) {
+          cSec2End = rIdx;
+          break;
+        }
+      }
+    }
+
+    const cStartRow = cSec2Start !== -1 ? cSec2Start : 0;
+    const cEndRow = cSec2End !== -1 ? cSec2End : matrizConcreto.length;
+
+    // Detección dinámica de columnas en encabezado de Sección 2
+    let colElem = -1, colTipo = -1, colRes = -1, colLong = -1, colAncho = -1, colEsp = -1, colCant = -1, colVol = -1, colDosi = -1, colSacos = -1;
+    let cHeaderRow = -1;
+
+    for (let rIdx = cStartRow; rIdx < Math.min(cStartRow + 6, cEndRow); rIdx++) {
+      const r = matrizConcreto[rIdx];
+      if (!Array.isArray(r)) continue;
+      for (let c = 0; c < r.length; c++) {
+        const ct = this.cleanForRegex(String(r[c] || ""));
+        if ((ct.includes("elemento estructural") || ct === "elemento") && colElem === -1) colElem = c;
+        else if ((ct.includes("tipo de concreto") || ct === "tipo") && colTipo === -1) colTipo = c;
+        else if ((ct.includes("resistencia") || ct.includes("f'c") || ct.includes("psi")) && colRes === -1) colRes = c;
+        else if (ct.includes("longitud") && colLong === -1) colLong = c;
+        else if (ct.includes("ancho") && colAncho === -1) colAncho = c;
+        else if ((ct.includes("espesor") || ct.includes("alto")) && colEsp === -1) colEsp = c;
+        else if ((ct.includes("n°") || ct.includes("no.") || ct.includes("cantidad")) && colCant === -1) colCant = c;
+        else if (ct.includes("volumen") && colVol === -1) colVol = c;
+        else if (ct.includes("dosificacion") && colDosi === -1) colDosi = c;
+        else if ((ct.includes("cemento") || ct.includes("sacos")) && colSacos === -1) colSacos = c;
+      }
+      if (colVol !== -1 || colLong !== -1) {
+        cHeaderRow = rIdx;
+        break;
+      }
+    }
+
+    const cFirstDataRow = cHeaderRow !== -1 ? cHeaderRow + 1 : cStartRow;
+
+    for (let rIdx = cFirstDataRow; rIdx < cEndRow; rIdx++) {
+      const r = matrizConcreto[rIdx];
       if (!Array.isArray(r) || r.length === 0) continue;
-      const rowLine = r.join(" ").toUpperCase();
-      const lVal = r.length >= 4 ? this.cleanNumber(r[3]) : 0;
-      const aVal = r.length >= 5 ? this.cleanNumber(r[4]) : 0;
-      const eVal = r.length >= 6 ? this.cleanNumber(r[5]) : 0;
-      const nVal = r.length >= 7 ? this.cleanNumber(r[6]) : 0;
-      const vol = r.length >= 8 ? this.cleanNumber(r[7]) : 0;
-      const dosi = r.length >= 9 ? this.cleanNumber(r[8]) : 0;
-      const sacos = r.length >= 10 ? this.cleanNumber(r[9]) : 0;
+      const rowLine = this.cleanForRegex(r.join(" "));
+      if (rowLine.includes("subtotal") || rowLine.includes("total concreto")) {
+        const subVol = colVol >= 0 ? this.cleanNumber(r[colVol]) : (r.length >= 8 ? this.cleanNumber(r[7]) : 0);
+        const subSacos = colSacos >= 0 ? this.cleanNumber(r[colSacos]) : (r.length >= 10 ? this.cleanNumber(r[9]) : 0);
+        if (subVol > 0) totalConcM3 = subVol;
+        if (subSacos > 0) totalSacos = Math.round(subSacos);
+        break;
+      }
+
+      const lVal = colLong >= 0 ? this.cleanNumber(r[colLong]) : (r.length >= 4 ? this.cleanNumber(r[3]) : 0);
+      const aVal = colAncho >= 0 ? this.cleanNumber(r[colAncho]) : (r.length >= 5 ? this.cleanNumber(r[4]) : 0);
+      const eVal = colEsp >= 0 ? this.cleanNumber(r[colEsp]) : (r.length >= 6 ? this.cleanNumber(r[5]) : 0);
+      const nVal = colCant >= 0 ? this.cleanNumber(r[colCant]) : (r.length >= 7 ? this.cleanNumber(r[6]) : 0);
+      const vol = colVol >= 0 ? this.cleanNumber(r[colVol]) : (r.length >= 8 ? this.cleanNumber(r[7]) : 0);
+      const dosi = colDosi >= 0 ? this.cleanNumber(r[colDosi]) : (r.length >= 9 ? this.cleanNumber(r[8]) : 0);
+      const sacos = colSacos >= 0 ? this.cleanNumber(r[colSacos]) : (r.length >= 10 ? this.cleanNumber(r[9]) : 0);
 
       const dimObj = {
         longitudM: lVal,
@@ -3857,33 +4140,30 @@ const FolderReader = {
         sacos: sacos > 0 ? sacos : null
       };
 
-      if (rowLine.includes("RIELES")) {
+      if (rowLine.includes("rieles") || rowLine.includes("huellas")) {
         if (vol > 0) huellasM3 = vol;
         if (dosi > 0) dosificaciones.rieles = dosi;
         dimensionesDetalle.rieles = dimObj;
-      } else if (rowLine.includes("ENTRERRIEL")) {
+      } else if (rowLine.includes("entrerriel")) {
         if (vol > 0) ciclopeoM3 += vol;
         if (dosi > 0) dosificaciones.entrerriel = dosi;
         dimensionesDetalle.entrerriel = dimObj;
-      } else if (rowLine.includes("SOBREANCHO")) {
+      } else if (rowLine.includes("sobreancho")) {
         if (vol > 0) sobreanchoM3 = vol;
         if (dosi > 0) dosificaciones.sobreancho = dosi;
         dimensionesDetalle.sobreancho = dimObj;
-      } else if (rowLine.includes("VIGAS RIOSTRAS") || rowLine.includes("RIOSTRA")) {
+      } else if (rowLine.includes("vigas riostras") || rowLine.includes("riostra")) {
         if (vol > 0) riostrasM3 = vol;
         if (dosi > 0) dosificaciones.riostras = dosi;
         dimensionesDetalle.riostras = dimObj;
-      } else if (rowLine.includes("CUNETAS Y BORDILLOS") || rowLine.includes("CUNETA")) {
+      } else if (rowLine.includes("cunetas y bordillos") || rowLine.includes("cuneta") || rowLine.includes("bordillo")) {
         if (vol > 0) cunetasM3 = vol;
         if (dosi > 0) dosificaciones.cunetas = dosi;
         dimensionesDetalle.cunetas = dimObj;
-      } else if (rowLine.includes("LOSA DE TRANSICI") || rowLine.includes("TRANSICION")) {
+      } else if (rowLine.includes("losa de transici") || rowLine.includes("transicion")) {
         if (vol > 0) transicionM3 = vol;
         if (dosi > 0) dosificaciones.transicion = dosi;
         dimensionesDetalle.transicion = dimObj;
-      } else if (rowLine.includes("SUBTOTAL CANTIDADES NOMINALES") || rowLine.includes("TOTAL CONCRETO")) {
-        if (vol > 0) totalConcM3 = vol;
-        if (sacos > 0) totalSacos = Math.round(sacos);
       }
     }
 
@@ -4313,10 +4593,821 @@ const FolderReader = {
     return null;
   },
 
+  // =========================================================================
+  // MOTOR HEURÍSTICO Y RECURSIVO DE EXTRACCIÓN DE FIRMAS (5 CAPAS)
+  // =========================================================================
+
+  normalizeClean(str) {
+    if (!str) return "";
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  },
+
+  esCargo(text) {
+    if (!text) return false;
+    const norm = this.normalizeClean(text);
+    if (norm.includes("alcald") || norm.includes("mandatari")) return true;
+    const secKeys = ["secretari", "subsecretari", "planeacion", "infraestructura", "obras publicas", "desarrollo", "director"];
+    return secKeys.some(k => norm.includes(k));
+  },
+
+  classifyCargo(text) {
+    if (!text) return null;
+    const norm = this.normalizeClean(text);
+    if (norm.includes("alcald") || norm.includes("mandatari")) return "ALCALDE";
+    const secKeys = ["secretari", "subsecretari", "planeacion", "infraestructura", "obras publicas", "desarrollo", "director"];
+    if (secKeys.some(k => norm.includes(k))) return "SECRETARIO";
+    return null;
+  },
+
+  cleanCandidateNameString(rawText, mpioName) {
+    if (!rawText) return "";
+    let s = String(rawText).trim();
+
+    // 1. Descartar de inmediato si contiene correo electrónico o URL
+    if (/@|(\.gov|\.com|\.co\b|www\.|https?:\/\/)/i.test(s)) return "";
+
+    // 2. Si la línea es mayoritariamente numérica (números telefónicos o cédulas > 4 dígitos)
+    const digitsOnly = s.replace(/[^0-9]/g, "");
+    if (digitsOnly.length >= 5 && (digitsOnly.length / Math.max(1, s.length)) > 0.40) {
+      return "";
+    }
+
+    // 3. Eliminar guiones bajos (rayas de firma), guiones largos y caracteres de adorno
+    s = s.replace(/[_]{2,}/g, " ").replace(/[-]{3,}/g, " ").replace(/[~#*|=+]/g, " ");
+
+    // 4. Eliminar etiquetas y prefijos institucionales o de formulario
+    const tagPatterns = [
+      /^(?:nombres?\s+y\s+apellidos?|nombres?|apellidos?|nombre\s+completo|firma(?:\s+del?\s+[a-z]+)?|firmado(?:\s+por)?|cargo|c\.?c\.?|cedula(?:\s+de\s+ciudadania)?|nit|correo(?:\s+electronico)?|emails?|e-mails?|celular|cel|telefonos?|tels?|direcci[oó]n|municipio\s+de|alcald[ií]a(?:\s+municipal(?:\s+de)?)?|republica\s+de\s+colombia)[\s:\._-]*/gi,
+      /\b(?:nombres?\s+y\s+apellidos?|nombre\s+completo|c\.?c\.?|cedula|nit|correo|email|celular|telefono|direccion|municipio\s+de)\b[\s:\._-]*/gi,
+      /\b(?:ing(?:enier[oa])?|arq(?:uitect[oa])?|dr[a]?|doctor[a]?|abog(?:ad[oa])?|lic(?:enciad[oa])?|sr[a]?|se[nñ]or[a]?|representante\s+legal)\b[\.\s]*/gi,
+      /\b(?:de|en|del)\s+(?:medellin|bogota|antioquia|colombia)\b/gi
+    ];
+    for (const pat of tagPatterns) {
+      s = s.replace(pat, " ");
+    }
+
+    // 5. Eliminar palabras que componen el cargo mismo
+    const cargoWordsPat = /\b(?:alcalde(?:sa)?(?:\s+municipal)?|mandatari[oa]|secretari[oa](?:\s+de\s+despacho|\s+de\s+planeaci[oó]n|\s+de\s+infraestructura|\s+de\s+obras(?:\s+p[uú]blicas)?)?|subsecretari[oa]|planeaci[oó]n|infraestructura|obras\s+p[uú]blicas|obras|desarrollo(?:\s+institucional|\s+territorial|\s+comunitario|\s+rural|\s+urbano)?|director[a]?)\b/gi;
+    s = s.replace(cargoWordsPat, " ");
+
+    // 6. Eliminar mención de departamento y municipio (con o sin tildes)
+    s = s.replace(/\b(?:antioquia|gobernaci[oó]n(?:\s+de\s+antioquia)?|colombia)\b/gi, " ");
+    if (mpioName) {
+      const cleanMpio = this.normalizeClean(mpioName);
+      if (cleanMpio.length >= 3) {
+        const vMap = { a: "[aá]", e: "[eé]", i: "[ií]", o: "[oó]", u: "[uú]", n: "[nñ]" };
+        const mpioRegex = cleanMpio.split("").map(c => vMap[c] || c).join("");
+        s = s.replace(new RegExp(`\\b(?:de\\s+|en\\s+|del\\s+)?${mpioRegex}\\b`, "gi"), " ");
+      }
+    }
+
+    // 7. Eliminar fechas y períodos
+    s = s.replace(/\b(?:202[0-9]|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|periodo)\b/gi, " ");
+
+    // 8. Normalizar espacios, quitar preposiciones sueltas y limpiar puntuación residual
+    s = s.replace(/[0-9]+/g, " ");
+    s = s.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, " ");
+    s = s.replace(/^(?:de|en|del|para|por)\s+/gi, " ");
+    s = s.replace(/\s+/g, " ").trim();
+
+    return s;
+  },
+
+  cleanNameText(raw) {
+    return this.cleanCandidateNameString(raw);
+  },
+
+  evaluarPuntajeNombrePropio(candidateStr, lineIndexDist = 0, yDist = 0) {
+    if (!candidateStr) return { valid: false, score: 0 };
+    const s = candidateStr.trim();
+
+    // Descartar si el texto es en sí mismo un cargo o título institucional
+    if (this.esCargo(s)) return { valid: false, score: 0 };
+
+    // Estructura de nombre humano: longitud entre 7 y 45 caracteres
+    if (s.length < 7 || s.length > 45) return { valid: false, score: 0 };
+
+    // Entre 2 y 5 palabras compuestas únicamente por letras
+    const words = s.split(/\s+/).filter(w => w.length > 0);
+    if (words.length < 2 || words.length > 5) return { valid: false, score: 0 };
+
+    // Solo letras y espacios
+    if (!/^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/.test(s)) return { valid: false, score: 0 };
+
+    // Cada palabra de 2 o más letras debe contener al menos una vocal
+    for (const w of words) {
+      if (w.length >= 2 && !/[aeiouáéíóúAEIOUÁÉÍÓÚ]/i.test(w)) {
+        return { valid: false, score: 0 };
+      }
+    }
+
+    // Descartar consonantes repetidas anómalas (3 o más en fila, o dobles ilegales)
+    if (/([bcdfghjklmnñpqrstvwxyz])\1{2,}/i.test(s)) {
+      return { valid: false, score: 0 };
+    }
+    if (/([bdfghjkmnpqtvwxyz])\1+/i.test(s)) {
+      return { valid: false, score: 0 };
+    }
+
+    // En nombres de 2 palabras, cada palabra debe tener al menos 3 letras
+    if (words.length === 2 && words.some(w => w.length < 3)) {
+      return { valid: false, score: 0 };
+    }
+
+    let score = 100;
+
+    // Bonificación por 3 o 4 palabras (estructura típica colombiana)
+    if (words.length === 3 || words.length === 4) score += 15;
+    else if (words.length === 2) score += 5;
+
+    // Penalización por lejanía a la línea del cargo
+    score -= Math.min(45, (Math.abs(lineIndexDist) * 7) + (Math.abs(yDist) * 0.08));
+
+    return { valid: true, score: Math.max(1, score), name: s };
+  },
+
+  async localizarZonaDeFirmasPdf(pdf) {
+    if (!pdf || pdf.numPages === 0) return { zonaItems: [], allItems: [], cutPage: 1 };
+
+    const allItems = [];
+    const totalPages = pdf.numPages;
+    const pagesToScan = [];
+    if (totalPages <= 6) {
+      for (let p = 1; p <= totalPages; p++) pagesToScan.push(p);
+    } else {
+      pagesToScan.push(1);
+      const startP = Math.max(2, totalPages - 3);
+      for (let p = startP; p <= totalPages; p++) {
+        if (!pagesToScan.includes(p)) pagesToScan.push(p);
+      }
+    }
+
+    for (const p of pagesToScan) {
+      const page = await pdf.getPage(p);
+      const viewport = page.getViewport({ scale: 1.0 });
+      const pageH = (viewport && viewport.height) || (page.view ? page.view[3] - page.view[1] : 792);
+      const tc = await page.getTextContent();
+      const items = (tc && tc.items) || [];
+
+      for (const it of items) {
+        const str = (it.str || "").trim();
+        if (!str) continue;
+        const x = it.transform[4];
+        const y = it.transform[5];
+        const w = it.width || (str.length * 6);
+        const h = it.height || 10;
+        const yGlobal = ((p - 1) * 2000) + (pageH - y);
+        allItems.push({
+          str,
+          x,
+          y,
+          width: w,
+          height: h,
+          yGlobal,
+          page: p,
+          pageHeight: pageH
+        });
+      }
+    }
+
+    if (allItems.length === 0) return { zonaItems: [], allItems: [], cutPage: 1 };
+
+    const closingPhrases = [
+      "para constancia",
+      "firman la presente",
+      "en constancia se firma",
+      "intervinieron",
+      "organizados con la numeracion"
+    ];
+
+    let cutYGlobal = null;
+    let cutPage = 1;
+
+    // 1. Frases de cierre flexibles (normalizadas sin tildes)
+    for (const it of allItems) {
+      const norm = this.normalizeClean(it.str);
+      for (const phrase of closingPhrases) {
+        if (norm.includes(phrase)) {
+          cutYGlobal = it.yGlobal;
+          cutPage = it.page;
+          break;
+        }
+      }
+      if (cutYGlobal !== null) break;
+    }
+
+    // 2. Si no tiene frase de cierre, tomar contenido ubicado después del último ítem numerado de anexos (25, 26, 27 o 28)
+    if (cutYGlobal === null) {
+      let lastAnnexY = null;
+      let lastAnnexPage = 1;
+      for (const it of allItems) {
+        const norm = this.normalizeClean(it.str);
+        if (/(?:^|\b)(?:anexo|item\s*)?(?:2[5-8]|28|27|26|25)[\.\s\-\)]/i.test(norm) ||
+          /\b2[5-8]\s*[\.\-\)]\s*[a-z]/i.test(norm)) {
+          lastAnnexY = it.yGlobal;
+          lastAnnexPage = it.page;
+        }
+      }
+      if (lastAnnexY !== null) {
+        cutYGlobal = lastAnnexY + 10;
+        cutPage = lastAnnexPage;
+      }
+    }
+
+    // 3. Fallback: buscar mención de 'alcald' o 'secretari' en las páginas finales
+    if (cutYGlobal === null) {
+      const lastPagesStart = (Math.max(1, pdf.numPages - 1) - 1) * 2000;
+      const cargoItems = allItems.filter(it => it.yGlobal >= lastPagesStart && this.esCargo(it.str));
+      if (cargoItems.length > 0) {
+        cutYGlobal = Math.min(...cargoItems.map(it => it.yGlobal)) - 100;
+        cutPage = cargoItems[0].page;
+      } else {
+        cutYGlobal = (pdf.numPages - 1) * 2000;
+        cutPage = pdf.numPages;
+      }
+    }
+
+    const zonaItems = allItems.filter(it => it.yGlobal >= cutYGlobal - 5);
+    return { zonaItems, allItems, cutPage };
+  },
+
+  agruparEspacialmenteLineasYClustersPdf(items) {
+    if (!items || items.length === 0) return [];
+
+    // 1. Agrupar fragmentos en la misma altura visual (Delta Y <= 5 pt)
+    const sorted = [...items].sort((a, b) => {
+      const dy = a.yGlobal - b.yGlobal;
+      if (Math.abs(dy) > 5) return dy;
+      return a.x - b.x;
+    });
+
+    const visualRows = [];
+    let currentRow = [];
+    let currentY = null;
+
+    for (const it of sorted) {
+      if (currentY === null || Math.abs(it.yGlobal - currentY) <= 5) {
+        currentRow.push(it);
+        if (currentY === null) currentY = it.yGlobal;
+      } else {
+        if (currentRow.length > 0) visualRows.push({ yGlobal: currentY, items: currentRow });
+        currentRow = [it];
+        currentY = it.yGlobal;
+      }
+    }
+    if (currentRow.length > 0) visualRows.push({ yGlobal: currentY, items: currentRow });
+
+    // 2. Fragmentos en misma altura: unir si Delta X < 80 pt; separar en bloques si Delta X >= 80 pt
+    const lineSegments = [];
+    for (const row of visualRows) {
+      const rowItems = [...row.items].sort((a, b) => a.x - b.x);
+      let segTokens = [];
+      let segMinX = null;
+      let segMaxX = null;
+      let prevMaxX = null;
+
+      for (const it of rowItems) {
+        const itMaxX = it.x + (it.width || (it.str.length * 6));
+        if (prevMaxX !== null && (it.x - prevMaxX) >= 80) {
+          lineSegments.push({
+            text: segTokens.join(" "),
+            x: segMinX,
+            maxX: segMaxX,
+            midX: (segMinX + segMaxX) / 2,
+            yGlobal: row.yGlobal,
+            page: it.page
+          });
+          segTokens = [it.str];
+          segMinX = it.x;
+          segMaxX = itMaxX;
+          prevMaxX = itMaxX;
+        } else {
+          segTokens.push(it.str);
+          if (segMinX === null) segMinX = it.x;
+          segMaxX = Math.max(segMaxX || 0, itMaxX);
+          prevMaxX = Math.max(prevMaxX || 0, itMaxX);
+        }
+      }
+      if (segTokens.length > 0) {
+        lineSegments.push({
+          text: segTokens.join(" "),
+          x: segMinX,
+          maxX: segMaxX,
+          midX: (segMinX + segMaxX) / 2,
+          yGlobal: row.yGlobal,
+          page: rowItems[0]?.page || 1
+        });
+      }
+    }
+
+    // 3. Agrupación vertical en Nodos/Clusters de Firma independientes
+    const clusters = [];
+    for (const seg of lineSegments) {
+      let matchedCluster = null;
+      let minDist = Infinity;
+
+      for (const cl of clusters) {
+        const yDiff = seg.yGlobal - cl.lastYGlobal;
+        if (yDiff >= -5 && yDiff <= 48 && seg.page === cl.page) {
+          const overlap = Math.min(seg.maxX, cl.maxX) - Math.max(seg.x, cl.minX);
+          const midDiff = Math.abs(seg.midX - cl.midX);
+          if (overlap > -30 || midDiff < 110) {
+            if (yDiff < minDist) {
+              minDist = yDiff;
+              matchedCluster = cl;
+            }
+          }
+        }
+      }
+
+      if (matchedCluster) {
+        matchedCluster.segments.push(seg);
+        matchedCluster.minX = Math.min(matchedCluster.minX, seg.x);
+        matchedCluster.maxX = Math.max(matchedCluster.maxX, seg.maxX);
+        matchedCluster.midX = (matchedCluster.minX + matchedCluster.maxX) / 2;
+        matchedCluster.lastYGlobal = seg.yGlobal;
+      } else {
+        clusters.push({
+          page: seg.page,
+          minX: seg.x,
+          maxX: seg.maxX,
+          midX: seg.midX,
+          lastYGlobal: seg.yGlobal,
+          segments: [seg]
+        });
+      }
+    }
+
+    return clusters;
+  },
+
+  localizarZonaDeFirmasExcel(wb) {
+    if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) return [];
+    let sheetName = wb.SheetNames.find(s => {
+      const n = s.toUpperCase();
+      return !n.includes("INSTRUCTIV") && !n.includes("MANUAL") && !n.includes("GUIA");
+    }) || wb.SheetNames[0];
+
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) return [];
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+    if (!rows || rows.length === 0) return [];
+
+    const closingPhrases = [
+      "para constancia",
+      "firman la presente",
+      "en constancia se firma",
+      "intervinieron",
+      "organizados con la numeracion"
+    ];
+
+    let cutRowIdx = -1;
+
+    for (let r = 0; r < rows.length; r++) {
+      const rowStr = rows[r].map(c => String(c || "")).join(" ");
+      const norm = this.normalizeClean(rowStr);
+      for (const phrase of closingPhrases) {
+        if (norm.includes(phrase)) {
+          cutRowIdx = r;
+          break;
+        }
+      }
+      if (cutRowIdx >= 0) break;
+    }
+
+    if (cutRowIdx < 0) {
+      for (let r = 0; r < rows.length; r++) {
+        const rowStr = rows[r].map(c => String(c || "")).join(" ");
+        const norm = this.normalizeClean(rowStr);
+        if (/(?:^|\b)(?:anexo|item\s*)?(?:2[5-8]|28|27|26|25)[\.\s\-\)]/i.test(norm) ||
+          /\b2[5-8]\s*[\.\-\)]\s*[a-z]/i.test(norm)) {
+          cutRowIdx = r;
+        }
+      }
+    }
+
+    const startRow = cutRowIdx >= 0 ? cutRowIdx + 1 : Math.max(0, rows.length - 35);
+    return rows.slice(startRow);
+  },
+
+  agruparEspacialmenteLineasYClustersExcel(rows) {
+    if (!rows || rows.length === 0) return [];
+
+    let maxCol = 0;
+    rows.forEach(r => {
+      for (let c = r.length - 1; c >= 0; c--) {
+        if (String(r[c] || "").trim()) {
+          if (c > maxCol) maxCol = c;
+          break;
+        }
+      }
+    });
+
+    const midCol = maxCol >= 4 ? 4 : Math.max(1, Math.floor((maxCol + 1) / 2));
+
+    const leftCluster = { minX: 0, maxX: midCol, midX: midCol / 2, segments: [] };
+    const rightCluster = { minX: midCol, maxX: maxCol, midX: (midCol + maxCol) / 2, segments: [] };
+
+    rows.forEach((r, rIdx) => {
+      const leftCells = [];
+      const rightCells = [];
+
+      for (let c = 0; c < r.length; c++) {
+        const val = String(r[c] || "").trim();
+        if (!val) continue;
+        if (c < midCol) leftCells.push(val);
+        else rightCells.push(val);
+      }
+
+      if (leftCells.length > 0) {
+        leftCluster.segments.push({ text: leftCells.join(" "), lineIdx: rIdx, yGlobal: rIdx * 20 });
+      }
+      if (rightCells.length > 0) {
+        rightCluster.segments.push({ text: rightCells.join(" "), lineIdx: rIdx, yGlobal: rIdx * 20 });
+      }
+    });
+
+    const res = [];
+    if (leftCluster.segments.length > 0) res.push(leftCluster);
+    if (rightCluster.segments.length > 0) res.push(rightCluster);
+    return res;
+  },
+
+  extraerNombreDeClusters(clusters, mpioName) {
+    let bestAlcalde = null;
+    let bestSecretario = null;
+
+    for (let cIdx = 0; cIdx < clusters.length; cIdx++) {
+      const cluster = clusters[cIdx];
+      const segments = cluster.segments || [];
+      if (segments.length === 0) continue;
+
+      const fullClusterText = segments.map(s => s.text).join(" \n ");
+      const role = this.classifyCargo(fullClusterText);
+
+      let clusterCedula = "";
+      const mCc = fullClusterText.match(/(?:C\.?C\.?|CEDULA|IDENTIFICACI[OÓ]N|NIT)[\s:\._-]*([0-9\.\,]{6,15})/i) ||
+        fullClusterText.match(/\b([0-9]{1,3}(?:\.[0-9]{3}){2,3})\b/) ||
+        fullClusterText.match(/\b([0-9]{6,11})\b/);
+      if (mCc) {
+        clusterCedula = mCc[1].replace(/[\.,\s]/g, "");
+      }
+
+      let cargoLineIdx = -1;
+      let cargoYGlobal = 0;
+      for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+        if (this.esCargo(segments[sIdx].text)) {
+          cargoLineIdx = sIdx;
+          cargoYGlobal = segments[sIdx].yGlobal || 0;
+          break;
+        }
+      }
+
+      let topCandidate = null;
+      let topScore = -1;
+
+      for (let sIdx = 0; sIdx < segments.length; sIdx++) {
+        const seg = segments[sIdx];
+        const cleaned = this.cleanCandidateNameString(seg.text, mpioName);
+        if (!cleaned) continue;
+
+        const lineDist = cargoLineIdx >= 0 ? Math.abs(sIdx - cargoLineIdx) : 0;
+        const yDist = cargoLineIdx >= 0 ? Math.abs((seg.yGlobal || 0) - cargoYGlobal) : 0;
+
+        const evalRes = this.evaluarPuntajeNombrePropio(cleaned, lineDist, yDist);
+        if (evalRes.valid && evalRes.score > topScore) {
+          topScore = evalRes.score;
+          topCandidate = evalRes.name;
+        }
+      }
+
+      if (topCandidate) {
+        if (role === "ALCALDE" && (!bestAlcalde || topScore > bestAlcalde.score)) {
+          bestAlcalde = {
+            nombre: topCandidate,
+            cargo: "ALCALDE MUNICIPAL",
+            cedula: clusterCedula,
+            score: topScore,
+            origen: "Extraído de: Ficha de Priorización"
+          };
+        } else if (role === "SECRETARIO" && (!bestSecretario || topScore > bestSecretario.score)) {
+          bestSecretario = {
+            nombre: topCandidate,
+            cargo: "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS",
+            cedula: clusterCedula,
+            score: topScore,
+            origen: "Extraído de: Ficha de Priorización"
+          };
+        } else if (!role) {
+          // Asignación posicional: Izquierda = Alcalde, Derecha = Secretario
+          if (!bestAlcalde && cIdx === 0) {
+            bestAlcalde = {
+              nombre: topCandidate,
+              cargo: "ALCALDE MUNICIPAL",
+              cedula: clusterCedula,
+              score: topScore,
+              origen: "Extraído de: Ficha de Priorización"
+            };
+          } else if (!bestSecretario) {
+            bestSecretario = {
+              nombre: topCandidate,
+              cargo: "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS",
+              cedula: clusterCedula,
+              score: topScore,
+              origen: "Extraído de: Ficha de Priorización"
+            };
+          }
+        }
+      }
+    }
+
+    return { alcalde: bestAlcalde, secretario: bestSecretario };
+  },
+
+  async extraerFirmasPdf(file, mpioName) {
+    if (!file || typeof pdfjsLib === "undefined") return null;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const { zonaItems } = await this.localizarZonaDeFirmasPdf(pdf);
+      if (!zonaItems || zonaItems.length === 0) return null;
+
+      const clusters = this.agruparEspacialmenteLineasYClustersPdf(zonaItems);
+      const res = this.extraerNombreDeClusters(clusters, mpioName);
+      return res;
+    } catch (err) {
+      console.warn("Aviso en extraerFirmasPdf:", err);
+      return null;
+    }
+  },
+
+  async extraerFirmasExcel(file, mpioName) {
+    if (!file || typeof XLSX === "undefined") return null;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const wb = XLSX.read(arrayBuffer, { type: "array" });
+      const rows = this.localizarZonaDeFirmasExcel(wb);
+      if (!rows || rows.length === 0) return null;
+
+      const clusters = this.agruparEspacialmenteLineasYClustersExcel(rows);
+      const res = this.extraerNombreDeClusters(clusters, mpioName);
+      return res;
+    } catch (err) {
+      console.warn("Aviso en extraerFirmasExcel:", err);
+      return null;
+    }
+  },
+
+  async ejecutarFallbackMultiDocumento(files, detectedMap, itemTextsMap, mpioName, currentAlcalde, currentSecretario) {
+    detectedMap = detectedMap || {};
+    itemTextsMap = itemTextsMap || {};
+    files = files || [];
+
+    let alcalde = (currentAlcalde && currentAlcalde.nombre) ? currentAlcalde : null;
+    let secretario = (currentSecretario && currentSecretario.nombre) ? currentSecretario : null;
+
+    const getItemText = async (itemNum) => {
+      if (itemTextsMap[itemNum]) return itemTextsMap[itemNum];
+      const f = detectedMap[itemNum];
+      if (!f) return "";
+      try {
+        const ext = this.getFileExtension(f);
+        let t = "";
+        if (ext === "pdf") t = await this.readPdfOrText(f, 3);
+        else if (["xlsx", "xls", "xlsm", "xlsb"].includes(ext)) t = await this.readExcelAsText(f);
+        itemTextsMap[itemNum] = t || "";
+        return t || "";
+      } catch (e) {
+        return "";
+      }
+    };
+
+    const extractCc = (txt) => {
+      const m = txt.match(/(?:C\.?C\.?|CEDULA|IDENTIFICACI[OÓ]N|NIT)[\s:\._-]*([0-9\.\,]{6,15})/i) ||
+        txt.match(/\b([0-9]{1,3}(?:\.[0-9]{3}){2,3})\b/) ||
+        txt.match(/\b([0-9]{6,11})\b/);
+      return m ? m[1].replace(/[\.,\s]/g, "") : "";
+    };
+
+    // Fallback Alcalde: Ítem 1 (Solicitud), 8 (Posesión), 7 (Cédula), 11, 12, 13, 14, 16, 22
+    if (!alcalde) {
+      const alcaldeItems = [
+        { num: 1, name: "Ítem 1 (Solicitud formal)" },
+        { num: 8, name: "Ítem 8 (Acta de posesión)" },
+        { num: 7, name: "Ítem 7 (Cédula de ciudadanía)" },
+        { num: 11, name: "Ítem 11 (Certificado Contraloría)" },
+        { num: 14, name: "Ítem 14 (Certificado Procuraduría)" },
+        { num: 13, name: "Ítem 13 (Certificado Policía Nacional)" },
+        { num: 12, name: "Ítem 12 (Medidas Correctivas RNMC)" },
+        { num: 16, name: "Ítem 16 (Certificado REDAM)" },
+        { num: 22, name: "Ítem 22 (Delitos Sexuales)" }
+      ];
+
+      for (const target of alcaldeItems) {
+        const txt = await getItemText(target.num);
+        if (!txt || txt.length < 25) continue;
+
+        let candName = null;
+        let candCc = extractCc(txt);
+
+        if (target.num === 1) {
+          const f1 = detectedMap[1];
+          if (f1 && this.getFileExtension(f1) === "pdf") {
+            try {
+              const resF1 = await this.extraerFirmasPdf(f1, mpioName);
+              if (resF1 && resF1.alcalde && resF1.alcalde.nombre) {
+                candName = resF1.alcalde.nombre;
+                if (resF1.alcalde.cedula) candCc = resF1.alcalde.cedula;
+              }
+            } catch (eF1) { }
+          }
+          if (!candName) {
+            const mSol = txt.match(/(?:yo,?\s+)?([A-ZÁÉÍÓÚÑ\s]{7,40})[,\s]+(?:mayor de edad,?\s+)?identificad[oa](?:\s+con\s+c[eé]dula|\s+c\.?c\.?|\s+de\s+ciudadan[ií]a)[\s\S]{0,60}?(?:en\s+calidad\s+de\s+alcalde|actuando\s+como\s+alcalde)/i) ||
+              txt.match(/(?:en\s+calidad\s+de\s+alcalde(?:sa)?(?:\s+municipal)?(?:,\s*de\s*|\s+del\s+municipio\s+de\s+[a-z\s]+)?[,\s]+(?:el\s+suscrito\s+|la\s+suscrita\s+)?)([A-ZÁÉÍÓÚÑ\s]{7,40})/i) ||
+              txt.match(/(?:atentamente|cordialmente)[,\s\S]{0,120}?([A-ZÁÉÍÓÚÑ\s]{7,40})\s*\n\s*(?:alcalde|alcaldesa)/i);
+            if (mSol) candName = this.cleanCandidateNameString(mSol[1], mpioName);
+          }
+        }
+
+        if (!candName && target.num === 8) {
+          const mPos = txt.match(/(?:posesi[oó]n(?:arse)?(?:\s+del\s+cargo\s+de\s+alcalde(?:sa)?|\s+como\s+alcalde(?:sa)?)[\s\S]{0,100}?)(?:al\s+se[nñ]or\(?a\)?\s+|se[nñ]or\(?a\)?\s+)?([A-ZÁÉÍÓÚÑ\s]{7,40})[,\s]+identificad/i) ||
+            txt.match(/(?:declara\s+posesionad[oa]\s+a[l]?\s+)([A-ZÁÉÍÓÚÑ\s]{7,40})/i) ||
+            txt.match(/alcalde(?:sa)?\s+elect[oa][\s\S]{0,50}?([A-ZÁÉÍÓÚÑ\s]{7,40})/i);
+          if (mPos) candName = this.cleanCandidateNameString(mPos[1], mpioName);
+        }
+
+        if (!candName && target.num === 7) {
+          const mCed = txt.match(/(?:APELLIDOS[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{3,25}))[\s\S]{0,50}?(?:NOMBRES[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{3,25}))/i);
+          if (mCed) {
+            const combined = `${mCed[2].trim()} ${mCed[1].trim()}`;
+            candName = this.cleanCandidateNameString(combined, mpioName);
+          }
+        }
+
+        if (!candName && [11, 12, 13, 14, 16, 22].includes(target.num)) {
+          const mCert = txt.match(/(?:certifica\s+que(?:\s+el\s+se[nñ]or|\s+la\s+se[nñ]ora)?\s+)([A-ZÁÉÍÓÚÑ\s]{7,40})[,\s]+(?:identificad[oa]|con\s+c\.?c\.?)/i) ||
+            txt.match(/(?:expedido\s+a\s+favor\s+de|titular)[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{7,40})/i) ||
+            txt.match(/([A-ZÁÉÍÓÚÑ\s]{7,40})\s+identificad[oa]\s+con\s+c[eé]dula/i);
+          if (mCert) candName = this.cleanCandidateNameString(mCert[1], mpioName);
+        }
+
+        if (!candName) {
+          const mGen = txt.match(/(?:ALCALDE(?:SA)?(?:\s+MUNICIPAL)?[\s:\._-]*)([A-ZÁÉÍÓÚÑ\s]{7,40})/i) ||
+            txt.match(/([A-ZÁÉÍÓÚÑ\s]{7,40})\s*\n[\s\S]{0,35}?ALCALDE(?:SA)?(?:\s+MUNICIPAL)?/i);
+          if (mGen) candName = this.cleanCandidateNameString(mGen[1], mpioName);
+        }
+
+        if (candName) {
+          const evalRes = this.evaluarPuntajeNombrePropio(candName);
+          if (evalRes.valid) {
+            alcalde = {
+              nombre: evalRes.name,
+              cargo: "ALCALDE MUNICIPAL",
+              cedula: candCc,
+              origen: `Extraído por respaldo de: ${target.name}`
+            };
+            console.log(`[Diagnóstico Firmas Ficha]: Fallback Alcalde activado en ${target.name}:`, alcalde);
+            break;
+          }
+        }
+      }
+    }
+
+    // Fallback Secretario: Ítems técnicos 2, 3, 4, 23, 25
+    if (!secretario) {
+      const secretarioItems = [
+        { num: 4, name: "Ítem 4 (Certificado de vías terciarias)" },
+        { num: 2, name: "Ítem 2 (Especificaciones técnicas)" },
+        { num: 3, name: "Ítem 3 (Despiece de acero)" },
+        { num: 23, name: "Ítem 23 (Banco de proyectos)" },
+        { num: 25, name: "Ítem 25 (Cronograma de obra)" }
+      ];
+
+      for (const target of secretarioItems) {
+        const file = detectedMap[target.num];
+        let candName = null;
+        let candCc = "";
+
+        if (file) {
+          const ext = this.getFileExtension(file);
+          try {
+            let resDoc = null;
+            if (ext === "pdf") resDoc = await this.extraerFirmasPdf(file, mpioName);
+            else if (["xlsx", "xls", "xlsm", "xlsb"].includes(ext)) resDoc = await this.extraerFirmasExcel(file, mpioName);
+
+            if (resDoc && resDoc.secretario && resDoc.secretario.nombre) {
+              candName = resDoc.secretario.nombre;
+              candCc = resDoc.secretario.cedula || "";
+            }
+          } catch (eDoc) { }
+        }
+
+        if (!candName) {
+          const txt = await getItemText(target.num);
+          if (txt && txt.length > 25) {
+            candCc = extractCc(txt);
+            const mSec = txt.match(/(?:el\s+suscrito\s+)?secretari[oa]\s+de\s+(?:planeaci[oó]n|infraestructura|obras(?:\s+p[uú]blicas)?)[,\s]+([A-ZÁÉÍÓÚÑ\s]{7,40})[,\s]+identificad/i) ||
+              txt.match(/(?:secretari[oa]\s+de\s+(?:planeaci[oó]n|infraestructura|obras(?:\s+p[uú]blicas)?))[\s:\._-]*([A-ZÁÉÍÓÚÑ\s]{7,40})/i) ||
+              txt.match(/([A-ZÁÉÍÓÚÑ\s]{7,40})\s*\n[\s\S]{0,50}?(?:secretari[oa]\s+de\s+(?:planeaci[oó]n|infraestructura|obras))/i);
+            if (mSec) candName = this.cleanCandidateNameString(mSec[1], mpioName);
+          }
+        }
+
+        if (candName) {
+          const evalRes = this.evaluarPuntajeNombrePropio(candName);
+          if (evalRes.valid) {
+            secretario = {
+              nombre: evalRes.name,
+              cargo: "SECRETARIO(A) DE PLANEACIÓN / OBRAS PÚBLICAS",
+              cedula: candCc,
+              origen: `Extraído por respaldo de: ${target.name}`
+            };
+            console.log(`[Diagnóstico Firmas Ficha]: Fallback Secretario activado en ${target.name}:`, secretario);
+            break;
+          }
+        }
+      }
+    }
+
+    return { alcalde, secretario };
+  },
+
+  async extraerFirmasFichaPriorizacion(files, fichaFile, allFichas, detectedMap, itemTextsMap, mpioName) {
+    allFichas = allFichas || [];
+    const validFichas = allFichas.filter(f => this.isFichaPriorizacionFile(f));
+
+    const excelFicha = validFichas.find(f => ["xlsx", "xls", "xlsm", "xlsb"].includes(this.getFileExtension(f))) ||
+      (files && files.find(f => this.isFichaPriorizacionFile(f) && ["xlsx", "xls", "xlsm", "xlsb"].includes(this.getFileExtension(f)))) ||
+      (fichaFile && ["xlsx", "xls", "xlsm", "xlsb"].includes(this.getFileExtension(fichaFile)) ? fichaFile : null);
+
+    const pdfFicha = validFichas.find(f => this.getFileExtension(f) === "pdf") ||
+      (files && files.find(f => this.isFichaPriorizacionFile(f) && this.getFileExtension(f) === "pdf")) ||
+      (fichaFile && this.getFileExtension(fichaFile) === "pdf" ? fichaFile : null);
+
+    let result = { alcalde: null, secretario: null };
+
+    // 1. Capas 1-4: Prioridad 1 en Excel estructurado
+    if (excelFicha) {
+      try {
+        const xlRes = await this.extraerFirmasExcel(excelFicha, mpioName);
+        if (xlRes) {
+          if (xlRes.alcalde && xlRes.alcalde.nombre) result.alcalde = xlRes.alcalde;
+          if (xlRes.secretario && xlRes.secretario.nombre) result.secretario = xlRes.secretario;
+        }
+      } catch (eXl) {
+        console.warn("Aviso en extracción de firmas Excel:", eXl);
+      }
+    }
+
+    // 2. Capas 1-4: Prioridad 2 en PDF oficial si falta algún rol
+    if ((!result.alcalde || !result.secretario) && pdfFicha) {
+      try {
+        const pdfRes = await this.extraerFirmasPdf(pdfFicha, mpioName);
+        if (pdfRes) {
+          if (!result.alcalde && pdfRes.alcalde && pdfRes.alcalde.nombre) {
+            result.alcalde = pdfRes.alcalde;
+          }
+          if (!result.secretario && pdfRes.secretario && pdfRes.secretario.nombre) {
+            result.secretario = pdfRes.secretario;
+          }
+        }
+      } catch (ePdf) {
+        console.warn("Aviso en extracción de firmas PDF:", ePdf);
+      }
+    }
+
+    // 3. Capa 5: Búsqueda Recursiva Multi-Documento en todo el Expediente (Fallback automático)
+    if (!result.alcalde || !result.secretario) {
+      try {
+        const fallbackRes = await this.ejecutarFallbackMultiDocumento(
+          files,
+          detectedMap,
+          itemTextsMap,
+          mpioName,
+          result.alcalde,
+          result.secretario
+        );
+        if (fallbackRes) {
+          if (!result.alcalde && fallbackRes.alcalde) result.alcalde = fallbackRes.alcalde;
+          if (!result.secretario && fallbackRes.secretario) result.secretario = fallbackRes.secretario;
+        }
+      } catch (eFallback) {
+        console.warn("Aviso en fallback multi-documento:", eFallback);
+      }
+    }
+
+    return result;
+  },
+
   /**
    * Lector de PDF con preservación de líneas visuales (Y-grouping) y respaldo por páginas
    */
-  async readPdfWithLayout(file) {
+  async readPdfWithLayout(file, maxPagesToRead = 40) {
     if (!file) return { pages: [], fullText: "" };
     try {
       if (file.name.toLowerCase().endsWith(".pdf")) {
@@ -4326,7 +5417,7 @@ const FolderReader = {
           const pdf = await loadingTask.promise;
           const pages = [];
           let fullText = "";
-          const maxPages = Math.min(pdf.numPages, 40);
+          const maxPages = Math.min(pdf.numPages, maxPagesToRead || 40);
 
           for (let p = 1; p <= maxPages; p++) {
             const page = await pdf.getPage(p);
@@ -4391,12 +5482,12 @@ const FolderReader = {
     return { pages: [], fullText: "" };
   },
 
-  async readPdfOrText(file) {
+  async readPdfOrText(file, maxPagesToRead = 40) {
     if (!file) return "";
     try {
       const ext = this.getFileExtension(file);
       if (ext === "pdf") {
-        const res = await this.readPdfWithLayout(file);
+        const res = await this.readPdfWithLayout(file, maxPagesToRead);
         return res ? res.fullText : "";
       } else if (["xlsx", "xls", "xlsm", "xlsb", "ods"].includes(ext)) {
         return await this.readExcelAsText(file);
@@ -4481,12 +5572,12 @@ const FolderReader = {
 };
 
 if (typeof window !== "undefined") {
-  FolderReader.clasificarPartidaConcreto = function(desc) {
+  FolderReader.clasificarPartidaConcreto = function (desc) {
     return typeof PresupuestoEngine !== "undefined" && typeof PresupuestoEngine.clasificarPartidaConcreto === "function"
       ? PresupuestoEngine.clasificarPartidaConcreto(desc)
       : { esConcreto: false };
   };
-  FolderReader.extraerDimensionesItem = function(desc, f1A) {
+  FolderReader.extraerDimensionesItem = function (desc, f1A) {
     return typeof PresupuestoEngine !== "undefined" && typeof PresupuestoEngine.extraerDimensionesItem === "function"
       ? PresupuestoEngine.extraerDimensionesItem(desc, f1A)
       : { converted: false, motivo: "Motor no disponible" };

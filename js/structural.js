@@ -179,30 +179,30 @@ const StructuralEngine = {
   },
 
   getNominalWeight(diam) {
-    if (!diam) return 0.560;
+    if (!diam) return 0;
     const str = String(diam);
     if (str.includes("1/2") || str.includes("#4")) return 0.994;
     if (str.includes("3/8") || str.includes("#3")) return 0.560;
     if (str.includes("1/4") || str.includes("#2")) return 0.250;
     if (str.includes("5/8") || str.includes("#5")) return 1.552;
     if (str.includes("3/4") || str.includes("#6")) return 2.235;
-    return 0.560;
+    return 0;
   },
 
   getDefaultStandardRows(longitudM = 0) {
     return [
-      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Empalmes escalonados" },
-      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Separación cada 0.20 m" },
-      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Longitud empalme según norma" },
-      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras superiores corridas" },
-      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras inferiores corridas" },
-      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Estribos cerrados c/ 0.20 m" },
-      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "3 barras longitudinales" },
-      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Flejes en U cada 0.25 m" },
-      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "1 barra superior corrida" },
-      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Ganchos de anclaje cada 0.30 m" },
-      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla de refuerzo en extremos" },
-      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla transversal en extremos" }
+      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Empalmes escalonados" },
+      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Separación cada 0.20 m" },
+      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Longitud empalme según norma" },
+      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras superiores corridas" },
+      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "2 barras inferiores corridas" },
+      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Estribos cerrados c/ 0.20 m" },
+      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "3 barras longitudinales" },
+      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Flejes en U cada 0.25 m" },
+      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "1 barra superior corrida" },
+      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Ganchos de anclaje cada 0.30 m" },
+      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla de refuerzo en extremos" },
+      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '', pesoLin: 0, corte: 0, piezas: 0, longTotalM: 0, pesoTotalKg: 0, varillas6m: 0, obs: "Malla transversal en extremos" }
     ];
   },
 
@@ -449,18 +449,18 @@ const StructuralEngine = {
    */
   getDefaultStandardRows() {
     const defaultElements = [
-      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Empalmes escalonados" },
-      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Separación cada 0.20 m" },
-      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Longitud empalme según norma" },
-      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras superiores corridas" },
-      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '1/2"', pesoLin: 0.994, corte: 0, obs: "2 barras inferiores corridas" },
-      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Estribos cerrados c/ 0.20 m" },
-      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "3 barras longitudinales" },
-      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Flejes en U cada 0.25 m" },
-      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "1 barra superior corrida" },
-      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '1/4"', pesoLin: 0.250, corte: 0, obs: "Ganchos de anclaje cada 0.30 m" },
-      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla de refuerzo en extremos" },
-      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '3/8"', pesoLin: 0.560, corte: 0, obs: "Malla transversal en extremos" }
+      { item: 1, elem: "RIELES", tipo: "Refuerzo Longitudinal", diam: '', pesoLin: 0, corte: 0, obs: "Empalmes escalonados" },
+      { item: 2, elem: "RIELES", tipo: "Refuerzo Transversal", diam: '', pesoLin: 0, corte: 0, obs: "Separación cada 0.20 m" },
+      { item: 3, elem: "RIELES", tipo: "Traslapo (Opcional)", diam: '', pesoLin: 0, corte: 0, obs: "Longitud empalme según norma" },
+      { item: 4, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Superior", diam: '', pesoLin: 0, corte: 0, obs: "2 barras superiores corridas" },
+      { item: 5, elem: "VIGA RIOSTRA", tipo: "Refuerzo Long. Inferior", diam: '', pesoLin: 0, corte: 0, obs: "2 barras inferiores corridas" },
+      { item: 6, elem: "VIGA RIOSTRA", tipo: "Refuerzo Transversal (Estribos)", diam: '', pesoLin: 0, corte: 0, obs: "Estribos cerrados c/ 0.20 m" },
+      { item: 7, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Longitudinal Cuneta", diam: '', pesoLin: 0, corte: 0, obs: "3 barras longitudinales" },
+      { item: 8, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Transversal Cuneta", diam: '', pesoLin: 0, corte: 0, obs: "Flejes en U cada 0.25 m" },
+      { item: 9, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Long. Bordillo", diam: '', pesoLin: 0, corte: 0, obs: "1 barra superior corrida" },
+      { item: 10, elem: "CUNETAS Y BORDILLOS", tipo: "Refuerzo Gancho Bordillo", diam: '', pesoLin: 0, corte: 0, obs: "Ganchos de anclaje cada 0.30 m" },
+      { item: 11, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Longitudinal", diam: '', pesoLin: 0, corte: 0, obs: "Malla de refuerzo en extremos" },
+      { item: 12, elem: "LOSA DE TRANSICIÓN", tipo: "Malla Transversal", diam: '', pesoLin: 0, corte: 0, obs: "Malla transversal en extremos" }
     ];
 
     return defaultElements.map(d => ({
@@ -538,7 +538,12 @@ const StructuralEngine = {
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    const concreteWrapper = document.querySelector(".concrete-memory-fullwidth");
+    const concreteContainer = document.getElementById("concreteVolumesContainer");
+
     if (!project) {
+      if (concreteWrapper) concreteWrapper.style.display = "none";
+      if (concreteContainer) concreteContainer.innerHTML = "";
       container.innerHTML = `
         <div class="standard-template-box" style="text-align:center;padding:48px 24px;color:var(--text-muted);">
           <div style="font-size:16px;font-weight:800;color:var(--text-main);margin-bottom:8px;">
@@ -553,8 +558,67 @@ const StructuralEngine = {
       return;
     }
 
-    const projectId = project.id || App.currentProjectId;
-    const d = project.despieceExtraido || project.despieceAcero || {};
+    const projectId = project.id || (window.App && window.App.currentProjectId) || "";
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    const expRecord = expedientesMap[projectId] || (window.App && window.App.currentAuditRecord) || null;
+    const f1A = (expRecord && expRecord.fase1A) || project.fase1A || {};
+    const f2 = (expRecord && expRecord.fase2) || (project.fase2) || {};
+    const item3 = (f2.items && Array.isArray(f2.items)) ? f2.items.find(it => Number(it.id) === 3) : null;
+    const hasItem3File = Boolean(
+      (item3 && !item3.faltante && (item3.archivoDetectado || item3.subsanado)) ||
+      (project.archivosFiles && project.archivosFiles[3]) ||
+      (project.archivosFileMap && project.archivosFileMap[3]) ||
+      (expRecord && expRecord.archivosFileMap && expRecord.archivosFileMap[3]) ||
+      (project.documentosStatus && project.documentosStatus.archivosDetectados && project.documentosStatus.archivosDetectados[3])
+    );
+
+    const d = project.despieceExtraido || project.despieceAcero || (expRecord && expRecord.despieceExtraido) || {};
+    const pesoTotal = (f1A && (f1A.pesoTotalKg || f1A.pesoTotalDeclaradoKg)) || d.pesoTotalDeclaradoKg || d.totalKilos || (d.acero && d.acero.totalKg) || 0;
+    const hasRealRows = (Array.isArray(f1A && f1A.marcas) && f1A.marcas.length > 0 && f1A.marcas.some(m => (m.pesoKg || 0) > 0 || (m.piezas || 0) > 0)) ||
+                        (d && d.standardTemplate && Array.isArray(d.standardTemplate.filas) && d.standardTemplate.filas.some(f => (f.pesoTotalKg || 0) > 0 || (f.piezas || 0) > 0));
+
+    // Validación estricta de existencia de documento de despiece (tieneDespiece)
+    const tieneDespiece = Boolean(
+      f1A.tieneDocumento !== false &&
+      d.tieneDocumento !== false &&
+      hasItem3File &&
+      (pesoTotal > 0 || hasRealRows)
+    );
+
+    // Si no se aportó documento de despiece, ocultar tablas y mostrar estado vacío institucional
+    if (!tieneDespiece) {
+      if (concreteWrapper) concreteWrapper.style.display = "none";
+      if (concreteContainer) concreteContainer.innerHTML = "";
+      const statConc = document.getElementById("statConcreteTotal");
+      if (statConc) statConc.innerText = "-";
+      const statCem = document.getElementById("statCementTotal");
+      if (statCem) statCem.innerText = "-";
+      const statDosi = document.getElementById("statDosificacionTotal");
+      if (statDosi) statDosi.innerText = "-";
+
+      container.innerHTML = `
+        <div class="empty-state-card" style="padding: 48px 24px; text-align: center; background: #FFF; border: 1.5px dashed #CBD5E1; border-radius: 12px; margin-bottom: 24px; box-shadow: var(--shadow-sm);">
+          <div style="max-width: 620px; margin: 0 auto;">
+            <div style="font-size: 42px; margin-bottom: 12px; line-height: 1;">⚠️</div>
+            <div style="font-size: 17px; font-weight: 800; color: #1E293B; margin-bottom: 8px;">
+              ⚠️ No se ha aportado documento de despiece de acero y memorias de concreto
+            </div>
+            <p style="font-size: 13.5px; color: #64748B; line-height: 1.5; margin: 0 auto 20px;">
+              En la carpeta del expediente no se detectó el archivo correspondiente al Despiece de Acero (Ítem 3). No se muestran tablas ni cálculos estructurales hasta que se cargue el documento.
+            </p>
+            <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
+              <button class="btn-primary" style="padding: 10px 22px; font-size: 13px; font-weight: 700; background: #00412E; border-color: #00412E; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(0,65,46,0.25);" onclick="App.subirSubsanacionItem('${projectId}', 3)" title="Cargar archivo de Despiece de Acero (Ítem 3)">
+                <span>📤</span> Cargar / Subsanar Documento de Despiece
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    // Documento válido detectado: habilitar contenedor de memoria de concreto
+    if (concreteWrapper) concreteWrapper.style.display = "block";
 
     let template = d.standardTemplate;
     if (!template) {
@@ -584,30 +648,10 @@ const StructuralEngine = {
     const tot = template.totales || { pesoTotalGlobalKg: 0, totalVarillas6m: 0, cuantiaKgM: 0, cuantiaSuperavitKgM: 0 };
 
     // 1. Alerta de formato con estilo institucional del dashboard
-    const tieneDoc = (d.tieneDocumento !== false && !!d.archivoNombre && (project.archivosFiles ? !!project.archivosFiles[3] : true));
     const isStd = template.isStandardTemplate;
     let statusBanner = "";
 
-    if (!tieneDoc) {
-      statusBanner = `
-        <div class="template-status-banner" style="background:#FEF2F2;border:1.5px solid #EF4444;border-left:5px solid #DC2626;padding:16px 20px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;box-shadow:var(--shadow-sm);">
-          <div style="display:flex;align-items:center;gap:14px;">
-            <div style="font-size:24px;color:#DC2626;font-weight:900;">✕</div>
-            <div>
-              <div style="font-weight:800;color:#991B1B;font-size:14px;margin-bottom:2px;">Documento de Despiece de Acero (Ítem 3) NO APORTADO</div>
-              <div style="font-size:12px;color:#7F1D1D;line-height:1.4;">
-                En la carpeta municipal no se encontró ningún archivo de despiece, planilla de acero o figuración. La cuantía de acero no se puede certificar sin el documento.
-              </div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <button class="btn-primary" style="padding:6px 14px;font-size:12px;background:#DC2626;border-color:#DC2626;cursor:pointer;" onclick="App.subirSubsanacionItem(3, '${projectId}')" title="Cargar archivo de Despiece de Acero (Ítem 3)">
-              📁 Aportar Despiece de Acero
-            </button>
-          </div>
-        </div>
-      `;
-    } else if (isStd) {
+    if (isStd) {
       statusBanner = `
         <div class="template-status-banner status-standard">
           <div style="display:flex;align-items:center;gap:12px;">
@@ -618,8 +662,8 @@ const StructuralEngine = {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre)}</span>
-            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="App.subirSubsanacionItem(3, '${projectId}')" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
+            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre || 'Despiece_Acero.xlsx')}</span>
+            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="App.subirSubsanacionItem('${projectId}', 3)" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
           </div>
         </div>
       `;
@@ -634,16 +678,26 @@ const StructuralEngine = {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre)}</span>
-            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="App.subirSubsanacionItem(3, '${projectId}')" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
+            <span class="format-file-tag">📄 ${this.escapeHtml(d.archivoNombre || 'Despiece_Acero.pdf')}</span>
+            <button class="btn-secondary" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.85);cursor:pointer;" onclick="App.subirSubsanacionItem('${projectId}', 3)" title="Seleccionar o reemplazar el archivo de Despiece de Acero (Ítem 3)">Reemplazar Archivo &#8644;</button>
           </div>
         </div>
       `;
     }
 
-    // 2. Parámetros clave del proyecto (Únicamente los 3 datos requeridos)
+    // 2. Parámetros clave del proyecto (Únicamente los 3 datos requeridos + desglose multitramo si existe)
+    const multitramoBadge = (info.tramosMultitramo && info.tramosMultitramo.length > 0)
+      ? `<div style="grid-column: 1 / -1; background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 14px; font-size: 11.5px; color: #166534; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span>🔀</span> <b>Desglose Multitramo Detectado:</b> ${info.tramosMultitramo.length} tramo(s) (${info.tramosMultitramo.map(t => `${t.tramo}: ${t.longitudM} m [${t.codigoVia}]`).join(' • ')})
+          </div>
+          <span style="font-weight:800; background:#DCFCE7; padding:2px 8px; border-radius:4px;">Total: ${info.longitudM} m</span>
+        </div>`
+      : "";
+
     const keyParamsHtml = `
       <div class="template-key-params-grid">
+        ${multitramoBadge}
         <div class="key-param-card">
           <div class="key-param-icon-box">🛣️</div>
           <div>
@@ -767,17 +821,22 @@ const StructuralEngine = {
     let filasHtml = "";
     filas.forEach((r, idx) => {
       const elemCell = getRowElemHtml(idx, r.elem);
-      const diamColor = (r.diam || "").includes("1/2") ? "#0284C7" : ((r.diam || "").includes("3/8") ? "#059669" : "#D97706");
+      const diamStr = r.diam ? String(r.diam).trim() : "";
+      const diamColor = diamStr.includes("1/2") ? "#0284C7" : (diamStr.includes("3/8") ? "#059669" : (diamStr.includes("1/4") ? "#D97706" : "#64748B"));
+      const diamDisplay = diamStr ? `
+        <span class="diam-pill font-mono" style="background:${diamColor}14; color:${diamColor}; border:1px solid ${diamColor}30; padding:2px 7px; font-size:11px;">
+          ${this.escapeHtml(diamStr)}
+        </span>
+      ` : `<span style="color:var(--text-muted);">-</span>`;
+      const pesoLinVal = parseFloat(r.pesoLin) || 0;
+      const pesoLinDisplay = pesoLinVal > 0 ? pesoLinVal.toFixed(3) : "-";
+
       filasHtml += `
         <tr>
           ${elemCell}
           <td style="font-size:12px;font-weight:600;">${this.escapeHtml(r.tipo)}</td>
-          <td style="text-align:center;">
-            <span class="diam-pill font-mono" style="background:${diamColor}14; color:${diamColor}; border:1px solid ${diamColor}30; padding:2px 7px; font-size:11px;">
-              ${r.diam}
-            </span>
-          </td>
-          <td class="font-mono" style="text-align:right;font-size:12px;">${(parseFloat(r.pesoLin) || 0.56).toFixed(3)}</td>
+          <td style="text-align:center;">${diamDisplay}</td>
+          <td class="font-mono" style="text-align:right;font-size:12px;">${pesoLinDisplay}</td>
           <td class="font-mono" style="text-align:center;font-size:12px;">${(r.corte !== undefined && r.corte !== null && parseFloat(r.corte) > 0) ? `${parseFloat(r.corte).toFixed(2)} m` : ((r.corte === 0 || r.corte === "0") ? "0" : "-")}</td>
           <td class="font-mono font-bold" style="text-align:center;font-size:12px;">${(parseInt(r.piezas) || 0).toLocaleString('es-CO')}</td>
           <td class="font-mono" style="text-align:right;font-size:12px;">${(r.longTotalM || 0).toLocaleString('es-CO', { minimumFractionDigits: 2 })} m</td>
@@ -840,20 +899,25 @@ const StructuralEngine = {
 
   renderConcreteTable(concretoVolumes, container, fase1A, despieceExtraido) {
     if (!container) return;
-    container.innerHTML = "";
+    const concreteWrapper = container.closest(".concrete-memory-fullwidth") || document.querySelector(".concrete-memory-fullwidth");
 
-    if (!concretoVolumes || !concretoVolumes.longitudM || concretoVolumes.longitudM === 0) {
-      container.innerHTML = `
-        <div style="text-align:center;padding:36px 20px;color:var(--text-muted);background:var(--color-bg-alt);border-radius:8px;">
-          <div style="font-weight:800;font-size:15px;margin-bottom:6px;color:var(--text-muted);">ℹ️ Memoria de Volúmenes en Espera</div>
-          <div style="font-size:13px;max-width:540px;margin:0 auto;">Cargue una carpeta municipal para visualizar los volúmenes de concreto simple, concreto ciclópeo y sacos de cemento consignados en la plantilla oficial.</div>
-        </div>
-      `;
+    const tieneDoc = fase1A ? (fase1A.tieneDocumento !== false) : (despieceExtraido ? despieceExtraido.tieneDocumento !== false : true);
+    if (!tieneDoc || !concretoVolumes || !concretoVolumes.longitudM || concretoVolumes.longitudM === 0) {
+      if (!tieneDoc && concreteWrapper) {
+        concreteWrapper.style.display = "none";
+      }
+      container.innerHTML = "";
       const statConc = document.getElementById("statConcreteTotal");
-      if (statConc) statConc.innerText = "0.00 m³";
+      if (statConc) statConc.innerText = "-";
       const statCem = document.getElementById("statCementTotal");
-      if (statCem) statCem.innerText = "0 sacos";
+      if (statCem) statCem.innerText = "-";
+      const statDosi = document.getElementById("statDosificacionTotal");
+      if (statDosi) statDosi.innerText = "-";
       return;
+    }
+
+    if (concreteWrapper) {
+      concreteWrapper.style.display = "block";
     }
 
     const cv = concretoVolumes;
@@ -1067,13 +1131,30 @@ const StructuralEngine = {
   },
   auditProject(project) {
     const standards = SIPRO_DATA.normativeStandards;
-    const despiece = project.despieceExtraido || project.despieceAcero || { marcas: [], pesoTotalDeclaradoKg: 0, cuantiaKgM: 0 };
-    const marcas = despiece.marcas || [];
+    const despiece = (project && (project.despieceExtraido || project.despieceAcero)) || { marcas: [], pesoTotalDeclaradoKg: 0, cuantiaKgM: 0 };
+    const lengthM = (despiece && despiece.longitudIntervencionM) || (project && project.longitudM) || 0;
+    const minCuantia = standards.cuantiaMinimaKgM;
+
+    // 1. Identificar si existe archivo válido para Ítem 3
+    const hasItem3File = Boolean(
+      (project && project.archivosFiles && project.archivosFiles[3]) ||
+      (project && project.archivosFileMap && project.archivosFileMap[3]) ||
+      (project && project.documentosStatus && project.documentosStatus.archivosDetectados && project.documentosStatus.archivosDetectados[3]) ||
+      (despiece && despiece.archivoNombre && despiece.tieneDocumento !== false)
+    );
+
+    // 2. Identificar si se extrajeron datos reales con pesoTotalKg > 0 o filas reales
+    const totalCalculatedWeightKg = (despiece && (despiece.pesoTotalDeclaradoKg || despiece.totalKilos || (despiece.acero && despiece.acero.totalKg))) || 0;
+    const hasExtractedRows = Array.isArray(despiece && despiece.marcas) && despiece.marcas.length > 0 && despiece.marcas.some(m => (m.pesoKg || 0) > 0 || (m.piezas || 0) > 0 || (m.longTotalM || 0) > 0);
+    const hasTemplateRows = Boolean(despiece && despiece.standardTemplate && Array.isArray(despiece.standardTemplate.filas) && despiece.standardTemplate.filas.some(f => (f.pesoTotalKg || 0) > 0 || (f.piezas || 0) > 0));
+    const hasRealData = (totalCalculatedWeightKg > 0) || hasExtractedRows || hasTemplateRows;
+
+    const tieneDoc = Boolean(hasItem3File && despiece.tieneDocumento !== false && hasRealData);
 
     let alerts = [];
 
     // Chequeo de anomalías de hoja de cálculo detectadas en el PDF (informativo)
-    if (despiece.spreadsheetErrors && despiece.spreadsheetErrors.length > 0) {
+    if (despiece && despiece.spreadsheetErrors && despiece.spreadsheetErrors.length > 0) {
       alerts.push({
         criterio: "Anomalía de Hoja de Cálculo en Documento Original",
         observacion: `El documento de despiece contiene errores de fórmulas no resueltos: ${despiece.spreadsheetErrors.join(", ")}`,
@@ -1081,10 +1162,64 @@ const StructuralEngine = {
       });
     }
 
-    const lengthM = despiece.longitudIntervencionM || project.longitudM || 0;
-    const totalCalculatedWeightKg = despiece.pesoTotalDeclaradoKg || 0;
+    if (!tieneDoc) {
+      alerts.push({
+        criterio: "Documento de Despiece de Acero (Ítem 3)",
+        observacion: "No se aportó el documento de despiece de acero en la carpeta municipal.",
+        accion_requerida: "Aportar el documento de despiece de acero (Ítem 3) en formato Excel o PDF."
+      });
+
+      return {
+        fase: "1A_ACERO",
+        tieneDocumento: false,
+        aprobado: false,
+        cuantiaConforme: false,
+        cumpleCuantia: false,
+        normaAplicada: standards.normaBase,
+        longitudTramo: lengthM,
+        longitudIntervencionM: lengthM,
+        pesoTotalCalculadoKg: 0,
+        pesoTotalDeclaradoKg: 0,
+        pesoTotalKg: 0,
+        diferenciaPesoPct: 0,
+        cuantiaRealKgM: 0,
+        cuantiaNormativaMinKgM: minCuantia,
+        cuantiaSuperavitKgM: -minCuantia,
+        marcas: [],
+        marcasEvaluadas: [],
+        totalMarcas: 0,
+        marcasCumplen: 0,
+        marcasNoCumplen: 0,
+        concreto: [],
+        concretoVolumes: {
+          longitudM: lengthM,
+          totalConcreto21M3: 0,
+          totalConcretoCiclopeoM3: 0,
+          totalConcretoGlobalM3: 0,
+          sacosCemento: 0,
+          dosificacionGlobal: 0,
+          elementos: {}
+        },
+        acero: {
+          pesoTotalKg: 0,
+          pesoDeclaradoKg: 0,
+          pesoCalculadoKg: 0,
+          cuantiaRealKgM: 0,
+          subtotalesPorElemento: {},
+          subtotalesPorDiametro: {}
+        },
+        copniaOk: true,
+        hallazgosCriticos: [{
+          criterio: "Ítem 3: Despiece de Acero",
+          observacion: "Documento de despiece de acero no aportado",
+          accion_requerida: "Aportar el despiece de acero conforme a los criterios técnicos"
+        }],
+        alertas: alerts
+      };
+    }
+
+    const marcas = despiece.marcas || [];
     const realCuantiaKgM = despiece.cuantiaKgM || (lengthM > 0 ? +(totalCalculatedWeightKg / lengthM).toFixed(2) : 0);
-    const minCuantia = standards.cuantiaMinimaKgM;
 
     const auditedMarks = marcas.map(m => ({
       ...m,
@@ -1098,21 +1233,13 @@ const StructuralEngine = {
       : this.calculateConcreteVolumes(lengthM, { pesoTotalKg: totalCalculatedWeightKg });
     project.concretoVolumes = concretoVolumes;
 
-    const tieneDoc = despiece.tieneDocumento !== false && (!!despiece.archivoNombre || (project.archivosFiles && !!project.archivosFiles[3]));
-    if (!tieneDoc) {
-      alerts.push({
-        criterio: "Documento de Despiece de Acero (Ítem 3)",
-        observacion: "No se aportó el documento de despiece de acero en la carpeta municipal.",
-        accion_requerida: "Aportar el documento de despiece de acero (Ítem 3) en formato Excel o PDF."
-      });
-    }
-
-    const cumpleCuantia = tieneDoc && (realCuantiaKgM >= minCuantia);
-
+    const cumpleCuantia = (realCuantiaKgM >= minCuantia);
     const auditPesoKg = despiece.pesoTotalDeclaradoKg || totalCalculatedWeightKg;
+
     return {
       fase: "1A_ACERO",
-      aprobado: tieneDoc,
+      tieneDocumento: true,
+      aprobado: true,
       cuantiaConforme: cumpleCuantia,
       cumpleCuantia: cumpleCuantia,
       normaAplicada: standards.normaBase,
@@ -1126,6 +1253,7 @@ const StructuralEngine = {
       cuantiaNormativaMinKgM: minCuantia,
       cuantiaSuperavitKgM: +(realCuantiaKgM - minCuantia).toFixed(2),
       marcasEvaluadas: auditedMarks,
+      marcas: auditedMarks,
       totalMarcas: auditedMarks.length,
       marcasCumplen: auditedMarks.length,
       marcasNoCumplen: 0,
@@ -1148,11 +1276,7 @@ const StructuralEngine = {
         elementos: concretoVolumes.elementos || {}
       },
       copniaOk: true,
-      hallazgosCriticos: tieneDoc ? [] : [{
-        criterio: "Ítem 3: Despiece de Acero",
-        observacion: "Documento de despiece de acero no aportado",
-        accion_requerida: "Aportar el despiece de acero conforme a los criterios técnicos"
-      }],
+      hallazgosCriticos: [],
       alertas: alerts
     };
   },

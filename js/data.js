@@ -153,10 +153,10 @@ const SIPRO_DATA = {
     {
         "id": 9,
         "num": "09",
-        "title": "Acuerdo del Concejo que faculta al alcalde para contratar (vigencia < 1 mes)",
-        "rule": "Expedición o certificación menor a 1 mes (30 días); facultades explícitas para convenios interadministrativos.",
+        "title": "Acuerdo del Concejo que faculta al alcalde para contratar (Vigencia: Mes calendario en curso)",
+        "rule": "Expedición o certificación dentro del mes y año calendario en curso; facultades explícitas para convenios interadministrativos.",
         "entity": "Concejo Municipal",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "acuerdo",
@@ -168,10 +168,10 @@ const SIPRO_DATA = {
     {
         "id": 10,
         "num": "10",
-        "title": "Copia del RUT del municipio (vigencia < 1 mes)",
-        "rule": "Descarga de la DIAN con fecha de generación menor a 30 días, estado Activo, NIT correcto.",
+        "title": "Copia del RUT del municipio (Vigencia: Mes calendario en curso)",
+        "rule": "Descarga de la DIAN con fecha de generación del mes y año calendario en curso, estado Activo, NIT correcto.",
         "entity": "DIAN",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "rut",
@@ -181,10 +181,10 @@ const SIPRO_DATA = {
     {
         "id": 11,
         "num": "11",
-        "title": "Certificado de Responsables Fiscales de la Contraloría General (vigencia < 1 mes)",
-        "rule": "Vigencia < 30 días. Estado: NO REPORTADO COMO RESPONSABLE FISCAL (Alcalde y Municipio).",
+        "title": "Certificado de Responsables Fiscales de la Contraloría General (Vigencia: Mes calendario en curso)",
+        "rule": "Expedición dentro del mes calendario en curso. Estado: NO REPORTADO COMO RESPONSABLE FISCAL (Alcalde y Municipio).",
         "entity": "Contraloría General de la República",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "contraloria",
@@ -195,10 +195,10 @@ const SIPRO_DATA = {
     {
         "id": 12,
         "num": "12",
-        "title": "Certificado de Medidas Correctivas del alcalde (vigencia < 1 mes)",
-        "rule": "Vigencia < 30 días. Sistema RNMC Policía Nacional sin sanciones de convivencia pendientes.",
+        "title": "Certificado de Medidas Correctivas del alcalde (Vigencia: Mes calendario en curso)",
+        "rule": "Expedición dentro del mes calendario en curso. Sistema RNMC Policía Nacional sin sanciones de convivencia pendientes.",
         "entity": "Policía Nacional - RNMC",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "rnmc",
@@ -210,10 +210,10 @@ const SIPRO_DATA = {
     {
         "id": 13,
         "num": "13",
-        "title": "Certificado de Antecedentes Judiciales del alcalde (vigencia < 1 mes)",
-        "rule": "Vigencia < 30 días. Sin asuntos pendientes con las autoridades judiciales.",
+        "title": "Certificado de Antecedentes Judiciales del alcalde (Vigencia: Mes calendario en curso)",
+        "rule": "Expedición dentro del mes calendario en curso. Sin asuntos pendientes con las autoridades judiciales.",
         "entity": "Policía Nacional",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "judiciales",
@@ -224,10 +224,10 @@ const SIPRO_DATA = {
     {
         "id": 14,
         "num": "14",
-        "title": "Certificado de Antecedentes Disciplinarios de la Procuraduría (vigencia < 1 mes)",
-        "rule": "Vigencia < 30 días. Sin inhabilidades ni sanciones disciplinarias vigentes ordinarias/especiales.",
+        "title": "Certificado de Antecedentes Disciplinarios de la Procuraduría (Vigencia: Mes calendario en curso)",
+        "rule": "Expedición dentro del mes calendario en curso. Sin inhabilidades ni sanciones disciplinarias vigentes ordinarias/especiales.",
         "entity": "Procuraduría General de la Nación",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "procuraduria",
@@ -239,9 +239,9 @@ const SIPRO_DATA = {
         "id": 15,
         "num": "15",
         "title": "Certificado de paz y salvo de seguridad social y parafiscales del mes presente",
-        "rule": "Expedido en el mes corriente por revisor fiscal o representante legal acreditando pagos al día.",
+        "rule": "Expedido en el mes calendario en curso por revisor fiscal o representante legal acreditando pagos al día.",
         "entity": "Revisor Fiscal / Tesorería",
-        "validity": "Mes presente",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "parafiscales",
@@ -252,10 +252,10 @@ const SIPRO_DATA = {
     {
         "id": 16,
         "num": "16",
-        "title": "Certificado Registro de Deudores Alimentarios Morosos (REDAM)",
-        "rule": "Estado: NO REGISTRA deuda alimentaria morosa vigente en el sistema del MinTIC/MinJusticia.",
+        "title": "Certificado Registro de Deudores Alimentarios Morosos - REDAM (Vigencia: Mes calendario en curso)",
+        "rule": "Expedición dentro del mes calendario en curso. Estado: NO REGISTRA deuda alimentaria morosa vigente en el sistema del MinTIC/MinJusticia.",
         "entity": "Ministerio de Tecnologías / MinJusticia",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "redam",
@@ -319,10 +319,10 @@ const SIPRO_DATA = {
     {
         "id": 21,
         "num": "21",
-        "title": "Constancia de consulta en el portal anticorrupción de Colombia - PACO",
-        "rule": "Consulta en PACO (Secretaría de Transparencia de la Presidencia) sin reportes de sanciones.",
+        "title": "Constancia de consulta en el portal anticorrupción de Colombia - PACO (Vigencia: Mes calendario en curso)",
+        "rule": "Consulta en PACO (Secretaría de Transparencia) generada en el mes calendario en curso sin reportes de sanciones.",
         "entity": "Presidencia de la República - PACO",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "paco",
@@ -333,10 +333,10 @@ const SIPRO_DATA = {
     {
         "id": 22,
         "num": "22",
-        "title": "Certificado de inhabilidades por delitos sexuales contra menores del alcalde",
-        "rule": "Ley 1918 de 2018. Certificado de la Policía Nacional con resultado 'NO REGISTRA INHABILIDAD'.",
+        "title": "Certificado de inhabilidades por delitos sexuales contra menores del alcalde (Vigencia: Mes calendario en curso)",
+        "rule": "Ley 1918 de 2018. Certificado de la Policía Nacional expedido en el mes calendario en curso con resultado 'NO REGISTRA INHABILIDAD'.",
         "entity": "Policía Nacional",
-        "validity": "< 1 mes (30 días)",
+        "validity": "Mes calendario en curso",
         "daysMax": 30,
         "expectedFilePattern": [
             "delitos sexuales",

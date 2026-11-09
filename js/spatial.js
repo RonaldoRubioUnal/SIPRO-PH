@@ -672,16 +672,22 @@ const SpatialEngine = {
     // Reevaluar conformidad global si existe el expediente
     if (expMap && pId && expMap[pId]) {
       const exp = expMap[pId];
+      if (project.georreferenciacion) {
+        exp.fase1B = { ...exp.fase1B, ...project.georreferenciacion };
+      }
       const a1A = exp.fase1A || {};
       const a1B = exp.fase1B || {};
       const a2 = exp.fase2 || {};
       const totalDocs = exp.modalidad === "RECURSOS" ? 28 : 27;
 
       const a1AOk = a1A.aprobado !== undefined ? a1A.aprobado : (a1A.cuantiaConforme === true);
-      const a1BOk = a1B.coberturaConforme === true;
+      const a1BOk = (a1B.coberturaConforme === true) || (a1B.porcentajeAlineacion >= 95.0) || (a1B.puntosAnomalia === 0 && (a1B.tramos && a1B.tramos.length > 0));
       const a2Ok = (a2.itemsConformes || 0) >= totalDocs;
 
       if (exp.auditGlobal) {
+        exp.auditGlobal.audit1A = a1A;
+        exp.auditGlobal.audit1B = a1B;
+        exp.auditGlobal.audit2 = a2;
         exp.auditGlobal.isApproved = a1AOk && a1BOk && a2Ok;
         if (!a1AOk) {
           exp.auditGlobal.activeGatekeeper = "1A_DISENO";
@@ -695,11 +701,13 @@ const SpatialEngine = {
       }
     }
 
-    // Invocar actualización reactiva de KPIs ejecutivos y banner
+    // Invocar actualización reactiva centralizada de KPIs ejecutivos y compuertas
     if (window.App && typeof window.App.actualizarKPIsEjecutivos === "function") {
       window.App.actualizarKPIsEjecutivos(pId);
     }
-    if (window.App && typeof window.App.renderPipelineBanner === "function" && expMap && pId && expMap[pId] && expMap[pId].auditGlobal) {
+    if (window.App && typeof window.App.actualizarBarraCompuertas === "function") {
+      window.App.actualizarBarraCompuertas(pId);
+    } else if (window.App && typeof window.App.renderPipelineBanner === "function" && expMap && pId && expMap[pId] && expMap[pId].auditGlobal) {
       window.App.renderPipelineBanner(expMap[pId].auditGlobal);
     }
   },
@@ -1497,6 +1505,7 @@ const SpatialEngine = {
   recalculateProjectProximity(project) {
     if (!project || (!project.georreferenciacion && !project.fase1B)) return;
     const geo = project.georreferenciacion || project.fase1B || {};
+    var tramosConformes = 0;
 
     // Deduplicación defensiva de tramos por coordenadas exactas
     if (geo.tramos && Array.isArray(geo.tramos)) {
@@ -1628,7 +1637,7 @@ const SpatialEngine = {
       }
     });
 
-    const tramosConformes = tramos.filter(t => t.cumple).length;
+    var tramosConformes = Array.isArray(tramos) ? tramos.filter(t => t && t.cumple).length : 0;
 
     let sumEnViaM = 0;
     let sumTotalTrackM = 0;
@@ -1673,7 +1682,7 @@ const SpatialEngine = {
     geo.coberturaBufferPct = porcentajeAlineacion;
     geo.tieneKMZ = tieneKMZ;
     geo.tieneGeorreferenciacionValida = tieneKMZ;
-    geo.puntosAnomalia = tramos.length - tramosConformes;
+    geo.puntosAnomalia = Math.max(0, tramos.length - (typeof tramosConformes !== 'undefined' ? tramosConformes : 0));
     geo.coberturaConforme = tieneKMZ && (porcentajeAlineacion >= 95.0);
     geo.aprobado = geo.coberturaConforme;
     geo.estado = tieneKMZ ? (geo.coberturaConforme ? "Cumple" : "Alerta de Desfase Espacial") : "No Cumple - Falta archivo KMZ/KML";
@@ -1762,6 +1771,10 @@ const SpatialEngine = {
       project.fase1B.coberturaConforme = geo.coberturaConforme;
       project.fase1B.aprobado = geo.coberturaConforme;
       project.fase1B.puntosContraste = puntosContraste;
+    }
+
+    if (window.App && typeof window.App.actualizarBarraCompuertas === "function") {
+      window.App.actualizarBarraCompuertas(pId);
     }
   },
 
@@ -2842,7 +2855,7 @@ const SpatialEngine = {
     const puntos = (geo.puntos && geo.puntos !== geo.puntosContraste) ? geo.puntos : (geo.puntosInspeccion || []);
 
     const totalTramos = tramos.length;
-    const tramosConformes = tramos.filter(t => t.cumple && !t.cumpleParcial).length;
+    const tramosConformes = Array.isArray(tramos) ? tramos.filter(t => t && t.cumple && !t.cumpleParcial).length : 0;
     const tramosParciales = tramos.filter(t => t.cumpleParcial).length;
     const totalPuntos = puntos.length;
     const puntosConformes = puntos.filter(p => p.cumple).length;

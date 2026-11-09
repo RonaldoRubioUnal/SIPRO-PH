@@ -317,6 +317,19 @@ const PresupuestoEngine = {
         evaluado: false
       };
     }
+    if (!expediente.fase1C.presupuestoData) {
+      expediente.fase1C.presupuestoData = {
+        aceroKg: 0,
+        concretoSimpleM3: 0,
+        concretoCiclopeoM3: 0,
+        longitudM: (expediente.datos && expediente.datos.longitudM) || 0,
+        valorTotalPresupuesto: (expediente.datos && expediente.datos.presupuestoTotal) || 0,
+        archivoOrigen: null,
+        objetoProyecto: "",
+        esPlacaHuella: false,
+        otroPavimentoDetectado: null
+      };
+    }
     return expediente.fase1C;
   },
 
@@ -830,6 +843,7 @@ const PresupuestoEngine = {
     if (presupuestoData) {
       state.presupuestoData = { ...state.presupuestoData, ...presupuestoData };
     }
+    state.presupuestoData = state.presupuestoData || {};
     const pData = state.presupuestoData;
 
     // =========================================================================
@@ -1308,7 +1322,6 @@ const PresupuestoEngine = {
             <div>
               <div class="audit-title" style="display:flex;align-items:center;gap:8px;">
                 <span>📊 Comparación de Totales Principales (Fase 1A vs. Presupuesto)</span>
-                <span class="badge-modalidad" style="font-size:10px;padding:1px 6px;">Single Source of Truth: Fase 1A</span>
               </div>
               <div class="audit-subtitle">Contraste directo entre los totales consolidados de la Fase 1A y la sumatoria de partidas en la hoja PRESUPUESTO</div>
             </div>
