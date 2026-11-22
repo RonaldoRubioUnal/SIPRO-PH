@@ -34,6 +34,7 @@ const DocumentalEngine = {
   },
 
   ITEMS_VIGENCIA_MENSUAL: [9, 10, 11, 12, 13, 14, 15, 16, 21, 22],
+  ITEMS_VIGENCIA_MENSUAL_2026_2: [27, 28, 29, 30, 31, 32, 33, 34, 39, 40],
 
   SHORT_TITLES_VIGENCIA: {
     9: "Acuerdo del Concejo",
@@ -46,6 +47,31 @@ const DocumentalEngine = {
     16: "Certificado REDAM",
     21: "Constancia Consulta PACO",
     22: "Certificado Inhabilidades Delitos Sexuales"
+  },
+
+  SHORT_TITLES_VIGENCIA_2026_2: {
+    27: "Acuerdo del Concejo",
+    28: "Copia del RUT",
+    29: "Certificado Contraloría (Responsables Fiscales)",
+    30: "Certificado Medidas Correctivas (RNMC)",
+    31: "Certificado Antecedentes Judiciales",
+    32: "Certificado Antecedentes Disciplinarios",
+    33: "Certificado Seguridad Social y Parafiscales",
+    34: "Certificado REDAM",
+    39: "Constancia Consulta PACO",
+    40: "Certificado Inhabilidades Delitos Sexuales"
+  },
+
+  getItemsVigencia(processMode) {
+    if (processMode === "2026_2" || processMode === "CONVENIOS_2026_2") {
+      return this.ITEMS_VIGENCIA_MENSUAL_2026_2;
+    }
+    return this.ITEMS_VIGENCIA_MENSUAL;
+  },
+
+  isVigenciaMensual(itemId, processMode) {
+    const list = this.getItemsVigencia(processMode);
+    return list.includes(Number(itemId));
   },
 
   /**
@@ -239,8 +265,17 @@ const DocumentalEngine = {
    * Ejecuta la auditoría documental completa del proyecto basada en los archivos reales
    */
   auditProject(project) {
-    const isRecursos = project && (project.modalidad === "RECURSOS" || (project.datos && project.datos.modalidad === "RECURSOS"));
-    const items = isRecursos ? SIPRO_DATA.items27 : SIPRO_DATA.items27.filter(i => !i.soloRecursos);
+    const processMode = (project && project.procesoEspecial) || (project && project.datos && project.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    const isRecursos = !is2026_2 && project && (project.modalidad === "RECURSOS" || (project.datos && project.datos.modalidad === "RECURSOS"));
+    
+    let items;
+    if (is2026_2) {
+      items = (SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.length > 0) ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27;
+    } else {
+      items = isRecursos ? SIPRO_DATA.items27 : SIPRO_DATA.items27.filter(i => !i.soloRecursos);
+    }
+
     const docStatus = project.documentosStatus || { itemsCumplidos: [], itemsSubsanar: [], diasVigencias: {}, archivosDetectados: {} };
     const diasVigencias = docStatus.diasVigencias || {};
     const archivosDetectados = docStatus.archivosDetectados || {};
@@ -287,12 +322,12 @@ const DocumentalEngine = {
       }
 
       // 2. Si el archivo SÍ existe, verificar regla de vigencia estricta por Mes Calendario en Curso
-      // Documentos obligados a vigencia mensual: 9, 10, 11, 12, 13, 14, 15, 16, 21, 22
       let fechaDoc = null;
       let fechaDocStr = null;
       let esVigente = true;
+      const isVigenciaItem = this.isVigenciaMensual(item.id, processMode);
 
-      if (this.ITEMS_VIGENCIA_MENSUAL.includes(item.id)) {
+      if (isVigenciaItem) {
         if (meta && meta.fechaDoc instanceof Date) {
           fechaDoc = meta.fechaDoc;
           fechaDocStr = meta.fechaDocStr || `${String(fechaDoc.getDate()).padStart(2, '0')}/${String(fechaDoc.getMonth() + 1).padStart(2, '0')}/${fechaDoc.getFullYear()}`;
@@ -331,7 +366,7 @@ const DocumentalEngine = {
 
         esVigente = Boolean(fechaDoc && fechaDoc.getFullYear() === anioActual && fechaDoc.getMonth() === mesActual);
 
-        const shortTitle = this.SHORT_TITLES_VIGENCIA[item.id] || item.title.split("(")[0].trim();
+        const shortTitle = (is2026_2 ? this.SHORT_TITLES_VIGENCIA_2026_2[item.id] : this.SHORT_TITLES_VIGENCIA[item.id]) || item.title.split("(")[0].trim();
         const nombreMesActual = this.NOMBRES_MESES[mesActual];
 
         if (!esVigente) {
@@ -357,12 +392,51 @@ const DocumentalEngine = {
         }
       }
 
+      // 3.5 CALIFICACIÓN MANUAL VINCULANTE DE LA SUPERVISIÓN
+      const revSup = (project.revisionSupervisor && (project.revisionSupervisor[item.id] || project.revisionSupervisor[String(item.id)]))
+                  || (docStatus.revisionSupervisor && (docStatus.revisionSupervisor[item.id] || docStatus.revisionSupervisor[String(item.id)]))
+                  || null;
+
+      let marcadoSupervisor = false;
+      let estadoSupervisor = null;
+      let observacionSupervisor = null;
+      let fechaRevisionSupervisor = null;
+
+      if (revSup) {
+        marcadoSupervisor = true;
+        estadoSupervisor = revSup.estado;
+        observacionSupervisor = revSup.observacion || "";
+        fechaRevisionSupervisor = revSup.fecha || "";
+
+        if (estadoSupervisor === "NO_CONFORME" || estadoSupervisor === "INCONFORME") {
+          isCompliant = false;
+          observation = observacionSupervisor
+            ? `⚠️ NO CONFORME (Supervisor): ${observacionSupervisor}`
+            : `⚠️ Documento marcado como No Conforme tras la inspección técnica del supervisor.`;
+          
+          criticalIssues.push({
+            criterio: `Ítem ${item.num}: ${item.title}`,
+            observacion: `• Ítem ${item.num}: ⚠️ NO CONFORME (Supervisor) — ${observacionSupervisor || 'No cumple requisitos técnicos tras inspección'}`,
+            accion_requerida: `Subsanar las no conformidades técnicas señaladas por el supervisor: ${observacionSupervisor || 'Ajustar documento según especificaciones'}`
+          });
+        } else if (estadoSupervisor === "CONFORME") {
+          isCompliant = true;
+          isExpired = false;
+          observation = observacionSupervisor
+            ? `✓ Aprobado por el Supervisor: ${observacionSupervisor}`
+            : `Documento verificado y aprobado de conformidad por el supervisor (${detectedFile || 'Conforme'}).`;
+          
+          // Remover de criticalIssues si se había agregado por vigencia o falta previa
+          criticalIssues = criticalIssues.filter(ci => !ci.criterio.startsWith(`Ítem ${item.num}:`));
+        }
+      }
+
       if (isCompliant) {
         totalCompliant++;
         if (observation === "-") {
           observation = `Documento verificado y vigente en la carpeta: ${detectedFile}`;
         }
-      } else if (!isExpired) {
+      } else if (!isExpired && !marcadoSupervisor) {
         criticalIssues.push({
           criterio: `Ítem ${item.num}: ${item.title}`,
           observacion: observation,
@@ -375,24 +449,43 @@ const DocumentalEngine = {
         conforme: isCompliant,
         faltante: isMissing,
         vencido: isExpired,
-        esVigente: isExpired ? false : (this.ITEMS_VIGENCIA_MENSUAL.includes(item.id) ? true : null),
+        esVigente: isExpired ? false : (isVigenciaItem ? true : null),
         fechaDoc: fechaDoc,
         fechaDocStr: fechaDocStr,
         observacion: observation,
         diasRestantes: null,
         archivoDetectado: detectedFile,
-        meta: meta
+        meta: meta,
+        marcadoSupervisor: marcadoSupervisor,
+        estadoSupervisor: estadoSupervisor,
+        observacionSupervisor: observacionSupervisor,
+        fechaRevisionSupervisor: fechaRevisionSupervisor
       };
     });
 
     // 4. Verificación de Ficha de Priorización (Documento Base)
-    const fichaP = project.fichaPriorizacion || (project.datos && project.datos.fichaPriorizacion);
-    if (!fichaP || fichaP.existe === false || fichaP.detected === false) {
-      criticalIssues.unshift({
-        criterio: "Ficha de Priorización (Documento Base)",
-        observacion: "Ficha de Priorización: Documento faltante en el expediente",
-        accion_requerida: "Aportar la Ficha de Priorización oficial suscrita por el Alcalde y el Secretario."
-      });
+    // En el proceso especial Convenios "2026 - II" no se exige Ficha de Priorización
+    if (!is2026_2) {
+      const fichaP = project.fichaPriorizacion || (project.datos && project.datos.fichaPriorizacion);
+      const revFicha = (project.revisionSupervisor && project.revisionSupervisor["FICHA_PRIORIZACION"])
+                    || (docStatus.revisionSupervisor && docStatus.revisionSupervisor["FICHA_PRIORIZACION"])
+                    || null;
+
+      if (revFicha && (revFicha.estado === "NO_CONFORME" || revFicha.estado === "INCONFORME")) {
+        criticalIssues.unshift({
+          criterio: "Ficha de Priorización (Documento Base)",
+          observacion: `Ficha de Priorización: ⚠️ NO CONFORME (Supervisor) — ${revFicha.observacion || 'Observación técnica en Ficha de Priorización'}`,
+          accion_requerida: `Corregir las observaciones en la Ficha de Priorización: ${revFicha.observacion || 'Aportar Ficha debidamente corregida'}`
+        });
+      } else if (!fichaP || fichaP.existe === false || fichaP.detected === false) {
+        if (!revFicha || revFicha.estado !== "CONFORME") {
+          criticalIssues.unshift({
+            criterio: "Ficha de Priorización (Documento Base)",
+            observacion: "Ficha de Priorización: Documento faltante en el expediente",
+            accion_requerida: "Aportar la Ficha de Priorización oficial suscrita por el Alcalde y el Secretario."
+          });
+        }
+      }
     }
 
     const passed = criticalIssues.length === 0;
@@ -400,7 +493,7 @@ const DocumentalEngine = {
     return {
       fase: "2_DOCUMENTAL",
       aprobado: passed,
-      totalItems: items.length, // 27
+      totalItems: items.length,
       itemsConformes: totalCompliant,
       itemsNoConformes: items.length - totalCompliant,
       porcentajeConformidad: +((totalCompliant / items.length) * 100).toFixed(1),
@@ -441,11 +534,16 @@ const DocumentalEngine = {
    * Permite previsualización in-app en modal o apertura directa en pestaña completa
    */
   abrirDocumento(itemId, openInNewTab = false) {
-    const item = SIPRO_DATA.items27.find(i => i.id === itemId);
+    const p = App.currentProject || {};
+    const rec = App.currentAuditRecord || (window.proyectosAuditados && window.proyectosAuditados[App.currentProjectId]);
+    const processMode = (p && p.procesoEspecial) || (rec && rec.procesoEspecial) || (App && App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2" || itemId > 28;
+    const item = is2026_2
+      ? ((SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.find(i => Number(i.id) === Number(itemId))) || SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId)))
+      : (SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId)) || (SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.find(i => Number(i.id) === Number(itemId))));
     if (!item) return;
 
     const file = this.getFileForItem(itemId);
-    const p = App.currentProject || {};
     const detectedName = (p.documentosStatus && p.documentosStatus.archivosDetectados && p.documentosStatus.archivosDetectados[itemId])
                       || (p.archivosMetadata && p.archivosMetadata[itemId] && p.archivosMetadata[itemId].fileName);
 
@@ -524,6 +622,13 @@ const DocumentalEngine = {
    * Despliega el visor interactivo de documentos en el modal de alta resolución
    */
   openViewerModal(itemId, item, file, fileUrl) {
+    if (!item || !file) {
+      if (String(itemId).toUpperCase().includes("FICHA")) {
+        return this.abrirFichaPriorizacion(App.currentProjectId, false);
+      }
+      return this.abrirDocumento(itemId, false);
+    }
+
     const modal = document.getElementById("documentModal");
     const modalWin = document.getElementById("documentModalWindow") || (modal ? modal.querySelector(".modal-window") : null);
     const modalTitle = document.getElementById("modalDocTitle");
@@ -543,6 +648,52 @@ const DocumentalEngine = {
     const sizeKb = (file.size / 1024).toFixed(1) + " KB";
     const modDate = file.lastModified ? new Date(file.lastModified).toLocaleDateString("es-CO") : "Reciente";
     const p = App.currentProject || {};
+    const rec = App.currentAuditRecord || (window.proyectosAuditados && window.proyectosAuditados[App.currentProjectId]);
+
+    // Consultar estado de calificación de la supervisión
+    const revSup = (p.revisionSupervisor && (p.revisionSupervisor[itemId] || p.revisionSupervisor[String(itemId)]))
+                || (rec && rec.revisionSupervisor && (rec.revisionSupervisor[itemId] || rec.revisionSupervisor[String(itemId)]))
+                || null;
+    const auditedItem = (rec && rec.fase2 && rec.fase2.items) ? rec.fase2.items.find(i => String(i.id) === String(itemId)) : null;
+    const isConforme = revSup ? (revSup.estado === "CONFORME") : (auditedItem ? auditedItem.conforme : true);
+    const observacionSup = (revSup && revSup.observacion) || (auditedItem && auditedItem.observacionSupervisor) || "";
+
+    const supervisorDecisionBarHtml = `
+      <div id="modalSupervisorDecisionBar" class="supervisor-decision-bar" style="background:var(--color-bg-alt);border:1px solid var(--border-subtle);border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span style="font-size:12px;font-weight:800;color:var(--text-main);display:flex;align-items:center;gap:5px;">
+            <span>🛡️</span> <span>Revisión de Supervisión:</span>
+          </span>
+          <span id="modalSupStatusBadge" class="status-pill ${isConforme ? 'cumple' : 'no-cumple'}" style="font-size:11px;padding:3px 10px;font-weight:700;">
+            ${isConforme ? '&#10003; CONFORME' : '&#10007; NO CONFORME'}
+          </span>
+          <span id="modalSupObsDisplay" style="font-size:11.5px;color:${isConforme ? '#15803d' : '#be123c'};font-weight:600;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${observacionSup || ''}">
+            ${observacionSup ? `(${observacionSup})` : ''}
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <button type="button" class="btn-supervisor-action btn-supervisor-conforme"
+                  style="padding:5px 12px;font-size:11.5px;"
+                  onclick="DocumentalEngine.marcarConformeDesdeModal('${itemId}')"
+                  title="Aprobar y marcar este documento como Conforme">
+            <span>✓</span> <span>Marcar Conforme</span>
+          </button>
+          <button type="button" class="btn-supervisor-action btn-supervisor-inconforme"
+                  style="padding:5px 12px;font-size:11.5px;"
+                  onclick="DocumentalEngine.solicitarInconformidad('${itemId}', true)"
+                  title="Marcar este documento como Inconforme y registrar observación">
+            <span>⚠️</span> <span>Marcar Inconforme</span>
+          </button>
+          <button type="button" class="btn-secondary"
+                  id="btnModalEditObs"
+                  style="padding:5px 8px;font-size:11.5px;border-radius:4px;display:${isConforme ? 'none' : 'inline-flex'};align-items:center;gap:3px;"
+                  onclick="DocumentalEngine.solicitarInconformidad('${itemId}', true)"
+                  title="Editar observación del supervisor">
+            <span>✏️ Motivo</span>
+          </button>
+        </div>
+      </div>
+    `;
 
     if (modalTitle) {
       modalTitle.innerHTML = `<span style="color:var(--color-primary);font-weight:800;margin-right:6px">Ítem ${item.num}:</span> ${item.title}`;
@@ -691,7 +842,7 @@ const DocumentalEngine = {
       `;
     }
 
-    modalBody.innerHTML = viewerHtml;
+    modalBody.innerHTML = supervisorDecisionBarHtml + viewerHtml;
     modal.classList.add("active");
   },
 
@@ -721,18 +872,90 @@ const DocumentalEngine = {
     const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
                 (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
                 App.currentAuditRecord;
+    const processMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2" || totalItems === 41;
     const fichaData = (exp && exp.fichaPriorizacion) || (exp && exp.datos && exp.datos.fichaPriorizacion) || {};
     const fichaExiste = Boolean(fichaData && fichaData.existe);
     const fichaFileName = (fichaData && fichaData.fileName) || "Sin archivo";
+    const pCurrent = (window.App && App.currentProject) || (exp && exp.datos) || {};
+    const revFicha = (pCurrent.revisionSupervisor && pCurrent.revisionSupervisor["FICHA_PRIORIZACION"])
+                  || (exp && exp.revisionSupervisor && exp.revisionSupervisor["FICHA_PRIORIZACION"])
+                  || null;
+    const fichaInconforme = revFicha && (revFicha.estado === "NO_CONFORME" || revFicha.estado === "INCONFORME");
+
+    const headerTitle = is2026_2
+      ? `Lista de Chequeo de Viabilidad Técnica - Convenios "2026 - II" (Ítems 1 al ${totalItems})`
+      : `Lista Numérica de Verificación Documental (Ítems 1 al ${totalItems})`;
+
+    const headerSubtitle = is2026_2
+      ? `Cotejo estricto de los 41 requisitos de Viabilidad Técnica según la Dirección de Estructuración de Proyectos. En este proceso especial no se exige Ficha de Priorización. Haga clic en <b>Abrir</b> para ver o en <b>Subsanar</b> para cargar un documento de reemplazo.`
+      : `Cotejo estricto de los ${totalItems} requisitos ${isRecursos ? '(incluye Presupuesto Oficial en Modalidad RECURSOS)' : ''} según la documentación del expediente. Haga clic en <b>Abrir</b> para ver o en <b>Subsanar</b> para cargar un documento de reemplazo.`;
+
+    const bannerHtml = is2026_2 ? `
+      <!-- BARRA INFORMATIVA PROCESO ESPECIAL CONVENIOS 2026 - II (SIN FICHA DE PRIORIZACIÓN) -->
+      <div class="ficha-priorizacion-banner" style="background:var(--color-bg-alt);border:1px solid #0284c7;border-left:5px solid #0284c7;border-radius:8px;padding:12px 18px;margin:14px 0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:22px;">⚡</span>
+          <div>
+            <div style="font-size:13.5px;font-weight:800;color:var(--color-primary);">Proceso Especial Transitorio: Convenios "2026 - II"</div>
+            <div style="font-size:11.5px;color:var(--text-muted);">Lista oficial de 41 requisitos de Viabilidad Técnica (Dirección de Estructuración). En este proceso no se exige Ficha de Priorización territorial.</div>
+          </div>
+          <span class="status-pill cumple" style="font-size:11.5px;padding:3px 10px;">
+            ✓ 41 Requisitos Normativos
+          </span>
+        </div>
+      </div>
+    ` : `
+      <!-- BARRA DE ESTADO DEL DOCUMENTO BASE (FICHA DE PRIORIZACIÓN) -->
+      <div class="ficha-priorizacion-banner" style="background:var(--color-bg-alt);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 18px;margin:14px 0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:20px;">📋</span>
+          <div>
+            <div style="font-size:13px;font-weight:800;color:var(--color-primary);">Ficha de Priorización (Documento Maestro del Expediente)</div>
+            <div style="font-size:11px;color:var(--text-muted);">Documento base suscrito por las autoridades territoriales con el acta de cierre y 27 anexos.</div>
+          </div>
+          ${fichaExiste ? `
+            <span class="status-pill ${fichaInconforme ? 'no-cumple' : 'cumple'}" style="font-size:11.5px;padding:3px 10px;${fichaInconforme ? 'background:#fee2e2;color:#991b1b;border:1px solid #ef4444;' : ''}">
+              ${fichaInconforme ? '✗ Ficha Marcada No Conforme (Supervisor)' : `✓ Ficha detectada: <strong>${fichaFileName}</strong>`}
+            </span>
+          ` : `
+            <span class="status-pill no-cumple" style="font-size:11.5px;padding:3px 10px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;">
+              ✗ Ficha de Priorización No Encontrada
+            </span>
+          `}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${fichaExiste ? `
+            <button class="btn-primary" style="padding:4px 12px;font-size:11px;background:#0284C7;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.abrirFichaPriorizacion()" title="Abrir y visualizar la Ficha de Priorización en visor modal">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              <span>👁️ Ver Ficha</span>
+            </button>
+            <button class="btn-subsanar" style="font-size:11px;padding:4px 10px;" onclick="App.subirFichaPriorizacion()" title="Reemplazar o volver a cargar la Ficha de Priorización">
+              <span>📤 Cambiar Ficha</span>
+            </button>
+            <button type="button" class="btn-supervisor-action ${fichaInconforme ? 'btn-supervisor-conforme' : 'btn-supervisor-inconforme'}"
+                    style="font-size:11px;padding:4px 10px;"
+                    onclick="${fichaInconforme ? 'DocumentalEngine.marcarConformeSupervisor(\'FICHA_PRIORIZACION\')' : 'DocumentalEngine.solicitarInconformidad(\'FICHA_PRIORIZACION\')'}"
+                    title="${fichaInconforme ? 'Revalidar Ficha de Priorización como Conforme' : 'Marcar Ficha de Priorización como Inconforme tras revisión del supervisor'}">
+              <span>${fichaInconforme ? '✓ Marcar Ficha Conforme' : '⚠️ Marcar Ficha Inconforme'}</span>
+            </button>
+          ` : `
+            <button class="btn-subsanar" style="font-size:11px;padding:5px 14px;background:#dc2626;color:#fff;border-color:#b91c1c;" onclick="App.subirFichaPriorizacion()" title="Cargar archivo de la Ficha de Priorización">
+              <span>📤 Subir Ficha de Priorización</span>
+            </button>
+          `}
+        </div>
+      </div>
+    `;
 
     cardEl.innerHTML = `
       <div class="documental-header">
         <div>
           <h3 style="font-size: 16px; font-weight: 800; color: var(--color-primary); margin: 0 0 4px 0;">
-            Lista Numérica de Verificación Documental (Ítems 1 al ${totalItems})
+            ${headerTitle}
           </h3>
           <p style="font-size: 12px; color: var(--text-muted); margin: 0;">
-            Cotejo estricto de los ${totalItems} requisitos ${isRecursos ? '(incluye Presupuesto Oficial en Modalidad RECURSOS)' : ''} según la documentación del expediente. Haga clic en <b>Abrir</b> para ver o en <b>Subsanar</b> para cargar un documento de reemplazo.
+            ${headerSubtitle}
           </p>
         </div>
         <div style="display:flex; align-items:center; gap: 8px;">
@@ -747,40 +970,7 @@ const DocumentalEngine = {
         </div>
       </div>
 
-      <!-- BARRA DE ESTADO DEL DOCUMENTO BASE (FICHA DE PRIORIZACIÓN) -->
-      <div class="ficha-priorizacion-banner" style="background:var(--color-bg-alt);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 18px;margin:14px 0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <span style="font-size:20px;">📋</span>
-          <div>
-            <div style="font-size:13px;font-weight:800;color:var(--color-primary);">Ficha de Priorización (Documento Maestro del Expediente)</div>
-            <div style="font-size:11px;color:var(--text-muted);">Documento base suscrito por las autoridades territoriales con el acta de cierre y 27 anexos.</div>
-          </div>
-          ${fichaExiste ? `
-            <span class="status-pill cumple" style="font-size:11.5px;padding:3px 10px;">
-              ✓ Ficha detectada: <strong>${fichaFileName}</strong>
-            </span>
-          ` : `
-            <span class="status-pill no-cumple" style="font-size:11.5px;padding:3px 10px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;">
-              ✗ Ficha de Priorización No Encontrada
-            </span>
-          `}
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          ${fichaExiste ? `
-            <button class="btn-primary" style="padding:4px 12px;font-size:11px;background:#0284C7;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.abrirFichaPriorizacion()" title="Abrir y visualizar la Ficha de Priorización en visor modal">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              <span>👁️ Ver Ficha de Priorización</span>
-            </button>
-            <button class="btn-subsanar" style="font-size:11px;padding:4px 10px;" onclick="App.subirFichaPriorizacion()" title="Reemplazar o volver a cargar la Ficha de Priorización">
-              <span>📤 Cambiar / Subir Ficha</span>
-            </button>
-          ` : `
-            <button class="btn-subsanar" style="font-size:11px;padding:5px 14px;background:#dc2626;color:#fff;border-color:#b91c1c;" onclick="App.subirFichaPriorizacion()" title="Cargar archivo de la Ficha de Priorización">
-              <span>📤 Subir Ficha de Priorización</span>
-            </button>
-          `}
-        </div>
-      </div>
+      ${bannerHtml}
 
       <div class="table-responsive">
         <table class="data-table documental-table" style="table-layout: auto; width: 100%;">
@@ -807,14 +997,24 @@ const DocumentalEngine = {
                   ${item.soloRecursos ? '<span style="margin-left:6px;font-size:10px;background:rgba(217,119,6,0.15);color:#D97706;padding:1px 5px;border-radius:4px;font-weight:800;">RECURSOS</span>' : ''}
                 </td>
                 <td style="text-align: center; white-space: nowrap;">
-                  <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="white-space: nowrap; ${item.vencido ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;' : ''}">
-                    ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vigencia Vencida' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
-                  </span>
+                  ${item.estadoSupervisor === "NO_CONFORME" ? `
+                    <span class="status-pill no-cumple" style="white-space: nowrap; background:#fee2e2; color:#991b1b; border:1px solid #ef4444; font-weight:700;" title="${item.observacionSupervisor || 'Documento no conforme por decisión del supervisor'}">
+                      &#10007; Inconforme (Sup)
+                    </span>
+                  ` : (item.estadoSupervisor === "CONFORME" ? `
+                    <span class="status-pill cumple" style="white-space: nowrap; background:#dcfce7; color:#166534; border:1px solid #22c55e; font-weight:700;" title="${item.observacionSupervisor || 'Verificado y aprobado por el supervisor'}">
+                      &#10003; Conforme (Sup)
+                    </span>
+                  ` : `
+                    <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="white-space: nowrap; ${item.vencido ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;' : ''}">
+                      ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vigencia Vencida' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
+                    </span>
+                  `)}
                   ${item.fechaDocStr ? `
                     <div style="font-size:10.5px;color:${item.vencido ? '#b45309' : '#059669'};font-weight:700;margin-top:3px;" title="Fecha de expedición detectada">
                       Exp: ${item.fechaDocStr}
                     </div>
-                  ` : (DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(item.id) && item.archivoDetectado ? `
+                  ` : (DocumentalEngine.isVigenciaMensual(item.id, processMode) && item.archivoDetectado ? `
                     <div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:3px;" title="No se detectó fecha en el texto ni metadatos">
                       Fecha no detectada
                     </div>
@@ -843,10 +1043,36 @@ const DocumentalEngine = {
                     <button class="btn-subsanar" style="white-space:nowrap;flex-shrink:0;" onclick="App.subirSubsanacionItem(${item.id})" title="Cargar documento enviado por el municipio para subsanar o actualizar este ítem">
                       <span style="white-space:nowrap;">📤 Subsanar</span>
                     </button>
+                    <button type="button" class="btn-secondary" style="white-space:nowrap;flex-shrink:0;padding:4px 8px;font-size:11px;font-weight:700;background:rgba(2,132,199,0.08);color:#0284c7;border:1px solid rgba(2,132,199,0.3);border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:3px;" onclick="DocumentalEngine.abrirModalAsignarArchivo(${item.id})" title="Asignar un archivo que ya se encuentra en la carpeta del proyecto (subcarpetas o documento compartido)">
+                      <span>📁 Asignar</span>
+                    </button>
+                    ${item.conforme ? `
+                      <button type="button" class="btn-supervisor-action btn-supervisor-inconforme"
+                              onclick="DocumentalEngine.solicitarInconformidad('${item.id}')"
+                              title="Marcar este documento como Inconforme tras la inspección del supervisor">
+                        <span style="font-size:11px;">⚠️</span>
+                        <span>Inconforme</span>
+                      </button>
+                    ` : `
+                      <button type="button" class="btn-supervisor-action btn-supervisor-conforme"
+                              onclick="DocumentalEngine.marcarConformeSupervisor('${item.id}')"
+                              title="Aprobar o revalidar este documento como Conforme">
+                        <span style="font-size:11px;">✓</span>
+                        <span>Conforme</span>
+                      </button>
+                      ${item.estadoSupervisor === "NO_CONFORME" ? `
+                        <button type="button" class="btn-secondary"
+                                style="padding:4px 6px;font-size:11px;border-radius:4px;flex-shrink:0;"
+                                onclick="DocumentalEngine.solicitarInconformidad('${item.id}')"
+                                title="Editar observación técnica del supervisor">
+                          <span>✏️</span>
+                        </button>
+                      ` : ''}
+                    `}
                   </div>
                 </td>
                 <td>
-                  ${DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(item.id) ? `
+                  ${DocumentalEngine.isVigenciaMensual(item.id, processMode) ? `
                     <div style="font-size:11px;font-weight:700;color:var(--color-primary);margin-bottom:3px;display:flex;align-items:center;gap:4px;">
                       <span>📅</span> Mes en curso (${DocumentalEngine.NOMBRES_MESES[new Date().getMonth()]} de ${new Date().getFullYear()})
                     </div>
@@ -859,9 +1085,30 @@ const DocumentalEngine = {
                   ${item.entity}
                 </td>
                 <td>
-                  <span class="${item.conforme ? 'text-muted' : 'criterio-tag'}" style="font-size: 11px;">
-                    ${item.observacion}
-                  </span>
+                  ${item.estadoSupervisor === "NO_CONFORME" ? `
+                    <div style="font-size: 11px; line-height: 1.35;">
+                      <div style="background: rgba(239, 68, 68, 0.08); border-left: 3px solid #dc2626; padding: 4px 8px; border-radius: 4px; color: #991b1b; font-weight: 600; margin-bottom: 2px;">
+                        <span style="font-weight: 800;">⚠️ Observación del Supervisor:</span>
+                        ${item.observacionSupervisor || 'No cumple con las especificaciones técnicas requeridas.'}
+                      </div>
+                      ${item.fechaRevisionSupervisor ? `
+                        <div style="font-size: 9.5px; color: var(--text-muted);">
+                          Revisado: ${item.fechaRevisionSupervisor}
+                        </div>
+                      ` : ''}
+                    </div>
+                  ` : (item.estadoSupervisor === "CONFORME" ? `
+                    <div style="font-size: 11px; color: #166534; line-height: 1.35;">
+                      <span style="background: rgba(34, 197, 94, 0.12); border-left: 3px solid #16a34a; padding: 2px 6px; border-radius: 3px; font-weight: 600; display: inline-block;">
+                        ✓ Aprobado por el Supervisor
+                      </span>
+                      ${item.observacionSupervisor ? `<div style="font-size: 10.5px; margin-top: 2px;">${item.observacionSupervisor}</div>` : ''}
+                    </div>
+                  ` : `
+                    <span class="${item.conforme ? 'text-muted' : 'criterio-tag'}" style="font-size: 11px;">
+                      ${item.observacion}
+                    </span>
+                  `)}
                 </td>
               </tr>
             `).join("")}
@@ -871,7 +1118,7 @@ const DocumentalEngine = {
 
       <div style="padding: 14px 20px; background: var(--bg-subtle); border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted); flex-wrap:wrap; gap:10px;">
         <div>
-          Criterio vinculante: Todos los ${totalItems} ítems deben estar aportados y vigentes para aprobar la Fase 2 y viabilizar la Ficha de Priorización.
+          Criterio vinculante: Todos los ${totalItems} ítems deben estar aportados y vigentes para aprobar la Fase 2${is2026_2 ? ' y emitir el Concepto Técnico de Viabilidad.' : ' y viabilizar la Ficha de Priorización.'}
         </div>
       </div>
     `;
@@ -887,7 +1134,11 @@ const DocumentalEngine = {
     const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
                 (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
                 App.currentAuditRecord;
-    const baseItem = SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId));
+    const processMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || (App && App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2" || itemId > 28;
+    const baseItem = is2026_2
+      ? ((SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.find(i => Number(i.id) === Number(itemId))) || SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId)))
+      : (SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId)) || (SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.find(i => Number(i.id) === Number(itemId))));
     if (!baseItem) return;
 
     const auditedItem = (exp && exp.fase2 && exp.fase2.items) ? exp.fase2.items.find(i => Number(i.id) === Number(itemId)) : null;
@@ -966,6 +1217,14 @@ const DocumentalEngine = {
 
           <div style="background:rgba(2,132,199,0.06);border:1px solid rgba(2,132,199,0.2);padding:14px;border-radius:var(--radius-sm);font-size:12px;color:var(--text-main);">
             <b>Acción de Subsanación Requerida:</b> Debe solicitarse al municipio de <b>${p.municipio}</b> que anexe este documento a la carpeta del proyecto para superar la compuerta de Fase 2.
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+              <button type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;background:#0284c7;border-color:#0284c7;display:inline-flex;align-items:center;gap:6px;" onclick="DocumentalEngine.closeModal(); DocumentalEngine.abrirModalAsignarArchivo(${itemId})">
+                📁 Asignar archivo existente de la carpeta
+              </button>
+              <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:12px;" onclick="DocumentalEngine.closeModal(); App.subirSubsanacionItem(${itemId})">
+                📤 Cargar archivo nuevo
+              </button>
+            </div>
           </div>
         </div>
       `;
@@ -991,6 +1250,9 @@ const DocumentalEngine = {
                   Abrir Documento
                 </button>
               ` : ''}
+              <button type="button" class="btn-secondary" style="padding:6px 12px;font-size:12px;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.closeModal(); DocumentalEngine.abrirModalAsignarArchivo(${itemId})" title="Cambiar o reasignar a otro archivo de la carpeta">
+                📁 Reasignar
+              </button>
             </div>
           </div>
 
@@ -1053,6 +1315,551 @@ const DocumentalEngine = {
     }
 
     modal.classList.add("active");
+  },
+
+  /**
+   * Asegura la existencia del modal de observación del supervisor en el DOM
+   */
+  ensureSupervisorModal() {
+    let modal = document.getElementById("supervisorObservationModal");
+    if (modal) return modal;
+
+    const modalHtml = `
+      <div id="supervisorObservationModal" class="modal-overlay">
+        <div class="modal-window" style="max-width: 620px;">
+          <div class="modal-header" style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-bottom: 1px solid #fecaca;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:36px; height:36px; border-radius:50%; background:#dc2626; color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:bold; box-shadow:0 2px 6px rgba(220,38,38,0.25);">
+                ⚠️
+              </div>
+              <div>
+                <h4 class="modal-title" style="color:#991b1b; font-size:16px; margin:0;">Declarar Inconformidad Documental / Técnica</h4>
+                <p style="font-size:12px; color:#b91c1c; margin:2px 0 0 0;">Criterio y observación directa del supervisor para el informe de subsanación</p>
+              </div>
+            </div>
+            <button type="button" class="btn-viewer-close-circle" title="Cerrar ventana" onclick="DocumentalEngine.closeSupervisorModal()">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <div class="modal-body" style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+            <input type="hidden" id="supObsItemId" value="">
+            <input type="hidden" id="supObsFromViewer" value="false">
+
+            <div style="background:var(--color-bg-alt); padding:12px 14px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:4px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="supObsItemNum" style="font-size:12px; font-weight:800; color:var(--color-primary); text-transform:uppercase;">Ítem --</span>
+                <span id="supObsDocBadge" class="status-pill alerta" style="font-size:11px;">Documento Analizado</span>
+              </div>
+              <div id="supObsItemTitle" style="font-size:13px; font-weight:700; color:var(--text-main); line-height:1.4;">--</div>
+              <div id="supObsDetectedFile" style="font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono); margin-top:2px;">📄 Archivo: --</div>
+            </div>
+
+            <div>
+              <label class="form-label" style="font-size:11.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; display:block;">
+                ⚡ Causales frecuentes de no conformidad (clic para aplicar):
+              </label>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <button type="button" class="btn-preset-cause" onclick="DocumentalEngine.aplicarCausalRapida('Documento sin firma legible o sin matrícula profesional vigente del profesional responsable.')">
+                  ✍️ Falta firma / matrícula
+                </button>
+                <button type="button" class="btn-preset-cause" onclick="DocumentalEngine.aplicarCausalRapida('No corresponde a la localización, tramo veredal o abscisado del proyecto viabilizado.')">
+                  📍 Tramo / Vereda incorrecto
+                </button>
+                <button type="button" class="btn-preset-cause" onclick="DocumentalEngine.aplicarCausalRapida('Incompleto: carece de anexos técnicos, memorias de soporte o firmas requeridas.')">
+                  📑 Documento incompleto
+                </button>
+                <button type="button" class="btn-preset-cause" onclick="DocumentalEngine.aplicarCausalRapida('Discrepancia en cantidades o especificaciones frente al presupuesto y despiece oficial.')">
+                  ⚖️ Discrepancia de cantidades
+                </button>
+                <button type="button" class="btn-preset-cause" onclick="DocumentalEngine.aplicarCausalRapida('Certificado o documento expedido fuera de la vigencia exigida (no corresponde al mes en curso).')">
+                  📅 Vigencia vencida
+                </button>
+                <button type="button" class="btn-preset-cause" onclick="DocumentalEngine.aplicarCausalRapida('El contenido del archivo no corresponde al objeto técnico del requisito documental solicitado.')">
+                  🔍 Contenido no coincide
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" for="supObsTextarea" style="font-weight:700; font-size:12.5px;">
+                Observación / Hallazgo del Supervisor (se reflejará en el Informe Oficial de Subsanación): <span style="color:#dc2626;">*</span>
+              </label>
+              <textarea id="supObsTextarea" class="form-input" rows="4" style="resize:vertical; min-height:85px; font-size:12.5px; line-height:1.45;" placeholder="Describa puntualmente por qué el documento no se acepta o qué ajuste se requiere para subsanar..."></textarea>
+            </div>
+          </div>
+
+          <div class="modal-footer" style="padding:14px 20px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; background:#fafafa;">
+            <button type="button" class="btn-secondary" onclick="DocumentalEngine.closeSupervisorModal()">Cancelar</button>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="btn-primary" style="background:#dc2626; border-color:#b91c1c;" onclick="DocumentalEngine.guardarInconformidadModal()">
+                ⚠️ Confirmar y Marcar No Conforme
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+    return document.getElementById("supervisorObservationModal");
+  },
+
+  /**
+   * Abre el modal para capturar la observación e inconformidad de un ítem
+   */
+  solicitarInconformidad(itemId, fromViewerModal = false) {
+    this.ensureSupervisorModal();
+    const modal = document.getElementById("supervisorObservationModal");
+    if (!modal) return;
+
+    const pId = App.currentProjectId;
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
+                App.currentAuditRecord;
+    const p = App.currentProject || (exp && exp.datos) || {};
+
+    const isFicha = String(itemId) === "ficha_priorizacion" || String(itemId) === "0";
+    let numStr = "";
+    let titleStr = "";
+    let fileStr = "";
+
+    if (isFicha) {
+      numStr = "Ficha de Priorización Municipal";
+      titleStr = "Ficha de Priorización Municipal y Cierre (Documento Base)";
+      const fichaObj = p.fichaPriorizacion || (exp && exp.fichaPriorizacion);
+      fileStr = (fichaObj && fichaObj.fileName) ? fichaObj.fileName : "Documento de priorización";
+    } else {
+      const processMode = (exp && exp.procesoEspecial) || (p && p.procesoEspecial) || (App && App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+      const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2" || Number(itemId) > 28;
+      const baseItem = is2026_2
+        ? ((SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.find(i => Number(i.id) === Number(itemId))) || (SIPRO_DATA.items27 && SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId))))
+        : ((SIPRO_DATA.items27 && SIPRO_DATA.items27.find(i => Number(i.id) === Number(itemId))) || (SIPRO_DATA.items41_2026_2 && SIPRO_DATA.items41_2026_2.find(i => Number(i.id) === Number(itemId))));
+
+      const auditedItem = (exp && exp.fase2 && exp.fase2.items) ? exp.fase2.items.find(i => Number(i.id) === Number(itemId)) : null;
+      numStr = `Ítem ${baseItem ? (baseItem.num || baseItem.id) : itemId}`;
+      titleStr = baseItem ? baseItem.title : `Requisito ${itemId}`;
+
+      const detectedFile = (auditedItem && auditedItem.archivoDetectado)
+        || (p.documentosStatus && p.documentosStatus.archivosDetectados && (p.documentosStatus.archivosDetectados[itemId] || p.documentosStatus.archivosDetectados[String(itemId)]))
+        || null;
+      fileStr = detectedFile ? `Archivo: ${detectedFile}` : "Archivo: No aportado / Pendiente";
+    }
+
+    // Setear campos
+    const inputItemId = document.getElementById("supObsItemId");
+    const inputFromViewer = document.getElementById("supObsFromViewer");
+    const elItemNum = document.getElementById("supObsItemNum");
+    const elItemTitle = document.getElementById("supObsItemTitle");
+    const elDetectedFile = document.getElementById("supObsDetectedFile");
+    const textarea = document.getElementById("supObsTextarea");
+
+    if (inputItemId) inputItemId.value = String(itemId);
+    if (inputFromViewer) inputFromViewer.value = fromViewerModal ? "true" : "false";
+    if (elItemNum) elItemNum.textContent = numStr;
+    if (elItemTitle) elItemTitle.textContent = titleStr;
+    if (elDetectedFile) elDetectedFile.textContent = `📄 ${fileStr}`;
+
+    // Obtener observación previa si existía
+    let prevObs = "";
+    if (p.revisionSupervisor && p.revisionSupervisor[itemId] && p.revisionSupervisor[itemId].observacion) {
+      prevObs = p.revisionSupervisor[itemId].observacion;
+    } else if (p.fase3State && p.fase3State.matrizObservaciones) {
+      const key = isFicha ? "FASE_2_FICHA_PRIORIZACION" : `FASE_2_ITEM_${itemId}`;
+      if (p.fase3State.matrizObservaciones[key] && p.fase3State.matrizObservaciones[key].motivo) {
+        prevObs = p.fase3State.matrizObservaciones[key].motivo;
+      }
+    }
+    if (textarea) {
+      textarea.value = prevObs;
+      setTimeout(() => textarea.focus(), 100);
+    }
+
+    modal.classList.add("active");
+  },
+
+  /**
+   * Cierra el modal de observación del supervisor
+   */
+  closeSupervisorModal() {
+    const modal = document.getElementById("supervisorObservationModal");
+    if (modal) modal.classList.remove("active");
+  },
+
+  /**
+   * Aplica un texto predefinido al textarea de observación
+   */
+  aplicarCausalRapida(texto) {
+    const textarea = document.getElementById("supObsTextarea");
+    if (!textarea) return;
+    const current = textarea.value.trim();
+    if (current && !current.includes(texto)) {
+      textarea.value = current + " " + texto;
+    } else {
+      textarea.value = texto;
+    }
+    textarea.focus();
+  },
+
+  /**
+   * Guarda la inconformidad declarada desde el modal
+   */
+  guardarInconformidadModal() {
+    const inputItemId = document.getElementById("supObsItemId");
+    const inputFromViewer = document.getElementById("supObsFromViewer");
+    const textarea = document.getElementById("supObsTextarea");
+
+    if (!inputItemId) return;
+    const itemId = inputItemId.value;
+    const fromViewer = inputFromViewer && inputFromViewer.value === "true";
+    const motivo = textarea ? textarea.value.trim() : "";
+
+    if (!motivo) {
+      alert("Por favor ingrese o seleccione el motivo de la inconformidad técnica/documental.");
+      if (textarea) textarea.focus();
+      return;
+    }
+
+    this.actualizarEstadoSupervisor(itemId, "NO_CONFORME", motivo, fromViewer);
+    this.closeSupervisorModal();
+  },
+
+  /**
+   * Marca como Conforme un ítem directamente
+   */
+  marcarConformeSupervisor(itemId, observacion = "") {
+    this.actualizarEstadoSupervisor(itemId, "CONFORME", observacion, false);
+  },
+
+  /**
+   * Marca como Conforme desde el visor de documentos
+   */
+  marcarConformeDesdeModal(itemId) {
+    this.actualizarEstadoSupervisor(itemId, "CONFORME", "", true);
+  },
+
+  /**
+   * Actualiza el estado de supervisión de un ítem, persistiendo y sincronizando bidireccionalmente
+   */
+  actualizarEstadoSupervisor(itemId, nuevoEstado, observacion = "", fromModal = false) {
+    const pId = App.currentProjectId;
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
+                App.currentAuditRecord;
+    const p = App.currentProject || (exp && exp.datos) || {};
+
+    if (!p) {
+      console.warn("No hay proyecto activo para calificar por supervisor.");
+      return;
+    }
+
+    const isFicha = String(itemId) === "ficha_priorizacion" || String(itemId) === "0";
+    const rawKey = isFicha ? "ficha_priorizacion" : (typeof itemId === "number" ? itemId : (isNaN(Number(itemId)) ? itemId : Number(itemId)));
+
+    p.revisionSupervisor = p.revisionSupervisor || {};
+    p.revisionSupervisor[rawKey] = {
+      estado: nuevoEstado,
+      observacion: observacion || "",
+      fecha: new Date().toISOString(),
+      supervisor: window.SUPERVISOR_NAME || "Supervisor Técnico"
+    };
+
+    // Sincronizar en exp.revisionSupervisor y SIPRO_DATA si existen
+    if (exp) {
+      exp.revisionSupervisor = exp.revisionSupervisor || {};
+      exp.revisionSupervisor[rawKey] = p.revisionSupervisor[rawKey];
+    }
+    if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) {
+      SIPRO_DATA.expedientesMap[pId].revisionSupervisor = SIPRO_DATA.expedientesMap[pId].revisionSupervisor || {};
+      SIPRO_DATA.expedientesMap[pId].revisionSupervisor[rawKey] = p.revisionSupervisor[rawKey];
+    }
+
+    // Sincronizar hacia fase3State.matrizObservaciones
+    const obsKey = isFicha ? "FASE_2_FICHA_PRIORIZACION" : `FASE_2_ITEM_${rawKey}`;
+    const f3State = (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.getFase3State === "function")
+      ? ReportsEngine.getFase3State(pId)
+      : (p.fase3State || (p.fase3State = {}));
+
+    if (f3State) {
+      f3State.matrizObservaciones = f3State.matrizObservaciones || {};
+      f3State.observacionesEditadas = f3State.observacionesEditadas || {};
+
+      const findingObj = {
+        estado: nuevoEstado === "CONFORME" ? "Conforme" : "No Aceptado / Por Subsanar",
+        motivo: observacion || (nuevoEstado === "CONFORME" ? "Documento verificado y conforme por supervisor." : "Documento no conforme según revisión del supervisor.")
+      };
+
+      f3State.matrizObservaciones[obsKey] = findingObj;
+      f3State.observacionesEditadas[obsKey] = findingObj;
+      if (isFicha) {
+        f3State.matrizObservaciones["FICHA_PRIORIZACION"] = findingObj;
+        f3State.observacionesEditadas["FICHA_PRIORIZACION"] = findingObj;
+      }
+    }
+
+    // Re-ejecutar auditoría documental de Fase 2
+    if (typeof DocumentalEngine.auditProject === "function") {
+      const auditResult = DocumentalEngine.auditProject(p);
+      p.auditResult = auditResult;
+      if (exp) {
+        exp.fase2 = auditResult;
+        exp.datos = p;
+      }
+    }
+
+    // Refrescar KPIs y Compuertas
+    if (window.App && typeof window.App.refreshGatesAndKpis === "function") {
+      window.App.refreshGatesAndKpis(p);
+    }
+    if (window.App && typeof window.App.actualizarKPIsEjecutivos === "function") {
+      window.App.actualizarKPIsEjecutivos(pId);
+    }
+    if (window.App && typeof window.App.actualizarBarraCompuertas === "function") {
+      window.App.actualizarBarraCompuertas(pId);
+    }
+
+    // Re-renderizar la matriz documental
+    const container = document.getElementById("documentalMatrixContainer");
+    if (container && p.auditResult) {
+      DocumentalEngine.renderDocumentalMatrix(p.auditResult, container, DocumentalEngine.currentFilter || "ALL", pId);
+    }
+
+    // Si viene desde el visor modal abierto, refrescar el visor para mostrar la barra y estado actualizados
+    if (fromModal) {
+      const docModal = document.getElementById("documentModal");
+      if (docModal && docModal.classList.contains("active")) {
+        if (isFicha) {
+          DocumentalEngine.abrirFichaPriorizacion(pId, false);
+        } else {
+          DocumentalEngine.openViewerModal(itemId);
+        }
+      }
+    }
+
+    // Persistir progreso en localStorage / JSON
+    if (window.App && typeof window.App.saveAuditProgress === "function") {
+      window.App.saveAuditProgress(true);
+    }
+
+    // Si el reporte de Fase 3 está en pantalla, actualizarlo
+    const reportContainer = document.getElementById("officialReportContainer");
+    if (reportContainer && typeof ReportsEngine !== "undefined" && typeof ReportsEngine.renderOfficialReport === "function") {
+      ReportsEngine.renderOfficialReport(p, App.auditGlobal, reportContainer);
+    }
+
+    // Mensaje toast
+    const mensaje = nuevoEstado === "CONFORME"
+      ? `Ítem ${isFicha ? 'Ficha' : itemId}: marcado como CONFORME por supervisor.`
+      : `Ítem ${isFicha ? 'Ficha' : itemId}: marcado como NO CONFORME. Se incluyó en el informe de subsanación.`;
+    if (window.App && typeof window.App.showToast === "function") {
+      window.App.showToast(mensaje, nuevoEstado === "CONFORME" ? "success" : "warning");
+    }
+  },
+
+  escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  },
+
+  /**
+   * Abre el modal para asignar manualmente un archivo ya presente en la carpeta del proyecto
+   */
+  abrirModalAsignarArchivo(itemId) {
+    const pId = (window.App && App.currentProjectId);
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
+                (window.App && App.currentAuditRecord);
+
+    if (!exp) {
+      alert("Por favor cargue o seleccione un expediente municipal primero.");
+      return;
+    }
+
+    const processMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || (App && App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2" || itemId > 28;
+    const baseItems = is2026_2 ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27;
+    const item = (baseItems && baseItems.find(i => Number(i.id) === Number(itemId))) || { id: itemId, num: itemId, title: `Ítem ${itemId}` };
+
+    this._assignTargetItemId = Number(itemId);
+
+    // Obtener todos los archivos disponibles en el expediente
+    const filePool = [];
+    const seenNames = new Set();
+
+    // 1. De exp.archivos (todos los archivos leídos recursivamente de la carpeta)
+    if (Array.isArray(exp.archivos)) {
+      exp.archivos.forEach(f => {
+        if (f && f.name && !seenNames.has(f.name + '|' + (f.size || 0))) {
+          seenNames.add(f.name + '|' + (f.size || 0));
+          filePool.push(f);
+        }
+      });
+    }
+
+    // 2. De exp.archivosFileMap y exp.datos.archivosFiles
+    const fMap = { ...(exp.archivosFileMap || {}), ...((exp.datos && exp.datos.archivosFiles) || {}) };
+    Object.values(fMap).forEach(f => {
+      if (f && f.name && !seenNames.has(f.name + '|' + (f.size || 0))) {
+        seenNames.add(f.name + '|' + (f.size || 0));
+        filePool.push(f);
+      }
+    });
+
+    if (filePool.length === 0) {
+      if (confirm(`No se encontraron archivos en la memoria de la carpeta cargada.\n\n¿Desea cargar un archivo desde su equipo para el Ítem ${item.num || item.id}?`)) {
+        App.subirSubsanacionItem(itemId);
+      }
+      return;
+    }
+
+    this._assignableFiles = filePool;
+
+    // Abrir modal
+    const modal = document.getElementById("assignDocModal");
+    if (!modal) {
+      console.warn("Elemento #assignDocModal no encontrado en el DOM.");
+      return;
+    }
+
+    const titleEl = document.getElementById("assignDocModalTitle");
+    const subEl = document.getElementById("assignDocModalSubtitle");
+    const searchInput = document.getElementById("assignDocSearchInput");
+
+    if (titleEl) titleEl.textContent = `Asignar Documento de Carpeta — Ítem ${item.num || item.id}`;
+    if (subEl) subEl.textContent = `${item.title || item.nombre || 'Requisito documental'}`;
+    if (searchInput) searchInput.value = "";
+
+    this.renderListaArchivosAsignar("");
+    modal.classList.add("active");
+  },
+
+  /**
+   * Renderiza la lista filtrada de archivos en el modal de asignación
+   */
+  renderListaArchivosAsignar(filterText = "") {
+    const listCont = document.getElementById("assignDocFilesList");
+    const countEl = document.getElementById("assignDocFilesCount");
+    if (!listCont) return;
+
+    const pId = (window.App && App.currentProjectId);
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) || (window.App && App.currentAuditRecord) || {};
+    const files = this._assignableFiles || [];
+    const targetItemId = this._assignTargetItemId;
+
+    const q = (filterText || "").trim().toLowerCase();
+    const filtered = files.filter(f => {
+      if (!q) return true;
+      const n = (f.name || "").toLowerCase();
+      const p = (f.webkitRelativePath || "").toLowerCase();
+      return n.includes(q) || p.includes(q);
+    });
+
+    if (countEl) {
+      countEl.textContent = `Mostrando ${filtered.length} de ${files.length} archivo(s) disponibles en la carpeta`;
+    }
+
+    if (filtered.length === 0) {
+      listCont.innerHTML = `
+        <div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12.5px;">
+          🔍 No se encontraron archivos que coincidan con "<b>${this.escapeHtml(filterText)}</b>".
+        </div>
+      `;
+      return;
+    }
+
+    // Mapa inverso para ver en qué ítems está asignado cada archivo
+    const assignedMap = {};
+    if (exp.archivosFileMap) {
+      Object.entries(exp.archivosFileMap).forEach(([k, f]) => {
+        if (f && f.name) {
+          assignedMap[f.name] = assignedMap[f.name] || [];
+          if (!assignedMap[f.name].includes(k)) assignedMap[f.name].push(k);
+        }
+      });
+    }
+
+    listCont.innerHTML = filtered.map((file) => {
+      const origIndex = this._assignableFiles.indexOf(file);
+      const ext = (file.name.slice(file.name.lastIndexOf('.') + 1) || "").toLowerCase();
+      let icon = "📄";
+      if (["xlsx", "xls", "xlsm", "xlsb", "csv"].includes(ext)) icon = "📊";
+      else if (["pdf"].includes(ext)) icon = "📑";
+      else if (["kml", "kmz"].includes(ext)) icon = "🗺️";
+      else if (["docx", "doc"].includes(ext)) icon = "📝";
+      else if (["jpg", "jpeg", "png"].includes(ext)) icon = "🖼️";
+      else if (["zip", "rar", "7z"].includes(ext)) icon = "📦";
+
+      const sizeStr = file.size ? (file.size > 1048576 ? `${(file.size / 1048576).toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`) : "Tamaño desconocido";
+      const relPath = file.webkitRelativePath || "";
+      const pathParts = relPath ? relPath.split('/') : [];
+      const folderDisplay = pathParts.length > 1 ? pathParts.slice(0, -1).join(' / ') : "Raíz de carpeta";
+
+      const usedItems = assignedMap[file.name] || [];
+      const isAlreadyOnThisItem = usedItems.includes(String(targetItemId)) || usedItems.includes(Number(targetItemId));
+
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--color-bg-card);border:1px solid ${isAlreadyOnThisItem ? 'var(--color-primary)' : 'var(--border-subtle)'};border-radius:6px;gap:10px;transition:background 0.15s ease;">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
+            <span style="font-size:20px;flex-shrink:0;">${icon}</span>
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:12.5px;font-weight:700;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this.escapeHtml(file.name)}">
+                ${this.escapeHtml(file.name)}
+              </div>
+              <div style="font-size:10.5px;color:var(--text-muted);display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap;">
+                <span>📁 ${this.escapeHtml(folderDisplay)}</span>
+                <span>• ${sizeStr}</span>
+                ${usedItems.length > 0 ? `
+                  <span style="background:rgba(2,132,199,0.1);color:#0284c7;padding:1px 6px;border-radius:3px;font-weight:600;">
+                    ${isAlreadyOnThisItem ? '✓ Ya asignado a este ítem' : `Compartido en Ítem: ${usedItems.join(', ')}`}
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn-primary"
+                  style="padding:5px 12px;font-size:11.5px;white-space:nowrap;flex-shrink:0;${isAlreadyOnThisItem ? 'background:#10b981;border-color:#059669;' : 'background:#0284c7;border-color:#0284c7;'}"
+                  onclick="DocumentalEngine.confirmarAsignacionArchivo(${origIndex})">
+            ${isAlreadyOnThisItem ? '✓ Reasignar' : '✓ Asignar a este Ítem'}
+          </button>
+        </div>
+      `;
+    }).join("");
+  },
+
+  filtrarArchivosAsignar(val) {
+    this.renderListaArchivosAsignar(val);
+  },
+
+  cerrarModalAsignarArchivo() {
+    const modal = document.getElementById("assignDocModal");
+    if (modal) modal.classList.remove("active");
+  },
+
+  async confirmarAsignacionArchivo(fileIndex) {
+    const file = this._assignableFiles && this._assignableFiles[fileIndex];
+    const itemId = this._assignTargetItemId;
+    if (!file || !itemId) return;
+
+    this.cerrarModalAsignarArchivo();
+
+    // Asignar mediante App.subirSubsanacionItem indicando que es existente para no duplicar en disco
+    await App.subirSubsanacionItem(itemId, null, file, { esExistente: true });
+  },
+
+  subirArchivoNuevoDesdeAsignar() {
+    const itemId = this._assignTargetItemId;
+    this.cerrarModalAsignarArchivo();
+    if (itemId) {
+      App.subirSubsanacionItem(itemId);
+    }
   },
 
   /**

@@ -153,8 +153,8 @@ body {
 .sidebar-rail {
   width: var(--sidebar-width);
   flex-shrink: 0;
-  background: linear-gradient(180deg, #19370D 0%, #234314 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, #081c0e 0%, #144521 55%, #16a34a 100%);
+  border-right: 1.5px solid rgba(74, 222, 128, 0.25);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -166,16 +166,16 @@ body {
   bottom: 0;
   height: 100vh;
   z-index: 1000;
-  box-shadow: 4px 0 24px rgba(25, 55, 13, 0.15);
+  box-shadow: 3px 0 20px rgba(22, 101, 52, 0.25);
   overflow-y: auto;
   overflow-x: hidden;
   transition: width 0.25s ease, background 0.3s ease;
 }
 
 [data-theme="dark"] .sidebar-rail {
-  background: linear-gradient(180deg, #0D170B 0%, #152611 100%);
-  border-right: 1px solid rgba(190, 214, 111, 0.12);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(180deg, #05140a 0%, #0d2c16 55%, #15803d 100%);
+  border-right: 1.5px solid rgba(74, 222, 128, 0.18);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
 }
 
 .brand-badge {
@@ -3527,14 +3527,23 @@ button:focus-visible {
 }
 
 .report-compliant-box {
-  background: var(--color-bg);
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  border: 1px dashed #96BF8A;
+  background: var(--color-surface);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: var(--radius-md);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: var(--shadow-sm);
   padding: 16px 20px;
-  margin: 18px 0;
+  margin: 16px 0 22px 0;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.report-compliant-box:hover {
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+[data-theme="dark"] .report-compliant-box {
+  background: rgba(16, 185, 129, 0.04);
+  border-color: rgba(16, 185, 129, 0.3);
 }
 
 .report-compliant-toggle {
@@ -3543,28 +3552,80 @@ button:focus-visible {
   justify-content: space-between;
   cursor: pointer;
   user-select: none;
+  padding: 2px 0;
+}
+
+.report-compliant-badge-btn,
+#reportCompliantIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 65, 46, 0.08);
+  color: var(--color-primary-dark);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  transition: all 0.2s ease;
+}
+
+.report-compliant-toggle:hover .report-compliant-badge-btn,
+.report-compliant-toggle:hover #reportCompliantIcon {
+  background: rgba(0, 65, 46, 0.16);
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .report-compliant-badge-btn,
+[data-theme="dark"] #reportCompliantIcon {
+  background: rgba(190, 214, 111, 0.15);
+  color: #BED66F;
+}
+
+[data-theme="dark"] .report-compliant-toggle:hover .report-compliant-badge-btn,
+[data-theme="dark"] .report-compliant-toggle:hover #reportCompliantIcon {
+  background: rgba(190, 214, 111, 0.28);
 }
 
 .report-compliant-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
   margin-top: 14px;
-  max-height: 280px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  width: 100%;
+  max-height: 520px;
   overflow-y: auto;
-  padding-right: 6px;
+  scrollbar-width: thin;
 }
 
 .report-compliant-pill {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: var(--color-surface);
+  gap: 8px;
+  background: var(--color-bg);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: 11px;
+  padding: 8px 12px;
+  font-size: 11.5px;
   color: var(--text-main);
+  min-width: 0;
+  transition: all 0.15s ease;
+}
+
+.report-compliant-pill:hover {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+[data-theme="dark"] .report-compliant-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .report-compliant-pill:hover {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.4);
 }
 
 .report-del-btn {
@@ -4632,6 +4693,99 @@ button:focus-visible {
 }
 
 /* ==========================================================================
+   ESTILOS DE CALIFICACIÓN DE SUPERVISIÓN (CONFORME / NO CONFORME MANUAL)
+   ========================================================================== */
+.btn-supervisor-action {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap !important;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.btn-supervisor-inconforme {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid #fda4af;
+}
+
+.btn-supervisor-inconforme:hover {
+  background: #ffe4e6;
+  border-color: #f43f5e;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(225, 29, 72, 0.2);
+}
+
+.btn-supervisor-conforme {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.btn-supervisor-conforme:hover {
+  background: #dcfce7;
+  border-color: #22c55e;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(22, 163, 74, 0.2);
+}
+
+.supervisor-decision-bar {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.btn-preset-cause {
+  background: var(--color-surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-main);
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-preset-cause:hover {
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+  border-color: #0284c7;
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .btn-supervisor-inconforme {
+  background: rgba(225, 29, 72, 0.18);
+  color: #fda4af;
+  border-color: rgba(225, 29, 72, 0.45);
+}
+
+[data-theme="dark"] .btn-supervisor-conforme {
+  background: rgba(22, 163, 74, 0.18);
+  color: #86efac;
+  border-color: rgba(22, 163, 74, 0.45);
+}
+
+[data-theme="dark"] .btn-preset-cause {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--text-main);
+}
+
+/* ==========================================================================
    Salida Exclusiva de Impresión / PDF (Bloque 1 + Bloque 2)
    Regla estándar @page para suprimir encabezados y pies nativos del navegador
    ========================================================================== */
@@ -4741,6 +4895,333 @@ button:focus-visible {
   }
   .report-editable-table th:last-child,
   .report-editable-table td:last-child {
+    display: none !important;
+  }
+}
+
+/* =========================================================================
+   BOTÓN Y ESTILOS PROCESO ESPECIAL CONVENIOS "2026 - II" (INTERFAZ GEMELA)
+   ========================================================================= */
+.btn-convenios-2026 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--color-bg-alt);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  white-space: nowrap;
+}
+
+.btn-convenios-2026:hover {
+  background: var(--color-bg);
+  border-color: #0284c7;
+  color: #0284c7;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(2, 132, 199, 0.18);
+}
+
+.btn-convenios-2026 .badge-tag-year {
+  background: #0284c7;
+  color: #ffffff;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  transition: all 0.2s ease;
+}
+
+.btn-convenios-2026.active {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+}
+
+.btn-convenios-2026.active .badge-tag-year {
+  background: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+.btn-convenios-2026 .badge-parallel {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 800;
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  margin-left: 3px;
+  transition: all 0.2s ease;
+}
+
+.btn-convenios-2026:hover .badge-parallel {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+.btn-convenios-2026.active .badge-parallel {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.badge-proceso-2026 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.3);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* ==========================================================================
+   DIFERENCIACIÓN VISUAL DE ENTORNOS: CONVENIOS ORDINARIOS vs 2026 - II
+   ========================================================================== */
+
+/* 1. Barra de entorno superior permanente */
+.top-environment-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 18px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border-radius: var(--radius-lg, 12px);
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  position: relative;
+  z-index: 20;
+  transition: all 0.25s ease;
+}
+
+.env-bar-ordinario {
+  background: linear-gradient(90deg, #15803d 0%, #166534 100%);
+  color: #ffffff;
+  border: 1px solid #14532d;
+}
+
+.env-bar-2026 {
+  background: linear-gradient(90deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  border: 1px solid #075985;
+  box-shadow: 0 3px 12px rgba(2, 132, 199, 0.35);
+}
+
+.env-bar-content {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.env-pulse-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+  animation: pulseEnvDot 1.8s infinite ease-in-out;
+}
+
+.env-bar-2026 .env-pulse-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 10px #38bdf8;
+}
+
+@keyframes pulseEnvDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.6; }
+}
+
+.env-mode-title {
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.env-mode-desc {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.92;
+}
+
+.env-badge-pill {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+/* 2. Tematización de la barra lateral (Sidebar Rail) en ambos modos */
+body.mode-convenios-ordinario .sidebar-rail {
+  background: linear-gradient(180deg, #081c0e 0%, #144521 55%, #16a34a 100%) !important;
+  border-right: 1.5px solid rgba(74, 222, 128, 0.25) !important;
+  box-shadow: 3px 0 20px rgba(22, 101, 52, 0.25) !important;
+}
+
+body.mode-convenios-ordinario .brand-badge {
+  background: rgba(74, 222, 128, 0.16) !important;
+  border-color: rgba(74, 222, 128, 0.45) !important;
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.25) !important;
+}
+
+body.mode-convenios-ordinario .brand-text-mini {
+  color: #86efac !important;
+  font-weight: 900;
+  letter-spacing: 0.9px;
+}
+
+body.mode-convenios-ordinario .nav-link.active {
+  background: rgba(74, 222, 128, 0.2) !important;
+  color: #86efac !important;
+}
+
+body.mode-convenios-ordinario .sidebar-upload-btn {
+  background: #86efac !important;
+  color: #061a0c !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 0 16px rgba(74, 222, 128, 0.35) !important;
+}
+
+body.mode-convenios-2026-2 .sidebar-rail {
+  background: linear-gradient(180deg, #091a2e 0%, #0f2b48 55%, #0369a1 100%) !important;
+  border-right: 1.5px solid rgba(56, 189, 248, 0.25) !important;
+  box-shadow: 3px 0 20px rgba(2, 132, 199, 0.2) !important;
+}
+
+body.mode-convenios-2026-2 .brand-badge {
+  background: rgba(56, 189, 248, 0.2) !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.35) !important;
+}
+
+body.mode-convenios-2026-2 .brand-text-mini {
+  color: #38bdf8 !important;
+  font-weight: 900;
+}
+
+body.mode-convenios-2026-2 .nav-link.active {
+  background: rgba(56, 189, 248, 0.2) !important;
+  color: #38bdf8 !important;
+}
+
+body.mode-convenios-2026-2 .sidebar-upload-btn {
+  background: rgba(56, 189, 248, 0.15) !important;
+  border-color: rgba(56, 189, 248, 0.35) !important;
+  color: #38bdf8 !important;
+}
+
+/* 3. Badges distintivos de cabecera */
+.badge-mode-ordinario {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+  border: 1.5px solid rgba(22, 163, 74, 0.35);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.badge-mode-2026 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  background: rgba(2, 132, 199, 0.14);
+  color: #0284c7;
+  border: 1.5px solid #0284c7;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 0 12px rgba(2, 132, 199, 0.22);
+}
+
+/* 4. Insignia flotante permanente en la esquina inferior */
+.floating-mode-indicator {
+  position: fixed;
+  bottom: 18px;
+  right: 22px;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  user-select: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-mode-indicator:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.3);
+}
+
+.mode-indicator-ordinario {
+  background: rgba(21, 128, 61, 0.95);
+  color: #ffffff;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+}
+
+.mode-indicator-2026 {
+  background: rgba(2, 132, 199, 0.95);
+  color: #ffffff;
+  border: 1.5px solid rgba(56, 189, 248, 0.7);
+  box-shadow: 0 4px 20px rgba(2, 132, 199, 0.45);
+}
+
+.floating-mode-indicator .mode-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.mode-indicator-2026 .mode-dot.pulse {
+  background: #38bdf8;
+  box-shadow: 0 0 10px #38bdf8;
+  animation: pulseEnvDot 1.6s infinite ease-in-out;
+}
+
+.floating-mode-indicator .mode-count {
+  background: rgba(255, 255, 255, 0.24);
+  padding: 1.5px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+@media print {
+  .top-environment-bar,
+  .floating-mode-indicator {
     display: none !important;
   }
 }

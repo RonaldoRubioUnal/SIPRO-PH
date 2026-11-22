@@ -21,7 +21,148 @@ const App = {
   currentAuditRecord: null,
   currentTab: "tab-1a",
   currentFilterCluster: "ALL",
+  currentProcessMode: (typeof window !== "undefined" && window.SIPRO_PROCESS_MODE) || "ORDINARIO",
   auditGlobal: null,
+
+  setProcessMode(mode) {
+    this.currentProcessMode = mode;
+    window.SIPRO_PROCESS_MODE = mode;
+    console.log(`[PROCESO] Modo cambiado a: ${mode}`);
+
+    const is2026 = (mode === "2026_2" || mode === "CONVENIOS_2026_2");
+    if (typeof document !== "undefined" && document.body) {
+      if (is2026) {
+        document.body.classList.add("mode-convenios-2026-2");
+        document.body.classList.remove("mode-convenios-ordinario");
+        document.title = "⚡ [2026 - II] SIPRO-PH | 41 Requisitos de Viabilidad";
+      } else {
+        document.body.classList.add("mode-convenios-ordinario");
+        document.body.classList.remove("mode-convenios-2026-2");
+        document.title = "📋 [ORDINARIO] SIPRO-PH | 27 Requisitos + Ficha";
+      }
+    }
+
+    // Actualizar indicador visual del botón en DOM si existe
+    const btn = document.getElementById("btnConvenios2026") || document.getElementById("btnToggle2026_2");
+    if (btn) {
+      if (mode === "2026_2" || mode === "CONVENIOS_2026_2") {
+        btn.classList.add("active");
+        const lbl = btn.querySelector(".btn-convenios-label") || btn.querySelector(".btn-text");
+        if (lbl) lbl.innerText = 'Convenios "2026 - II" (Activo)';
+      } else {
+        btn.classList.remove("active");
+        const lbl = btn.querySelector(".btn-convenios-label") || btn.querySelector(".btn-text");
+        if (lbl) lbl.innerText = 'Convenios "2026 - II"';
+      }
+    }
+
+    const navTooltipF2 = document.getElementById("navTooltipFase2");
+    if (navTooltipF2) {
+      navTooltipF2.innerText = (mode === "2026_2" || mode === "CONVENIOS_2026_2")
+        ? "Fase 2: Viabilidad Técnica (41 Ítems)"
+        : "Fase 2: Lista Numérica (27 Ítems)";
+    }
+
+    const rec = (window.proyectosAuditados && window.proyectosAuditados[this.currentProjectId]) || this.currentAuditRecord;
+    if (rec) {
+      rec.procesoEspecial = mode;
+      if (rec.datos) rec.datos.procesoEspecial = mode;
+
+      // Si tenemos los archivos en memoria, reprocesar con la clasificación del modo seleccionado
+      if (window.FolderReader && window.FolderReader.rawFilesByProject && window.FolderReader.rawFilesByProject[rec.id]) {
+        const rawFiles = window.FolderReader.rawFilesByProject[rec.id];
+        window.FolderReader.processFolder(rawFiles, rec.rawFolderName, rec.id, rec.dirHandle);
+      } else {
+        rec.fase2 = DocumentalEngine.auditProject(rec.datos || rec);
+        this.actualizarKPIsEjecutivos(rec.id);
+        const docCont = document.getElementById("documentalMatrixContainer");
+        if (docCont && rec.fase2) DocumentalEngine.renderDocumentalMatrix(rec.fase2, docCont, this.currentFilterCluster || "ALL", rec.id);
+        const repCont = document.getElementById("officialReportContainer");
+        if (repCont && rec.datos) ReportsEngine.renderOfficialReport(rec.datos, rec.auditGlobal, repCont);
+      }
+    } else {
+      this.initEmptyDocumentalMatrix();
+    }
+  },
+
+  toggleProceso2026_2() {
+    const newMode = (this.currentProcessMode === "2026_2" || this.currentProcessMode === "CONVENIOS_2026_2") ? "ORDINARIO" : "2026_2";
+    this.setProcessMode(newMode);
+    if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+      if (newMode === "2026_2") {
+        FolderReader.showToast("⚡ Modo Proceso Especial: Convenios '2026 - II' activado (41 requisitos de Viabilidad Técnica - Sin Ficha).");
+      } else {
+        FolderReader.showToast("📋 Modo Proceso Ordinario activado (27/28 requisitos normativos).");
+      }
+    }
+  },
+
+  /**
+   * Abre o enfoca la interfaz de Convenios "2026 - II" en una pestaña paralela
+   * Garantiza que la pestaña actual con sus carpetas y revisiones NO se cierre ni se borre
+   */
+  abrirConvenios2026Paralelo(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const targetUrl = "convenios_2026_2.html";
+    const win = window.open(targetUrl, "sipro_tab_2026_2");
+    if (win) {
+      win.focus();
+    }
+    if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+      FolderReader.showToast("⧉ Convenios '2026 - II' abierto en pestaña paralela (tu revisión actual sigue intacta).");
+    }
+  },
+
+  /**
+   * Abre o enfoca la interfaz de Convenios Ordinarios en una pestaña paralela
+   * Garantiza que la pestaña actual con sus carpetas y revisiones NO se cierre ni se borre
+   */
+  abrirOrdinariosParalelo(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const targetUrl = "index.html";
+    const win = window.open(targetUrl, "sipro_tab_ordinarios");
+    if (win) {
+      win.focus();
+    }
+    if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+      FolderReader.showToast("⧉ Convenios Ordinarios abierto en pestaña paralela (tu revisión actual sigue intacta).");
+    }
+  },
+
+  initEmptyDocumentalMatrix() {
+    const is2026_2 = this.currentProcessMode === "2026_2" || this.currentProcessMode === "CONVENIOS_2026_2";
+    const baseItems = is2026_2 ? (SIPRO_DATA.items41_2026_2 || SIPRO_DATA.items27) : SIPRO_DATA.items27;
+    const initialItems = baseItems.map(item => ({
+      ...item,
+      conforme: false,
+      faltante: true,
+      vencido: false,
+      observacion: "Documento pendiente de cotejo. Cargue la carpeta municipal para cotejar y abrir el archivo.",
+      diasRestantes: null,
+      archivoDetectado: null,
+      meta: null
+    }));
+
+    const emptyAudit2 = {
+      fase: "2_DOCUMENTAL",
+      aprobado: false,
+      totalItems: baseItems.length,
+      itemsConformes: 0,
+      itemsNoConformes: baseItems.length,
+      porcentajeConformidad: 0,
+      items: initialItems,
+      hallazgosCriticos: [],
+      alertas: []
+    };
+    const cont = document.getElementById("documentalMatrixContainer");
+    if (cont) DocumentalEngine.renderDocumentalMatrix(emptyAudit2, cont, this.currentFilterCluster || "ALL");
+  },
 
   init() {
     window.proyectosAuditados = window.proyectosAuditados || {};
@@ -173,6 +314,11 @@ const App = {
     // 1. Establecer proyecto activo en el controlador
     this.currentProjectId = record.id;
     this.currentProject = record.datos;
+    if (this.currentProject) {
+      this.currentProject.id = record.id;
+      this.currentProject.municipio = record.municipio;
+      this.currentProject.codMunicipio = record.codMunicipio;
+    }
     this.currentAuditRecord = record;
     this.auditGlobal = record.auditGlobal;
 
@@ -249,7 +395,8 @@ const App = {
 
     // G2. Fase 1C (Solo si modalidad es RECURSOS): Coherencia Presupuestal
     const container1C = document.getElementById("presupuestoAuditContainer");
-    if (container1C && typeof PresupuestoEngine !== "undefined" && record.modalidad === "RECURSOS") {
+    const hasBudget = record.modalidad === "RECURSOS" || (record.datos && record.datos.modalidad === "RECURSOS") || (typeof PresupuestoEngine !== "undefined" && PresupuestoEngine.getBudgetFile && Boolean(PresupuestoEngine.getBudgetFile(record)));
+    if (container1C && typeof PresupuestoEngine !== "undefined" && (record.modalidad === "RECURSOS" || hasBudget)) {
       PresupuestoEngine.renderPresupuestoTab(record, container1C);
     }
 
@@ -419,10 +566,14 @@ const App = {
     // Compuertas Previas Superadas
     const previasOk = conforme1A && conforme1B && conforme1C;
 
-    // Compuerta F2 (Lista Numérica 27/28 Ítems)
+    // Compuerta F2 (Lista Numérica 27/28 o 41 Ítems)
+    const procMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || this.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2Mode = procMode === "2026_2" || procMode === "CONVENIOS_2026_2";
     const fichaP = exp.fichaPriorizacion || (exp.datos && exp.datos.fichaPriorizacion);
-    const hasFicha = Boolean(fichaP && fichaP.existe === true && fichaP.detected === true);
-    const totalItemsF2 = isRecursos ? 28 : 27;
+    const revFicha = (exp.revisionSupervisor && exp.revisionSupervisor["FICHA_PRIORIZACION"]) || ((exp.datos && exp.datos.revisionSupervisor) ? exp.datos.revisionSupervisor["FICHA_PRIORIZACION"] : null);
+    const fichaInconforme = revFicha && (revFicha.estado === "NO_CONFORME" || revFicha.estado === "INCONFORME");
+    const hasFicha = is2026_2Mode ? true : (Boolean(fichaP && fichaP.existe === true && fichaP.detected === true) && !fichaInconforme);
+    const totalItemsF2 = is2026_2Mode ? 41 : (isRecursos ? 28 : 27);
     let conformesF2 = 0;
     if (exp.fase2 && Array.isArray(exp.fase2.items)) {
       conformesF2 = exp.fase2.items.filter(it => it && (it.conforme || it.subsanado) && !it.vencido).length;
@@ -594,8 +745,10 @@ const App = {
     }
     if (!exp) return;
 
-    const isRecursos = exp.modalidad === "RECURSOS" || (exp.datos && exp.datos.modalidad === "RECURSOS");
-    const totalItemsRequeridos = isRecursos ? 28 : 27;
+    const processMode = exp.procesoEspecial || (exp.datos && exp.datos.procesoEspecial) || this.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    const isRecursos = (exp.modalidad === "RECURSOS" || (exp.datos && exp.datos.modalidad === "RECURSOS"));
+    const totalItemsRequeridos = is2026_2 ? 41 : (isRecursos ? 28 : 27);
 
     const f1A = exp.fase1A || (exp.auditGlobal && exp.auditGlobal.audit1A) || {};
     const f1B = exp.fase1B || (exp.datos && exp.datos.georreferenciacion) || (exp.auditGlobal && exp.auditGlobal.audit1B) || {};
@@ -747,21 +900,21 @@ const App = {
     // 3. TARJETA 6 — LISTA DE ÍTEMS (F2)
     // -------------------------------------------------------------------------
     const fichaP = exp.fichaPriorizacion || (exp.datos && exp.datos.fichaPriorizacion);
-    const hasFicha = Boolean(fichaP && fichaP.existe === true && fichaP.detected === true);
+    const hasFicha = is2026_2 ? true : Boolean(fichaP && fichaP.existe === true && fichaP.detected === true);
 
     const f2Items = (f2 && Array.isArray(f2.items)) ? f2.items : [];
     const vencidosF2 = f2Items.filter(it => it.vencido === true);
     const rawConformes = f2Items.filter(it => (it.conforme || it.estado === "Conforme" || it.subsanado === true) && !it.vencido).length;
-    // Si la Ficha de Priorización no existe, se descuenta de los requisitos conformes en los KPIs
+    // Si la Ficha de Priorización no existe, se descuenta de los requisitos conformes en los KPIs (solo en proceso ordinario)
     const itemsConformes = hasFicha ? rawConformes : Math.max(0, rawConformes - 1);
     const faltantes = Math.max(0, totalItemsRequeridos - itemsConformes);
-    const scoreF2 = (totalItemsRequeridos > 0 && hasFicha) 
-      ? (itemsConformes / totalItemsRequeridos) * 100 
+    const scoreF2 = (totalItemsRequeridos > 0 && hasFicha)
+      ? (itemsConformes / totalItemsRequeridos) * 100
       : (totalItemsRequeridos > 0 ? (itemsConformes / totalItemsRequeridos) * 75 : 0);
 
     const kpiDocLabel = document.getElementById("kpiDocLabel");
     if (kpiDocLabel) {
-      kpiDocLabel.innerText = isRecursos ? "Lista 28 Ítems (F2)" : "Lista 27 Ítems (F2)";
+      kpiDocLabel.innerText = is2026_2 ? "Lista 41 Ítems (Viabilidad)" : (isRecursos ? "Lista 28 Ítems (F2)" : "Lista 27 Ítems (F2)");
     }
 
     const kpiDoc = document.getElementById("kpiDocVal");
@@ -782,7 +935,7 @@ const App = {
     } else {
       if (kpiDoc) kpiDoc.style.color = "var(--status-danger)";
       if (kpiDocSub) {
-        if (!hasFicha) {
+        if (!hasFicha && !is2026_2) {
           kpiDocSub.innerHTML = '<span class="kpi-tag-bad">✗ Falta Ficha de Priorización (Documento Base)</span>';
         } else if (vencidosF2.length > 0 && faltantes === vencidosF2.length) {
           kpiDocSub.innerHTML = `<span class="kpi-tag-bad">⚠️ ${vencidosF2.length} ${vencidosF2.length === 1 ? 'ítem con vigencia vencida' : 'ítems con vigencia vencida'}</span>`;
@@ -1131,30 +1284,8 @@ const App = {
     // 4. Fase 1B: Mapa satelital centrado en Antioquia sin líneas artificiales
     SpatialEngine.initOrUpdateMap("leafletMapContainer", { municipio: "ANTIOQUIA", longitudM: 0, georreferenciacion: { puntosContraste: [] } });
 
-    // 5. Fase 2: RENDERIZAR LA LISTA DE LOS 27 ÍTEMS NORMATIVOS EN ESTADO PENDIENTE
-    const initialItems = SIPRO_DATA.items27.map(item => ({
-      ...item,
-      conforme: false,
-      faltante: true,
-      vencido: false,
-      observacion: "Documento pendiente de cotejo. Cargue la carpeta municipal para cotejar y abrir el archivo.",
-      diasRestantes: null,
-      archivoDetectado: null,
-      meta: null
-    }));
-
-    const emptyAudit2 = {
-      fase: "2_DOCUMENTAL",
-      aprobado: false,
-      totalItems: 27,
-      itemsConformes: 0,
-      itemsNoConformes: 27,
-      porcentajeConformidad: 0,
-      items: initialItems,
-      hallazgosCriticos: [],
-      alertas: []
-    };
-    DocumentalEngine.renderDocumentalMatrix(emptyAudit2, document.getElementById("documentalMatrixContainer"), this.currentFilterCluster || "ALL");
+    // 5. Fase 2: RENDERIZAR LA LISTA DE ÍTEMS NORMATIVOS EN ESTADO PENDIENTE
+    this.initEmptyDocumentalMatrix();
 
     // 6. Fase 3: Dictamen de espera
     const repContainer = document.getElementById("officialReportContainer");
@@ -1490,19 +1621,7 @@ const App = {
         if (this.currentAuditRecord && this.currentAuditRecord.fase2) {
           DocumentalEngine.renderDocumentalMatrix(this.currentAuditRecord.fase2, document.getElementById("documentalMatrixContainer"), filter);
         } else {
-          const initialItems = SIPRO_DATA.items27.map(item => ({
-            ...item,
-            conforme: false,
-            faltante: true,
-            vencido: false,
-            observacion: "Documento pendiente de cotejo.",
-            diasRestantes: null,
-            archivoDetectado: null,
-            meta: null
-          }));
-          DocumentalEngine.renderDocumentalMatrix({
-            fase: "2_DOCUMENTAL", aprobado: false, totalItems: 27, itemsConformes: 0, itemsNoConformes: 27, porcentajeConformidad: 0, items: initialItems, hallazgosCriticos: [], alertas: []
-          }, document.getElementById("documentalMatrixContainer"), filter);
+          this.initEmptyDocumentalMatrix();
         }
       });
     });
@@ -1814,11 +1933,14 @@ const App = {
     if (stepGate1C) stepGate1C.style.display = isRecursos ? "inline-flex" : "none";
     if (navItem1C) navItem1C.style.display = isRecursos ? "block" : "none";
 
-    // Re-auditar Fase 2 con 27 o 28 ítems
+    const processMode = exp.procesoEspecial || (exp.datos && exp.datos.procesoEspecial) || this.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+
+    // Re-auditar Fase 2 con 27 o 28 ítems (o 41 en 2026_2)
     if (exp.datos) {
       exp.fase2 = DocumentalEngine.auditProject(exp.datos);
       if (exp.kpis) {
-        exp.kpis.itemsTotal = isRecursos ? 28 : 27;
+        exp.kpis.itemsTotal = is2026_2 ? 41 : (isRecursos ? 28 : 27);
         exp.kpis.itemsConformes = exp.fase2.itemsConformes;
         exp.kpis.itemsNoConformes = exp.fase2.itemsNoConformes;
       }
@@ -1842,7 +1964,7 @@ const App = {
     this.saveAuditProgress(true);
 
     if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
-      FolderReader.showToast(`Modalidad actualizada: ${isRecursos ? '💰 RECURSOS (28 Ítems + Fase 1C)' : '🧱 MATERIALES (27 Ítems)'}`);
+      FolderReader.showToast(`Modalidad actualizada: ${isRecursos ? (is2026_2 ? '💰 RECURSOS (41 Ítems + Fase 1C)' : '💰 RECURSOS (28 Ítems + Fase 1C)') : (is2026_2 ? '🧱 MATERIALES (41 Ítems)' : '🧱 MATERIALES (27 Ítems)')}`);
     }
   },
 
@@ -1891,6 +2013,7 @@ const App = {
       fase3: {
         matrizObservaciones: (exp.fase3 && (exp.fase3.matrizObservaciones || exp.fase3.observacionesEditadas)) || {},
         observaciones: (exp.fase3 && (exp.fase3.matrizObservaciones || exp.fase3.observacionesEditadas)) || {},
+        observacionesOmitidas: (exp.fase3 && exp.fase3.observacionesOmitidas) || {},
         hallazgosManuales: (exp.fase3 && exp.fase3.hallazgosManuales) || [],
         conceptoGeneral: (exp.fase3 && exp.fase3.conceptoGeneral) || ""
       },
@@ -1974,25 +2097,35 @@ const App = {
   },
 
   /**
-   * Dispara el input file y procesa la subsanación para un ítem documental (1-28)
+   * Dispara el input file o asigna un archivo existente para un ítem documental (1-28 o 1-41)
    */
-  async subirSubsanacionItem(arg1, arg2, arg3) {
-    let itemId, projectId, directFile = null;
+  async subirSubsanacionItem(arg1, arg2, arg3, arg4) {
+    let itemId, projectId, directFile = null, options = {};
+
+    if (arg4 && typeof arg4 === "object" && !(arg4 instanceof File)) {
+      options = arg4;
+    }
 
     if (typeof arg1 === "string" && isNaN(Number(arg1)) && arg1.length > 2 && (typeof arg2 === "number" || !isNaN(Number(arg2)))) {
-      // Firma: (projectId, itemId, directFile)
+      // Firma: (projectId, itemId, directFile, options)
       projectId = arg1;
       itemId = Number(arg2);
-      directFile = arg3 || null;
+      directFile = (arg3 && (arg3 instanceof File || (arg3.name && arg3.size !== undefined))) ? arg3 : null;
+      if (arg3 && typeof arg3 === "object" && !(arg3 instanceof File) && !arg3.name) options = arg3;
     } else {
-      // Firma: (itemId, projectId, directFile)
+      // Firma: (itemId, projectId, directFile, options)
       itemId = Number(arg1);
       if (arg2 && typeof arg2 === "object" && (arg2 instanceof File || (arg2.name && arg2.size !== undefined))) {
         directFile = arg2;
-        projectId = arg3 || this.currentProjectId;
+        projectId = (typeof arg3 === "string" && isNaN(Number(arg3))) ? arg3 : this.currentProjectId;
+        if (arg3 && typeof arg3 === "object" && !(arg3 instanceof File) && !arg3.name) options = arg3;
       } else {
         projectId = arg2 || this.currentProjectId;
-        directFile = (arg3 && typeof arg3 === "object" && (arg3 instanceof File || (arg3.name && arg3.size !== undefined))) ? arg3 : null;
+        if (arg3 && typeof arg3 === "object" && (arg3 instanceof File || (arg3.name && arg3.size !== undefined))) {
+          directFile = arg3;
+        } else if (arg3 && typeof arg3 === "object") {
+          options = arg3;
+        }
       }
     }
 
@@ -2016,8 +2149,14 @@ const App = {
       if (!file) return;
 
       try {
-        // 1. Guardar físicamente en carpeta si disponemos de dirHandle
-        if (exp.dirHandle && typeof exp.dirHandle.getFileHandle === "function") {
+        const esExistente = Boolean(
+          (options && options.esExistente) ||
+          (exp.archivos && exp.archivos.includes(file)) ||
+          (exp.archivos && exp.archivos.some(f => f && f.name === file.name && f.size === file.size))
+        );
+
+        // 1. Guardar físicamente en carpeta si disponemos de dirHandle (SOLO si NO es un archivo ya presente en la carpeta)
+        if (!esExistente && exp.dirHandle && typeof exp.dirHandle.getFileHandle === "function") {
           try {
             const itemPadded = String(numItemId).padStart(2, "0");
             const targetName = file.name.toUpperCase().includes(`ITEM_${itemPadded}`) || file.name.toUpperCase().includes(`ITEM ${itemPadded}`)
@@ -2032,6 +2171,8 @@ const App = {
           } catch (diskErr) {
             console.warn("No se pudo escribir directamente en el disco:", diskErr);
           }
+        } else if (esExistente) {
+          console.log(`Asignando archivo existente sin duplicar en disco: ${file.name} al Ítem ${numItemId}`);
         }
 
         // 2. Inyectar archivo en la estructura en memoria del proyecto
@@ -2162,10 +2303,16 @@ const App = {
           }
         }
 
+        const procMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || this.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+        const is2026_2 = procMode === "2026_2" || procMode === "CONVENIOS_2026_2";
+        const budgetSlotId = is2026_2 ? 14 : 28;
+
         const isItem3 = (numItemId === 3 || (itemObj && /despiece|acero|memorias/i.test(itemObj.nombre || itemObj.requisito || itemObj.title || "")));
         const isItem24 = (numItemId === 24 || (itemObj && /georreferenc|kml|kmz/i.test(itemObj.nombre || itemObj.requisito || itemObj.title || "")));
         const isItem28 = (
-          numItemId === 28 ||
+          numItemId === budgetSlotId ||
+          (!is2026_2 && numItemId === 28) ||
+          (is2026_2 && numItemId === 14) ||
           (itemObj && /presupuesto/i.test(itemObj.nombre || itemObj.requisito || itemObj.title || itemObj.descripcion || "")) ||
           (/\.(xlsx|xlsm|xls|xlsb)$/i.test(file.name) && /presupuesto|pto/i.test(file.name))
         );
@@ -2283,24 +2430,24 @@ const App = {
             }
           }
         } else if (isItem28) {
-          // Asignar al slot 28 en todos los mapas
-          exp.archivosFileMap[28] = file;
-          exp.archivosFileMap["28"] = file;
+          // Asignar al slot correspondiente (14 en 2026-II, 28 en Ordinario)
+          exp.archivosFileMap[budgetSlotId] = file;
+          exp.archivosFileMap[String(budgetSlotId)] = file;
           if (exp.datos) {
             exp.datos.archivosFiles = exp.datos.archivosFiles || {};
-            exp.datos.archivosFiles[28] = file;
-            exp.datos.archivosFiles["28"] = file;
+            exp.datos.archivosFiles[budgetSlotId] = file;
+            exp.datos.archivosFiles[String(budgetSlotId)] = file;
             exp.datos.documentosStatus = exp.datos.documentosStatus || { archivosDetectados: {} };
-            exp.datos.documentosStatus.archivosDetectados[28] = file.name;
-            exp.datos.documentosStatus.archivosDetectados["28"] = file.name;
+            exp.datos.documentosStatus.archivosDetectados[budgetSlotId] = file.name;
+            exp.datos.documentosStatus.archivosDetectados[String(budgetSlotId)] = file.name;
             exp.datos.archivosMetadata = exp.datos.archivosMetadata || {};
-            exp.datos.archivosMetadata[28] = {
+            exp.datos.archivosMetadata[budgetSlotId] = {
               fileName: file.name,
               sizeBytes: file.size,
               lastModified: file.lastModified,
               textSnippet: `Documento de presupuesto aportado: ${file.name}`
             };
-            exp.datos.archivosMetadata["28"] = exp.datos.archivosMetadata[28];
+            exp.datos.archivosMetadata[String(budgetSlotId)] = exp.datos.archivosMetadata[budgetSlotId];
           }
 
           if (typeof PresupuestoEngine !== "undefined") {
@@ -2325,7 +2472,9 @@ const App = {
             Object.values(latestSubMap).forEach(sub => {
               const it = exp.fase2.items.find(i => Number(i.id) === Number(sub.itemId));
               if (it) {
-                if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(Number(sub.itemId))) {
+                const subProcessMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || App.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+                const isSubVigenteReq = typeof DocumentalEngine !== "undefined" && DocumentalEngine.isVigenciaMensual(Number(sub.itemId), subProcessMode);
+                if (isSubVigenteReq) {
                   if (sub.esVigente === false) {
                     it.conforme = false;
                     it.vencido = true;
@@ -2357,8 +2506,10 @@ const App = {
             exp.fase2.itemsConformes = exp.fase2.items.filter(it => it.conforme || (it.subsanado && !it.vencido)).length;
             exp.fase2.itemsNoConformes = exp.fase2.items.length - exp.fase2.itemsConformes;
           }
+          const subProcessMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || App.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+          const isSub2026_2 = subProcessMode === "2026_2" || subProcessMode === "CONVENIOS_2026_2";
+          const tot = isSub2026_2 ? 41 : (exp.modalidad === "RECURSOS" ? 28 : 27);
           if (exp.kpis) {
-            const tot = exp.modalidad === "RECURSOS" ? 28 : 27;
             exp.kpis.itemsTotal = tot;
             exp.kpis.itemsConformes = exp.fase2.itemsConformes;
             exp.kpis.itemsNoConformes = exp.fase2.itemsNoConformes;
@@ -2371,7 +2522,9 @@ const App = {
         const hasKmz1B = exp.fase1B ? (exp.fase1B.tieneKMZ === true && exp.fase1B.tieneGeorreferenciacionValida !== false) : false;
         const pct1B = Number((exp.fase1B && (exp.fase1B.porcentajeAlineacion || exp.fase1B.coberturaBufferPct)) || 0);
         const a1B = exp.fase1B ? (hasKmz1B && (exp.fase1B.aprobado === true || exp.fase1B.coberturaConforme === true || pct1B >= 95.0 || exp.fase1B.subsanado === true)) : false;
-        const a2 = exp.fase2 ? (exp.fase2.aprobado || (exp.fase2.itemsConformes >= (exp.modalidad === "RECURSOS" ? 28 : 27))) : true;
+        const subProcMode = (exp && exp.procesoEspecial) || (exp && exp.datos && exp.datos.procesoEspecial) || App.currentProcessMode || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+        const totItemsA2 = (subProcMode === "2026_2" || subProcMode === "CONVENIOS_2026_2") ? 41 : (exp.modalidad === "RECURSOS" ? 28 : 27);
+        const a2 = exp.fase2 ? (exp.fase2.aprobado || (exp.fase2.itemsConformes >= totItemsA2)) : true;
         const a1C = exp.modalidad !== "RECURSOS" || (exp.fase1C ? exp.fase1C.aprobado : true);
 
         exp.auditGlobal.audit1A = exp.fase1A;
@@ -2399,7 +2552,7 @@ const App = {
           if (subEsVigente !== false) {
             const cleanKeys = [`doc_item_${numItemId}`, `FASE_2_ITEM_${numItemId}`, `item_${numItemId}`];
             if (isItem28) {
-              cleanKeys.push("doc_item_28", "FASE_2_ITEM_28", "item_28", "FASE_1C_PTO", "fase_1c_presupuesto");
+              cleanKeys.push(`doc_item_${budgetSlotId}`, `FASE_2_ITEM_${budgetSlotId}`, `item_${budgetSlotId}`, "doc_item_28", "FASE_2_ITEM_28", "item_28", "doc_item_14", "FASE_2_ITEM_14", "item_14", "FASE_1C_PTO", "fase_1c_presupuesto");
             }
             if (isItem3) {
               cleanKeys.push("doc_item_3", "FASE_2_ITEM_3", "item_3", "FASE_1A_DISENO", "FASE_1A_ACERO", "fase_1a_acero");
@@ -2451,7 +2604,11 @@ const App = {
           }
         }
 
-        if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(numItemId) && !subEsVigente) {
+        if (esExistente) {
+          if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+            FolderReader.showToast(`✓ Documento "${file.name}" asignado al Ítem ${numItemId} (sin duplicar en disco).`);
+          }
+        } else if (typeof DocumentalEngine !== "undefined" && DocumentalEngine.ITEMS_VIGENCIA_MENSUAL.includes(numItemId) && !subEsVigente) {
           const ahora = new Date();
           const mesNombre = DocumentalEngine.NOMBRES_MESES[ahora.getMonth()];
           const anioActual = ahora.getFullYear();
@@ -2500,14 +2657,21 @@ const App = {
   },
 
   /**
+   * Asigna manualmente un archivo ya presente en la carpeta del proyecto a un ítem documental sin duplicarlo en disco
+   */
+  async asignarArchivoExistente(itemId, file, projectId = null) {
+    return this.subirSubsanacionItem(itemId, projectId, file, { esExistente: true });
+  },
+
+  /**
    * Carga o subsana el documento maestro Ficha de Priorización (.pdf o .xlsx/.xls)
    * Extrayendo de inmediato Municipio, Subregión, Longitud, Código Vial, Alcalde y Secretario
    */
   async subirFichaPriorizacion(proyectoId, directFile = null) {
     const projectId = proyectoId || this.currentProjectId;
     const exp = (window.proyectosAuditados && window.proyectosAuditados[projectId]) ||
-                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[proyectoId]) ||
-                this.currentAuditRecord;
+      (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[proyectoId]) ||
+      this.currentAuditRecord;
 
     if (!exp) {
       alert("Por favor seleccione un expediente municipal antes de cargar la Ficha de Priorización.");

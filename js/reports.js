@@ -54,10 +54,12 @@ const ReportsEngine = {
     rec.fase3 = rec.fase3 || {
       matrizObservaciones: {},
       observacionesEditadas: {},
+      observacionesOmitidas: {},
       hallazgosManuales: [],
       conclusionesConcepto: ""
     };
     rec.fase3.matrizObservaciones = rec.fase3.matrizObservaciones || rec.fase3.observacionesEditadas || {};
+    rec.fase3.observacionesOmitidas = rec.fase3.observacionesOmitidas || {};
 
     // Sincronizar espejo en SIPRO_DATA.expedientesMap y rec.datos
     if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[projectId]) {
@@ -84,57 +86,61 @@ const ReportsEngine = {
     const audit1A = (rec && rec.fase1A) || (auditGlobal && auditGlobal.audit1A);
     const audit1B = (rec && rec.fase1B) || (auditGlobal && auditGlobal.audit1B);
     const audit2 = (rec && rec.fase2) || (auditGlobal && auditGlobal.audit2);
+    const processMode = (project && project.procesoEspecial) || (rec && rec.procesoEspecial) || (rec && rec.datos && rec.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
 
-    // 0. DOCUMENTO BASE: FICHA DE PRIORIZACIÓN MUNICIPAL
-    const fichaP = (rec && rec.fichaPriorizacion) || (project && project.fichaPriorizacion) || (rec && rec.datos && rec.datos.fichaPriorizacion);
-    const hasFicha = fichaP ? (fichaP.existe === true && fichaP.detected === true) : false;
-    const fidFicha = "FICHA_PRIORIZACION";
+    // 0. DOCUMENTO BASE: FICHA DE PRIORIZACIÓN MUNICIPAL (Omitido en proceso especial Convenios 2026 - II)
+    if (!is2026_2) {
+      const fichaP = (rec && rec.fichaPriorizacion) || (project && project.fichaPriorizacion) || (rec && rec.datos && rec.datos.fichaPriorizacion);
+      const hasFicha = fichaP ? (fichaP.existe === true && fichaP.detected === true) : false;
+      const fidFicha = "FICHA_PRIORIZACION";
 
-    if (!hasFicha) {
-      const userEditFicha = this.getUserEdit(fase3State, fidFicha) || this.getUserEdit(fase3State, "ficha_priorizacion");
-      const statusFicha = userEditFicha?.estado || "Faltante";
-      const defaultMotivoFicha = "Ficha de Priorización: Documento faltante en el expediente";
-      const motivoFicha = userEditFicha?.motivo !== undefined ? userEditFicha.motivo : defaultMotivoFicha;
+      if (!hasFicha) {
+        const userEditFicha = this.getUserEdit(fase3State, fidFicha) || this.getUserEdit(fase3State, "ficha_priorizacion");
+        const statusFicha = userEditFicha?.estado || "Faltante";
+        const defaultMotivoFicha = "Ficha de Priorización: Documento faltante en el expediente";
+        const motivoFicha = userEditFicha?.motivo !== undefined ? userEditFicha.motivo : defaultMotivoFicha;
 
-      const objFicha = {
-        id: fidFicha,
-        itemKey: fidFicha,
-        fase: "Documento Base",
-        titulo: "Ficha de Priorización Municipal y Cierre",
-        norma: "Documento Maestro de Priorización",
-        archivo: null,
-        estado: statusFicha,
-        motivo: motivoFicha,
-        isManual: false
-      };
+        const objFicha = {
+          id: fidFicha,
+          itemKey: fidFicha,
+          fase: "Documento Base",
+          titulo: "Ficha de Priorización Municipal y Cierre",
+          norma: "Documento Maestro de Priorización",
+          archivo: null,
+          estado: statusFicha,
+          motivo: motivoFicha,
+          isManual: false
+        };
 
-      if (statusFicha === "Conforme") {
-        compliantItems.push(objFicha);
+        if (statusFicha === "Conforme") {
+          compliantItems.push(objFicha);
+        } else {
+          findings.push(objFicha);
+        }
       } else {
-        findings.push(objFicha);
-      }
-    } else {
-      const userEditFicha = this.getUserEdit(fase3State, fidFicha) || this.getUserEdit(fase3State, "ficha_priorizacion");
-      const statusFicha = userEditFicha?.estado || "Conforme";
-      const defaultMotivoFicha = `✓ Ficha de Priorización aportada (${fichaP.fileName || "documento detectado"}).`;
-      const motivoFicha = userEditFicha?.motivo !== undefined ? userEditFicha.motivo : defaultMotivoFicha;
+        const userEditFicha = this.getUserEdit(fase3State, fidFicha) || this.getUserEdit(fase3State, "ficha_priorizacion");
+        const statusFicha = userEditFicha?.estado || "Conforme";
+        const defaultMotivoFicha = `✓ Ficha de Priorización aportada (${fichaP.fileName || "documento detectado"}).`;
+        const motivoFicha = userEditFicha?.motivo !== undefined ? userEditFicha.motivo : defaultMotivoFicha;
 
-      const objFicha = {
-        id: fidFicha,
-        itemKey: fidFicha,
-        fase: "Documento Base",
-        titulo: "Ficha de Priorización Municipal y Cierre",
-        norma: "Documento Maestro de Priorización",
-        archivo: fichaP.fileName,
-        estado: statusFicha,
-        motivo: motivoFicha,
-        isManual: false
-      };
+        const objFicha = {
+          id: fidFicha,
+          itemKey: fidFicha,
+          fase: "Documento Base",
+          titulo: "Ficha de Priorización Municipal y Cierre",
+          norma: "Documento Maestro de Priorización",
+          archivo: fichaP.fileName,
+          estado: statusFicha,
+          motivo: motivoFicha,
+          isManual: false
+        };
 
-      if (statusFicha === "Conforme") {
-        compliantItems.push(objFicha);
-      } else {
-        findings.push(objFicha);
+        if (statusFicha === "Conforme") {
+          compliantItems.push(objFicha);
+        } else {
+          findings.push(objFicha);
+        }
       }
     }
 
@@ -459,7 +465,7 @@ const ReportsEngine = {
     }
 
     // 3. COMPUERTA 2: LISTA DE REQUISITOS DOCUMENTALES
-    const items27 = (audit2 && audit2.items) || (rec && rec.fase2 && rec.fase2.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
+    const items27 = (audit2 && audit2.items) || (rec && rec.fase2 && rec.fase2.items) || (is2026_2 ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27) || [];
     items27.forEach((it) => {
       const num = it.num || it.id;
       const fid = `FASE_2_ITEM_${num}`;
@@ -533,6 +539,16 @@ const ReportsEngine = {
       }
     });
 
+    // Aplicar indicador de omisión para la impresión (a consideración del revisor, sin eliminar del sistema)
+    findings.forEach(f => {
+      const itemKey = this.toItemKey(f.id);
+      const userEdit = this.getUserEdit(fase3State, f.id);
+      f.omitido = Boolean(
+        (fase3State.observacionesOmitidas && (fase3State.observacionesOmitidas[f.id] || fase3State.observacionesOmitidas[itemKey])) ||
+        (userEdit && userEdit.omitido === true)
+      );
+    });
+
     return { findings, compliantItems };
   },
 
@@ -565,6 +581,42 @@ const ReportsEngine = {
       expedientesMap[projectId].fase3 = expedientesMap[projectId].fase3 || {};
       expedientesMap[projectId].fase3.matrizObservaciones = state.matrizObservaciones;
       expedientesMap[projectId].fase3.observacionesEditadas = state.observacionesEditadas;
+    }
+
+    // Sincronizar hacia project.revisionSupervisor si corresponde a un ítem documental o ficha
+    try {
+      const matchItem = id.match(/^(?:FASE_2_ITEM_|item_)(\d+)$/i);
+      const isFicha = id.toUpperCase() === "FICHA_PRIORIZACION" || id.toUpperCase() === "FASE_2_FICHA_PRIORIZACION";
+      const targetProject = (window.proyectosAuditados && window.proyectosAuditados[projectId]) || (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[projectId]) || App.currentProject;
+      if (targetProject) {
+        const pObj = targetProject.datos || targetProject;
+        pObj.revisionSupervisor = pObj.revisionSupervisor || {};
+        if (matchItem) {
+          const numId = parseInt(matchItem[1], 10);
+          pObj.revisionSupervisor[numId] = {
+            estado: newStatus === "Conforme" ? "CONFORME" : "NO_CONFORME",
+            observacion: (state.matrizObservaciones[itemKey] && state.matrizObservaciones[itemKey].motivo) || "",
+            fecha: new Date().toISOString(),
+            supervisor: window.SUPERVISOR_NAME || "Supervisor Técnico"
+          };
+          if (typeof DocumentalEngine !== "undefined" && typeof DocumentalEngine.auditProject === "function") {
+            DocumentalEngine.auditProject(pObj);
+            const container = document.getElementById("documentalMatrixContainer");
+            if (container && pObj.auditResult) {
+              DocumentalEngine.renderDocumentalMatrix(pObj.auditResult, container, DocumentalEngine.currentFilter || "ALL", projectId);
+            }
+          }
+        } else if (isFicha) {
+          pObj.revisionSupervisor["ficha_priorizacion"] = {
+            estado: newStatus === "Conforme" ? "CONFORME" : "NO_CONFORME",
+            observacion: (state.matrizObservaciones[itemKey] && state.matrizObservaciones[itemKey].motivo) || "",
+            fecha: new Date().toISOString(),
+            supervisor: window.SUPERVISOR_NAME || "Supervisor Técnico"
+          };
+        }
+      }
+    } catch (eSync) {
+      console.warn("Error sincronizando estado con revisionSupervisor:", eSync);
     }
 
     if (window.App && typeof App.saveAuditProgress === "function") {
@@ -628,6 +680,28 @@ const ReportsEngine = {
       expedientesMap[projectId].fase3.observacionesEditadas = state.observacionesEditadas;
     }
 
+    // Sincronizar observación hacia project.revisionSupervisor si corresponde
+    try {
+      const matchItem = id.match(/^(?:FASE_2_ITEM_|item_)(\d+)$/i);
+      const isFicha = id.toUpperCase() === "FICHA_PRIORIZACION" || id.toUpperCase() === "FASE_2_FICHA_PRIORIZACION";
+      const targetProject = (window.proyectosAuditados && window.proyectosAuditados[projectId]) || (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[projectId]) || App.currentProject;
+      if (targetProject) {
+        const pObj = targetProject.datos || targetProject;
+        if (pObj.revisionSupervisor) {
+          if (matchItem) {
+            const numId = parseInt(matchItem[1], 10);
+            if (pObj.revisionSupervisor[numId]) {
+              pObj.revisionSupervisor[numId].observacion = newMotivo;
+            }
+          } else if (isFicha && pObj.revisionSupervisor["ficha_priorizacion"]) {
+            pObj.revisionSupervisor["ficha_priorizacion"].observacion = newMotivo;
+          }
+        }
+      }
+    } catch (eSyncMot) {
+      console.warn("Error sincronizando motivo con revisionSupervisor:", eSyncMot);
+    }
+
     // Debounce save to localStorage/json
     if (this._saveTimer) clearTimeout(this._saveTimer);
     this._saveTimer = setTimeout(() => {
@@ -635,6 +709,57 @@ const ReportsEngine = {
         App.saveAuditProgress(true);
       }
     }, 600);
+  },
+
+  /**
+   * Conmuta la omisión de una observación para que no aparezca en la impresión ni PDF, sin eliminarla del sistema
+   */
+  toggleOmitFinding(id) {
+    const projectId = App.currentProjectId;
+    const state = this.getFase3State(projectId);
+    const itemKey = this.toItemKey(id);
+
+    state.observacionesOmitidas = state.observacionesOmitidas || {};
+    const isCurrentlyOmitted = Boolean(state.observacionesOmitidas[id] || state.observacionesOmitidas[itemKey]);
+    const nextState = !isCurrentlyOmitted;
+
+    state.observacionesOmitidas[id] = nextState;
+    state.observacionesOmitidas[itemKey] = nextState;
+
+    state.matrizObservaciones = state.matrizObservaciones || {};
+    state.observacionesEditadas = state.observacionesEditadas || {};
+
+    state.matrizObservaciones[itemKey] = state.matrizObservaciones[itemKey] || {};
+    state.matrizObservaciones[itemKey].omitido = nextState;
+
+    state.observacionesEditadas[itemKey] = state.matrizObservaciones[itemKey];
+    state.observacionesEditadas[id] = state.matrizObservaciones[itemKey];
+
+    const manual = (state.hallazgosManuales || []).find(m => m.id === id);
+    if (manual) {
+      manual.omitido = nextState;
+    }
+
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    if (expedientesMap[projectId]) {
+      expedientesMap[projectId].fase3 = expedientesMap[projectId].fase3 || {};
+      expedientesMap[projectId].fase3.observacionesOmitidas = state.observacionesOmitidas;
+      expedientesMap[projectId].fase3.matrizObservaciones = state.matrizObservaciones;
+      expedientesMap[projectId].fase3.observacionesEditadas = state.observacionesEditadas;
+    }
+
+    if (window.App && typeof App.saveAuditProgress === "function") {
+      App.saveAuditProgress(true);
+    }
+
+    this.renderOfficialReport(App.currentProject, App.auditGlobal, document.getElementById("officialReportContainer"));
+
+    const toastMsg = nextState
+      ? "🚫 Observación omitida para la impresión (se conserva guardada en el sistema)."
+      : "👁️ Observación restaurada e incluida para la impresión.";
+    if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
+      FolderReader.showToast(toastMsg);
+    }
   },
 
   /**
@@ -727,10 +852,12 @@ const ReportsEngine = {
     const fase3State = this.getFase3State(projectId);
     const { findings, compliantItems } = this.collectAllFindings(project, auditGlobal);
 
-    // Conteo estricto y real de la Fase 2 (27 requisitos documentales de expedientesMap)
+    // Conteo estricto y real de la Fase 2 (requisitos documentales de expedientesMap)
     const recF2 = (window.proyectosAuditados && projectId) ? window.proyectosAuditados[projectId] : null;
     const audit2Data = (recF2 && recF2.fase2) || (auditGlobal && auditGlobal.audit2) || {};
-    const items27List = (audit2Data && audit2Data.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
+    const reportProcessMode = (project && project.procesoEspecial) || (recF2 && recF2.procesoEspecial) || (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const isReport2026_2 = reportProcessMode === "2026_2" || reportProcessMode === "CONVENIOS_2026_2";
+    const items27List = (audit2Data && audit2Data.items) || (isReport2026_2 ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27) || [];
     let f2Conformes = 0;
     let f2Pendientes = 0;
     items27List.forEach((it) => {
@@ -793,10 +920,12 @@ const ReportsEngine = {
     const fase3State = this.getFase3State(projectId);
     const { findings, compliantItems } = this.collectAllFindings(project, auditGlobal);
 
-    // Conteo estricto y real de la Fase 2 (27 requisitos documentales de expedientesMap)
+    // Conteo estricto y real de la Fase 2 (requisitos documentales de expedientesMap)
     const recF2 = (window.proyectosAuditados && projectId) ? window.proyectosAuditados[projectId] : null;
     const audit2Data = (recF2 && recF2.fase2) || (auditGlobal && auditGlobal.audit2) || {};
-    const items27List = (audit2Data && audit2Data.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
+    const reportProcessMode = (project && project.procesoEspecial) || (recF2 && recF2.procesoEspecial) || (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const isReport2026_2 = reportProcessMode === "2026_2" || reportProcessMode === "CONVENIOS_2026_2";
+    const items27List = (audit2Data && audit2Data.items) || (isReport2026_2 ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27) || [];
     let f2Conformes = 0;
     let f2Pendientes = 0;
     items27List.forEach((it) => {
@@ -913,40 +1042,53 @@ const ReportsEngine = {
             <h5 style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;margin:0;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">
               <span>📍</span> Identificación Territorial del Proyecto
             </h5>
-            <button type="button" class="btn-primary" style="font-size:11.5px;padding:5px 14px;background:#0284C7;border-color:#0284C7;color:#fff;display:inline-flex;align-items:center;gap:6px;border-radius:6px;cursor:pointer;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.12);" onclick="DocumentalEngine.abrirFichaPriorizacion('${projectId}')" title="Abrir y verificar la Ficha de Priorización en el visor modal de Fase 2">
-              <span>👁️ Ver Ficha de Priorización</span>
-            </button>
+            ${isReport2026_2 ? '' : `
+              <button type="button" class="btn-primary" style="font-size:11.5px;padding:5px 14px;background:#0284C7;border-color:#0284C7;color:#fff;display:inline-flex;align-items:center;gap:6px;border-radius:6px;cursor:pointer;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.12);" onclick="DocumentalEngine.abrirFichaPriorizacion('${projectId}')" title="Abrir y verificar la Ficha de Priorización en el visor modal de Fase 2">
+                <span>👁️ Ver Ficha de Priorización</span>
+              </button>
+            `}
           </div>
 
-          <!-- BARRA DE ESTADO DE LA FICHA DE PRIORIZACIÓN -->
-          <div class="ficha-territorial-status-bar no-print" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:8px 14px;background:var(--color-bg);border:1px solid var(--border-subtle);border-radius:6px;margin-bottom:14px;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span style="font-weight:700;font-size:11.5px;color:var(--text-main);">Documento Base:</span>
-              ${fichaExiste ? `
+          <!-- BARRA DE ESTADO DE LA FICHA DE PRIORIZACIÓN / PROCESO 2026 - II -->
+          ${isReport2026_2 ? `
+            <div class="ficha-territorial-status-bar no-print" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:8px 14px;background:var(--color-bg);border:1px solid #0284c7;border-left:4px solid #0284c7;border-radius:6px;margin-bottom:14px;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:700;font-size:11.5px;color:var(--color-primary);">⚡ Proceso Especial Convenios "2026 - II":</span>
                 <span class="status-pill cumple" style="font-size:11px;padding:3px 9px;">
-                  ✓ Ficha detectada: <strong>${fichaFileName}</strong>
+                  ✓ Lista de Viabilidad Técnica (41 Requisitos - Sin Ficha de Priorización)
                 </span>
-              ` : `
-                <span class="status-pill no-cumple" style="font-size:11px;padding:3px 9px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;">
-                  ✗ Ficha de Priorización: Documento faltante en el expediente
-                </span>
-              `}
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.abrirFichaPriorizacion('${projectId}')" title="Ver documento en el visor modal">
-                <span>👁️ Ver Ficha</span>
-              </button>
-              ${fichaExiste ? `
-                <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;" onclick="App.subirFichaPriorizacion('${projectId}')" title="Subir o reemplazar la Ficha de Priorización">
-                  <span>📤 Cambiar / Subir Ficha</span>
+          ` : `
+            <div class="ficha-territorial-status-bar no-print" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:8px 14px;background:var(--color-bg);border:1px solid var(--border-subtle);border-radius:6px;margin-bottom:14px;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:700;font-size:11.5px;color:var(--text-main);">Documento Base:</span>
+                ${fichaExiste ? `
+                  <span class="status-pill cumple" style="font-size:11px;padding:3px 9px;">
+                    ✓ Ficha detectada: <strong>${fichaFileName}</strong>
+                  </span>
+                ` : `
+                  <span class="status-pill no-cumple" style="font-size:11px;padding:3px 9px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;">
+                    ✗ Ficha de Priorización: Documento faltante en el expediente
+                  </span>
+                `}
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;" onclick="DocumentalEngine.abrirFichaPriorizacion('${projectId}')" title="Ver documento en el visor modal">
+                  <span>👁️ Ver Ficha</span>
                 </button>
-              ` : `
-                <button type="button" class="btn-primary" style="font-size:11px;padding:4px 12px;background:#dc2626;border-color:#b91c1c;display:inline-flex;align-items:center;gap:4px;" onclick="App.subirFichaPriorizacion('${projectId}')" title="Cargar archivo de Ficha de Priorización">
-                  <span>📤 Subir Ficha de Priorización</span>
-                </button>
-              `}
+                ${fichaExiste ? `
+                  <button type="button" class="btn-secondary" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;" onclick="App.subirFichaPriorizacion('${projectId}')" title="Subir o reemplazar la Ficha de Priorización">
+                    <span>📤 Cambiar / Subir Ficha</span>
+                  </button>
+                ` : `
+                  <button type="button" class="btn-primary" style="font-size:11px;padding:4px 12px;background:#dc2626;border-color:#b91c1c;display:inline-flex;align-items:center;gap:4px;" onclick="App.subirFichaPriorizacion('${projectId}')" title="Cargar archivo de Ficha de Priorización">
+                    <span>📤 Subir Ficha de Priorización</span>
+                  </button>
+                `}
+              </div>
             </div>
-          </div>
+          `}
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px 24px;font-size:12.5px;">
             <div>
               <span style="color:var(--text-muted);display:block;font-size:11px;font-weight:700;">Municipio y Subregión:</span>
@@ -995,7 +1137,7 @@ const ReportsEngine = {
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
             <div>
               <h4 style="font-size:14px;font-weight:900;color:var(--status-danger);display:flex;align-items:center;gap:8px;">
-                <span>📋</span> Sección 1: Matriz de Requisitos y Documentos Faltantes / No Aceptados (${findings.length})
+                <span>📋</span> Sección 1: Matriz de Requisitos y Documentos Faltantes / No Aceptados (${findings.length}${findings.some(f => f.omitido) ? ` • ${findings.filter(f => !f.omitido).length} en impresión, ${findings.filter(f => f.omitido).length} omitidas` : ''})
               </h4>
               <p style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">
                 Listado prioritario de no conformidades. Edite el estado o amplíe la observación técnica de subsanación para cada ítem:
@@ -1015,21 +1157,26 @@ const ReportsEngine = {
               <table class="report-editable-table">
                 <thead>
                   <tr>
-                    <th style="width:28%;">Ítem / Fase / Requisito</th>
-                    <th style="width:22%;">Estado Actual</th>
-                    <th style="width:45%;">Detalle / Motivo de No Aceptación (Editable por el Revisor)</th>
-                    <th style="width:5%;text-align:center;"></th>
+                    <th style="width:26%;">Ítem / Fase / Requisito</th>
+                    <th style="width:18%;">Estado Actual</th>
+                    <th style="width:40%;">Detalle / Motivo de No Aceptación (Editable por el Revisor)</th>
+                    <th style="width:16%;text-align:center;">Impresión / Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   ${findings.map((f) => `
-                    <tr>
+                    <tr class="${f.omitido ? 'row-omitted-finding' : ''}" style="${f.omitido ? 'background:rgba(241, 245, 249, 0.75);opacity:0.8;' : ''}">
                       <td>
-                        <div style="font-weight:800;color:var(--text-main);font-size:12.5px;">${f.titulo}</div>
+                        <div style="font-weight:800;color:var(--text-main);font-size:12.5px;${f.omitido ? 'text-decoration:line-through;color:var(--text-muted);' : ''}">${f.titulo}</div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
                           <span style="background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;font-family:var(--font-mono);font-size:10px;">${f.fase}</span>
                           ${f.norma ? `<span style="margin-left:4px;">• ${f.norma}</span>` : ''}
                         </div>
+                        ${f.omitido ? `
+                          <div style="display:inline-flex;align-items:center;gap:4px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;margin-top:5px;">
+                            🚫 Omitida de impresión
+                          </div>
+                        ` : ''}
                         ${f.isManual ? `
                           <div style="margin-top:4px;">
                             <input type="text" value="${f.titulo.replace(/"/g, '&quot;')}" onchange="ReportsEngine.updateManualTitle('${f.id}', this.value)" style="font-size:11px;padding:3px 6px;border:1px dashed var(--border-strong);border-radius:4px;width:95%;background:var(--color-bg);" placeholder="Editar título de requisito...">
@@ -1045,13 +1192,24 @@ const ReportsEngine = {
                         </select>
                       </td>
                       <td>
-                        <textarea id="motivo_${f.id}" class="report-textarea" rows="2" placeholder="Escriba el motivo técnico detallado de no aceptación o la acción requerida para subsanar..." oninput="ReportsEngine.autoResizeTextarea(this); ReportsEngine.updateFindingMotivo('${f.id}', this.value);">${this.escapeHtml(f.motivo || '')}</textarea>
+                        <textarea id="motivo_${f.id}" class="report-textarea" rows="2" placeholder="Escriba el motivo técnico detallado de no aceptación o la acción requerida para subsanar..." oninput="ReportsEngine.autoResizeTextarea(this); ReportsEngine.updateFindingMotivo('${f.id}', this.value);" style="${f.omitido ? 'background:#f8fafc;color:#64748b;' : ''}">${this.escapeHtml(f.motivo || '')}</textarea>
                         <div class="print-observation-text" id="print_motivo_${f.id}">${this.escapeHtml(f.motivo || '')}</div>
                       </td>
-                      <td style="text-align:center;">
-                        ${f.isManual ? `
-                          <button type="button" class="report-del-btn" onclick="ReportsEngine.removeManualFinding('${f.id}')" title="Eliminar este requisito manual">✕</button>
-                        ` : ''}
+                      <td style="text-align:center;vertical-align:middle;">
+                        <div style="display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;">
+                          ${f.omitido ? `
+                            <button type="button" class="btn-omit-finding" onclick="ReportsEngine.toggleOmitFinding('${f.id}')" title="Esta observación está excluida de la impresión. Haga clic para incluirla de nuevo." style="padding:4px 9px;font-size:11px;font-weight:700;background:#fee2e2;color:#991b1b;border:1px solid #f87171;border-radius:4px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;">
+                              <span>👁️ Restaurar</span>
+                            </button>
+                          ` : `
+                            <button type="button" class="btn-omit-finding" onclick="ReportsEngine.toggleOmitFinding('${f.id}')" title="Omitir esta observación en la impresión (se conserva guardada en el sistema pero no saldrá en el reporte impreso ni PDF)" style="padding:4px 9px;font-size:11px;font-weight:600;background:var(--color-bg);color:var(--text-muted);border:1px solid var(--border-subtle);border-radius:4px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;">
+                              <span>🚫 Omitir</span>
+                            </button>
+                          `}
+                          ${f.isManual ? `
+                            <button type="button" class="report-del-btn" onclick="ReportsEngine.removeManualFinding('${f.id}')" title="Eliminar este requisito manual" style="margin-top:2px;">✕ Eliminar</button>
+                          ` : ''}
+                        </div>
                       </td>
                     </tr>
                   `).join("")}
@@ -1072,19 +1230,19 @@ const ReportsEngine = {
           <!-- BLOQUE COLAPSABLE DE ÍTEMS CONFORMES -->
           <div class="report-compliant-box">
             <div class="report-compliant-toggle" onclick="ReportsEngine.toggleCompliantList()">
-              <span style="font-size:12.5px;font-weight:700;color:var(--text-main);">
-                &#10003; Requisitos y Documentos Conformes (${compliantItems.length} de ${compliantItems.length + findings.length})
+              <span style="font-size:12.5px;font-weight:700;color:var(--text-main);display:flex;align-items:center;gap:8px;">
+                <span style="color:#10B981;font-weight:900;">&#10003;</span> Requisitos y Documentos Conformes (${compliantItems.length} de ${compliantItems.length + findings.length})
               </span>
-              <span id="reportCompliantIcon" style="font-size:11.5px;font-weight:700;color:var(--color-primary);">
+              <span id="reportCompliantIcon" class="report-compliant-badge-btn" style="font-size:11.5px;font-weight:700;">
                 ${this.compliantCollapsed ? '▶ Ver lista' : '▼ Ocultar'}
               </span>
             </div>
             <div id="reportCompliantGrid" class="report-compliant-grid" style="display:${this.compliantCollapsed ? 'none' : 'grid'};">
               ${compliantItems.map((c) => `
                 <div class="report-compliant-pill">
-                  <span style="color:#10B981;font-weight:800;">&#10003;</span>
-                  <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${c.titulo}">${c.titulo}</span>
-                  <span style="margin-left:auto;font-size:10px;opacity:0.6;font-family:var(--font-mono);">${c.fase}</span>
+                  <span style="color:#10B981;font-weight:800;flex-shrink:0;">&#10003;</span>
+                  <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;" title="${c.titulo}">${c.titulo}</span>
+                  <span style="margin-left:auto;font-size:10px;opacity:0.65;font-family:var(--font-mono);flex-shrink:0;padding-left:6px;">${c.fase}</span>
                 </div>
               `).join("")}
             </div>
@@ -1150,6 +1308,7 @@ const ReportsEngine = {
     auditGlobal = auditGlobal || (window.App && App.auditGlobal) || {};
 
     const projectId = project.id || (window.App && App.currentProjectId);
+    const recF2 = (window.proyectosAuditados && projectId) ? window.proyectosAuditados[projectId] : null;
     const fase3State = this.getFase3State(projectId);
     const { findings } = this.collectAllFindings(project, auditGlobal);
 
@@ -1215,13 +1374,16 @@ const ReportsEngine = {
       };
     });
 
-    const rowsHtml = processedFindings.length === 0 ? `
+    // Filtrar las observaciones omitidas a consideración del revisor para que NO salgan en la impresión
+    const nonOmittedFindings = processedFindings.filter(f => !f.omitido);
+
+    const rowsHtml = nonOmittedFindings.length === 0 ? `
       <tr>
         <td colspan="3" style="text-align:center;padding:16px;color:#15803d;font-weight:700;border:1px solid #cbd5e1;">
           ✓ No se registran requisitos faltantes ni observaciones pendientes de subsanación. El expediente cumple satisfactoriamente la totalidad de compuertas técnicas.
         </td>
       </tr>
-    ` : processedFindings.map(f => `
+    ` : nonOmittedFindings.map(f => `
       <tr>
         <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
           <div style="font-weight:800;color:#0f172a;font-size:11.5px;">${this.escapeHtml(f.titulo)}</div>
@@ -1269,7 +1431,7 @@ const ReportsEngine = {
         padding: 12mm 14mm !important;
         background: #FFFFFF !important;
       }
-      header, footer, .app-header, .app-footer, .sidebar, .no-print, .print-header, .print-footer {
+      header, footer, .app-header, .app-footer, .sidebar, .no-print, .print-header, .print-footer, .row-omitted-finding {
         display: none !important;
       }
       tr {
@@ -1434,7 +1596,7 @@ const ReportsEngine = {
   <!-- 2. LA TABLA DE LA MATRIZ DE REQUISITOS Y DOCUMENTOS FALTANTES / NO ACEPTADOS -->
   <div class="sheet-matriz-faltantes">
     <div class="sheet-matriz-title">
-      <span>📋</span> Matriz de Requisitos y Documentos Faltantes / No Aceptados (${processedFindings.length})
+      <span>📋</span> Matriz de Requisitos y Documentos Faltantes / No Aceptados (${nonOmittedFindings.length})
     </div>
     <div class="sheet-matriz-subtitle">
       Listado prioritario de observaciones técnicas y requisitos pendientes de subsanación:
@@ -1483,12 +1645,15 @@ const ReportsEngine = {
     const auditGlobal = App.auditGlobal || {};
     const fase3State = this.getFase3State(projectId);
     const { findings, compliantItems } = this.collectAllFindings(project, auditGlobal);
-    const isFavorable = findings.length === 0;
+    const nonOmittedFindings = findings.filter(f => !f.omitido);
+    const isFavorable = nonOmittedFindings.length === 0;
 
-    // Conteo estricto y real de Fase 2 (27 requisitos documentales de expedientesMap)
+    // Conteo estricto y real de Fase 2 (requisitos documentales de expedientesMap)
     const recF2 = (window.proyectosAuditados && projectId) ? window.proyectosAuditados[projectId] : null;
     const audit2Data = (recF2 && recF2.fase2) || (auditGlobal && auditGlobal.audit2) || {};
-    const items27List = (audit2Data && audit2Data.items) || (window.SIPRO_DATA && SIPRO_DATA.items27) || [];
+    const reportProcMode = (project && project.procesoEspecial) || (recF2 && recF2.procesoEspecial) || (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const isReport2026_2 = reportProcMode === "2026_2" || reportProcMode === "CONVENIOS_2026_2";
+    const items27List = (audit2Data && audit2Data.items) || (isReport2026_2 ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27) || [];
     let f2Conformes = 0;
     let f2Pendientes = 0;
     items27List.forEach((it) => {
@@ -1530,7 +1695,7 @@ const ReportsEngine = {
         generatedBlob = await this._buildDocxWithDocxJs({
           project, alcalde, ing, cuantiaReal, pesoAceroTotal, marcasOk,
           coberturaGIS, longKml, totalTramos, totalPuntos, f2Conformes, f2Pendientes,
-          findings, compliantItems, conceptoTexto, isFavorable
+          findings: nonOmittedFindings, compliantItems, conceptoTexto, isFavorable
         });
       } catch (err) {
         console.warn("Docx.js encontró un error al serializar documento, recurriendo a exportador Word compatible:", err);
@@ -1543,7 +1708,7 @@ const ReportsEngine = {
       const wordHtml = this._buildWordCompatibleHtml({
         project, alcalde, ing, cuantiaReal, pesoAceroTotal, marcasOk,
         coberturaGIS, longKml, totalTramos, totalPuntos, f2Conformes, f2Pendientes,
-        findings, compliantItems, conceptoTexto, isFavorable
+        findings: nonOmittedFindings, compliantItems, conceptoTexto, isFavorable
       });
       generatedBlob = new Blob(['\ufeff' + wordHtml], {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document;charset=utf-8'

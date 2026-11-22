@@ -58,6 +58,10 @@ const SpatialEngine = {
   // Índice de vías terciarias por código DANE del municipio (ej: '05234' -> [features])
   terciariaByMpio: {},
 
+  // Almacén aislado e indexado de redes viales por municipio y por proyecto (Previene persistencia errónea entre carpetas)
+  roadsByMunicipio: {},
+  roadsByProject: {},
+
   // Estado de visibilidad independiente por capa
   layerVisibility: {
     terciaria: true,
@@ -380,8 +384,9 @@ const SpatialEngine = {
    * Calcula el Bounding Box con margen de seguridad de 0.05 grados (~5 km) alrededor de todos los tramos
    */
   calculateProjectBbox(project) {
-    if (!project || (!project.georreferenciacion && !project.fase1B)) return null;
-    const geo = project.georreferenciacion || project.fase1B || {};
+    if (!project) return null;
+    if (project.bbox && project.bbox.minLon !== undefined) return project.bbox;
+    const geo = project.georreferenciacion || project.fase1B || project;
     const tramos = geo.tramos || [];
     const puntos = geo.puntosInspeccion || geo.puntosContraste || geo.puntos || [];
 
@@ -389,13 +394,18 @@ const SpatialEngine = {
     let count = 0;
 
     tramos.forEach(t => {
-      (t.coordenadas || []).forEach(c => {
-        if (c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
+      const coords = t.coordenadas || t.coords || [];
+      coords.forEach(c => {
+        const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : null);
+        const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : null);
+        if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+          // Filtrar a coordenadas territoriales de Antioquia / Colombia
+          if (lat < 4.0 || lat > 10.0 || lng < -78.5 || lng > -73.0) return;
           count++;
-          if (c.lng < minLon) minLon = c.lng;
-          if (c.lng > maxLon) maxLon = c.lng;
-          if (c.lat < minLat) minLat = c.lat;
-          if (c.lat > maxLat) maxLat = c.lat;
+          if (lng < minLon) minLon = lng;
+          if (lng > maxLon) maxLon = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
         }
       });
     });
@@ -403,13 +413,19 @@ const SpatialEngine = {
     puntos.forEach(p => {
       if (p.coordsTrack && p.coordsTrack.length > 0) {
         p.coordsTrack.forEach(c => {
-          count++;
-          if (c.lng < minLon) minLon = c.lng;
-          if (c.lng > maxLon) maxLon = c.lng;
-          if (c.lat < minLat) minLat = c.lat;
-          if (c.lat > maxLat) maxLat = c.lat;
+          const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : null);
+          const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : null);
+          if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+            if (lat < 4.0 || lat > 10.0 || lng < -78.5 || lng > -73.0) return;
+            count++;
+            if (lng < minLon) minLon = lng;
+            if (lng > maxLon) maxLon = lng;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+          }
         });
       } else if (p.lng !== undefined && p.lat !== undefined && p.lat !== 0) {
+        if (p.lat < 4.0 || p.lat > 10.0 || p.lng < -78.5 || p.lng > -73.0) return;
         count++;
         if (p.lng < minLon) minLon = p.lng;
         if (p.lng > maxLon) maxLon = p.lng;
@@ -514,6 +530,20 @@ const SpatialEngine = {
    */
   async obtenerRedVialParaProyecto(municipio, bbox, codMunicipio) {
     const daneCode = codMunicipio || (municipio ? this.getDaneCodeForMunicipio(municipio) : null);
+
+    // Retorno inmediato si ya fue descargada y cacheada para este municipio
+    if (daneCode && this.roadsByMunicipio && this.roadsByMunicipio[daneCode]) {
+      const cached = this.roadsByMunicipio[daneCode];
+      this.projectRoadsData = {
+        terciaria: cached.terciaria,
+        secundaria: cached.secundaria,
+        primaria: cached.primaria,
+        municipio: municipio,
+        daneCode: daneCode
+      };
+      return cached;
+    }
+
     const base = this.ARCGIS_BASE_URL;
 
     this.updateArcgisStatusIndicator("CONNECTING");
@@ -589,10 +619,29 @@ const SpatialEngine = {
     this.projectRoadsData.terciaria = { type: "FeatureCollection", features: tercFeatures };
     this.projectRoadsData.secundaria = { type: "FeatureCollection", features: secFeatures };
     this.projectRoadsData.primaria = { type: "FeatureCollection", features: primFeatures };
+    this.projectRoadsData.municipio = municipio;
+    this.projectRoadsData.daneCode = daneCode;
 
     if (daneCode) {
       this.terciariaByMpio = this.terciariaByMpio || {};
       this.terciariaByMpio[daneCode] = tercFeatures.filter(f => String(f.properties?.MUNICIPIO).trim() === daneCode);
+    }
+
+    const downloadedCollection = {
+      type: "FeatureCollection",
+      municipio: municipio,
+      daneCode: daneCode,
+      features: [...tercFeatures, ...secFeatures, ...primFeatures],
+      terciaria: this.projectRoadsData.terciaria,
+      secundaria: this.projectRoadsData.secundaria,
+      primaria: this.projectRoadsData.primaria
+    };
+
+    this.roadsByMunicipio = this.roadsByMunicipio || {};
+    if (daneCode) this.roadsByMunicipio[daneCode] = downloadedCollection;
+    if (municipio) {
+      const normM = typeof this.normalizeMpioName === "function" ? this.normalizeMpioName(municipio) : municipio.toLowerCase().trim();
+      this.roadsByMunicipio[normM] = downloadedCollection;
     }
 
     const totalDownloaded = tercFeatures.length + secFeatures.length + primFeatures.length;
@@ -604,13 +653,7 @@ const SpatialEngine = {
 
     this.updateLayerBadges();
 
-    return {
-      type: "FeatureCollection",
-      features: [...tercFeatures, ...secFeatures, ...primFeatures],
-      terciaria: this.projectRoadsData.terciaria,
-      secundaria: this.projectRoadsData.secundaria,
-      primaria: this.projectRoadsData.primaria
-    };
+    return downloadedCollection;
   },
 
   /**
@@ -622,12 +665,27 @@ const SpatialEngine = {
     project = project || this.currentProject;
     if (!project) return;
 
-    const bbox = this.calculateProjectBbox(project);
+    const pId = project.id || project.codigo || (window.App && window.App.currentProjectId);
     const activeMpio = project.municipio;
     const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+    const bbox = this.calculateProjectBbox(project);
 
     // Obtener red vial garantizada para el entorno del proyecto desde ArcGIS Circular 10
-    await this.obtenerRedVialParaProyecto(activeMpio, bbox, project.codMunicipio || daneCode);
+    const downloadedRoads = await this.obtenerRedVialParaProyecto(activeMpio, bbox, project.codMunicipio || daneCode);
+
+    // Guardar siempre en caché indexada por proyecto
+    this.roadsByProject = this.roadsByProject || {};
+    if (pId && downloadedRoads) {
+      this.roadsByProject[pId] = downloadedRoads;
+    }
+
+    // Prevenir race-condition si el usuario cambió de proyecto/carpeta mientras se descargaba
+    const activePIdNow = (window.App && window.App.currentProjectId) || (this.currentProject && (this.currentProject.id || this.currentProject.codigo));
+    const activeMpioNow = (this.currentProject && this.currentProject.municipio) || (window.App && window.App.currentProject && window.App.currentProject.municipio);
+    if (activePIdNow && pId !== activePIdNow && typeof this.municipiosCoinciden === "function" && !this.municipiosCoinciden(activeMpio, activeMpioNow)) {
+      console.log(`[SpatialEngine] Descarga en segundo plano de vías para ${activeMpio} finalizada y almacenada en caché del proyecto.`);
+      return;
+    }
 
     const tercFeatures = (this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features) || [];
     const secFeatures = (this.projectRoadsData.secundaria && this.projectRoadsData.secundaria.features) || [];
@@ -636,13 +694,14 @@ const SpatialEngine = {
     // Guardar en expedientesMap[proyectoId].fase1B.redVialRecortada (Sin tocar window.redVialDepartamentalCompleta)
     const redRecortada = {
       type: "FeatureCollection",
+      municipio: activeMpio,
+      daneCode: daneCode,
       features: [...tercFeatures, ...secFeatures, ...primFeatures],
       terciaria: this.projectRoadsData.terciaria,
       secundaria: this.projectRoadsData.secundaria,
       primaria: this.projectRoadsData.primaria
     };
 
-    const pId = project.id || project.codigo || (window.App && window.App.currentProjectId);
     const expMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || (window.App && window.App.expedientesMap);
     if (expMap && pId && expMap[pId]) {
       if (!expMap[pId].fase1B) expMap[pId].fase1B = project.georreferenciacion || {};
@@ -652,14 +711,20 @@ const SpatialEngine = {
     if (project.fase1B) project.fase1B.redVialRecortada = redRecortada;
 
     const totalCount = tercFeatures.length + secFeatures.length + primFeatures.length;
-    if (arcgisData && (arcgisData.terciaria.features.length > 0 || arcgisData.secundaria.features.length > 0 || arcgisData.primaria.features.length > 0)) {
+    if (downloadedRoads && totalCount > 0) {
       this.updateArcgisStatusIndicator("CONNECTED", totalCount);
     } else {
       this.updateArcgisStatusIndicator("OFFLINE_FALLBACK");
     }
 
     this.updateLayerBadges();
-    this.recalculateProjectProximity(project);
+    const hasExistingAnalysis = Boolean(
+      (project.georreferenciacion && project.georreferenciacion.tramos && project.georreferenciacion.tramos[0] && project.georreferenciacion.tramos[0].subAnalysis) ||
+      (project.fase1B && project.fase1B.tramos && project.fase1B.tramos[0] && project.fase1B.tramos[0].subAnalysis)
+    );
+    if (!hasExistingAnalysis) {
+      this.recalculateProjectProximity(project);
+    }
     this.renderTerciariaLayer();
     if (this.layerVisibility.secundaria) this.renderSecundariaLayer();
     if (this.layerVisibility.primaria) this.renderPrimariaLayer();
@@ -1131,6 +1196,60 @@ const SpatialEngine = {
   },
 
   /**
+   * Normaliza cadenas de nombres municipales para comparaciones territoriales exactas
+   */
+  normalizeMpioName(name) {
+    if (!name) return "";
+    return String(name)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "")
+      .trim();
+  },
+
+  /**
+   * Determina si dos nombres municipales corresponden exactamente al mismo territorio (sin falsos positivos por inclusión de texto)
+   */
+  municipiosCoinciden(m1, m2) {
+    if (!m1 || !m2) return false;
+    const n1 = this.normalizeMpioName(m1).trim();
+    const n2 = this.normalizeMpioName(m2).trim();
+    if (n1 === n2) return true;
+    const c1 = this.getDaneCodeForMunicipio(m1);
+    const c2 = this.getDaneCodeForMunicipio(m2);
+    if (c1 && c2 && c1 === c2) return true;
+    return false;
+  },
+
+  /**
+   * Calcula el Bounding Box [minLat, minLng, maxLat, maxLng] de un feature vial y lo cachea
+   */
+  calculateFeatureBbox(f) {
+    if (!f || !f.geometry) return null;
+    if (f._bbox) return f._bbox;
+    let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+    const geom = f.geometry;
+    let lines = geom.type === "LineString" ? [geom.coordinates] : (geom.type === "MultiLineString" ? geom.coordinates : []);
+    for (let l = 0; l < lines.length; l++) {
+      const line = lines[l];
+      for (let i = 0; i < line.length; i++) {
+        const lng = line[i][0];
+        const lat = line[i][1];
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      }
+    }
+    if (minLat !== Infinity) {
+      f._bbox = [minLat, minLng, maxLat, maxLng];
+      return f._bbox;
+    }
+    return null;
+  },
+
+  /**
    * Cálculo geométrico exacto (Proyección Punto-a-Segmento en metros locales):
    * Retorna { distM, latEje, lngEje, t }
    */
@@ -1177,32 +1296,69 @@ const SpatialEngine = {
    */
   getCandidateFeatures(project) {
     const candidates = [];
-    const activeMpio = project && project.municipio;
-    const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+    const targetProject = project || this.currentProject || {};
+    const activeMpio = targetProject && targetProject.municipio;
+    const daneCode = targetProject.codMunicipio || targetProject.daneCode || (activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null);
+    const pId = targetProject.id || targetProject.codigo || (window.App && window.App.currentProjectId);
+    const normMpio = this.normalizeMpioName(activeMpio);
 
-    // 1. Redes recortadas del proyecto
-    if (this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features && this.projectRoadsData.terciaria.features.length > 0) {
-      candidates.push(...this.projectRoadsData.terciaria.features);
-    } else if (daneCode && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
+    // 1. Redes recortadas del proyecto (Solo si coinciden estrictamente con este municipio/proyecto)
+    let roadsData = null;
+    if (this.projectRoadsData && (this.projectRoadsData.projectId === pId || this.municipiosCoinciden(this.projectRoadsData.municipio, activeMpio))) {
+      roadsData = this.projectRoadsData;
+    } else if (pId && this.roadsByProject && this.roadsByProject[pId]) {
+      roadsData = this.roadsByProject[pId];
+    } else if (targetProject.fase1B && targetProject.fase1B.redVialRecortada) {
+      roadsData = targetProject.fase1B.redVialRecortada;
+    } else if (targetProject.georreferenciacion && targetProject.georreferenciacion.redVialRecortada) {
+      roadsData = targetProject.georreferenciacion.redVialRecortada;
+    } else if (daneCode && this.roadsByMunicipio && this.roadsByMunicipio[daneCode]) {
+      roadsData = this.roadsByMunicipio[daneCode];
+    } else if (normMpio && this.roadsByMunicipio && this.roadsByMunicipio[normMpio]) {
+      roadsData = this.roadsByMunicipio[normMpio];
+    }
+
+    if (roadsData && roadsData.terciaria && Array.isArray(roadsData.terciaria.features) && roadsData.terciaria.features.length > 0) {
+      candidates.push(...roadsData.terciaria.features);
+    } else if (daneCode && this.terciariaByMpio && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
       candidates.push(...this.terciariaByMpio[daneCode]);
-    } else if (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.terciaria && window.redVialDepartamentalCompleta.terciaria.features) {
+    } else if (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.terciaria && window.redVialDepartamentalCompleta.terciaria.features && !this.filterByActiveMunicipio) {
       candidates.push(...window.redVialDepartamentalCompleta.terciaria.features);
-    } else if (this.cachedGeoData.terciaria && this.cachedGeoData.terciaria.features) {
+    } else if (this.cachedGeoData.terciaria && this.cachedGeoData.terciaria.features && !this.filterByActiveMunicipio) {
       candidates.push(...this.cachedGeoData.terciaria.features);
     }
 
     // Corredores Secundarios
-    if (this.projectRoadsData.secundaria && this.projectRoadsData.secundaria.features) {
-      candidates.push(...this.projectRoadsData.secundaria.features);
-    } else if (this.cachedGeoData.secundaria && this.cachedGeoData.secundaria.features) {
+    if (roadsData && roadsData.secundaria && Array.isArray(roadsData.secundaria.features) && roadsData.secundaria.features.length > 0) {
+      candidates.push(...roadsData.secundaria.features);
+    } else if (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.secundaria && window.redVialDepartamentalCompleta.secundaria.features && !this.filterByActiveMunicipio) {
+      candidates.push(...window.redVialDepartamentalCompleta.secundaria.features);
+    } else if (this.cachedGeoData.secundaria && this.cachedGeoData.secundaria.features && !this.filterByActiveMunicipio) {
       candidates.push(...this.cachedGeoData.secundaria.features);
     }
 
     // Corredores Primarios
-    if (this.projectRoadsData.primaria && this.projectRoadsData.primaria.features) {
-      candidates.push(...this.projectRoadsData.primaria.features);
-    } else if (this.cachedGeoData.primaria && this.cachedGeoData.primaria.features) {
+    if (roadsData && roadsData.primaria && Array.isArray(roadsData.primaria.features) && roadsData.primaria.features.length > 0) {
+      candidates.push(...roadsData.primaria.features);
+    } else if (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.primaria && window.redVialDepartamentalCompleta.primaria.features && !this.filterByActiveMunicipio) {
+      candidates.push(...window.redVialDepartamentalCompleta.primaria.features);
+    } else if (this.cachedGeoData.primaria && this.cachedGeoData.primaria.features && !this.filterByActiveMunicipio) {
       candidates.push(...this.cachedGeoData.primaria.features);
+    }
+
+    // Capa Personalizada / Subida
+    if (this.cachedGeoData.custom && this.cachedGeoData.custom.features) {
+      candidates.push(...this.cachedGeoData.custom.features);
+    }
+
+    // Aplicar filtro espacial estricto por Bounding Box del proyecto activo
+    // NUNCA permitir que analyzeTrackSubSegments evalúe miles de vías innecesarias en Antioquia
+    const bbox = this.calculateProjectBbox(targetProject);
+    if (bbox && candidates.length > 40) {
+      const filtered = this.filterFeaturesByBbox(candidates, bbox);
+      if (filtered && filtered.length > 0) {
+        return filtered;
+      }
     }
 
     return candidates;
@@ -1226,12 +1382,27 @@ const SpatialEngine = {
       };
     }
 
+    // Pre-filtrar features candidatas si hay más de 30 mediante BBox individual precalculado
+    let feats = candidateFeatures;
+    if (feats.length > 30) {
+      const margin = 0.05; // ~5 km
+      feats = feats.filter(f => {
+        if (!f._bbox) {
+          f._bbox = this.calculateFeatureBbox(f);
+        }
+        if (!f._bbox) return true;
+        return latP >= f._bbox[0] - margin && latP <= f._bbox[2] + margin &&
+               lngP >= f._bbox[1] - margin && lngP <= f._bbox[3] + margin;
+      });
+      if (feats.length === 0) feats = candidateFeatures.slice(0, 30);
+    }
+
     let minDist = Infinity;
     let bestProj = null;
     let bestFeature = null;
 
-    for (let fIdx = 0; fIdx < candidateFeatures.length; fIdx++) {
-      const feat = candidateFeatures[fIdx];
+    for (let fIdx = 0; fIdx < feats.length; fIdx++) {
+      const feat = feats[fIdx];
       const geom = feat.geometry;
       if (!geom) continue;
 
@@ -1350,8 +1521,48 @@ const SpatialEngine = {
   analyzeTrackSubSegments(coords, candidates) {
     if (!coords || coords.length < 2) return null;
 
-    // 1. Interpolación de puntos a intervalos de máximo 5 metros
-    const STEP_M = 5.0;
+    // 0. Pre-filtrar candidatos geográficamente para este track
+    let trackCandidates = candidates;
+    if (candidates && candidates.length > 25) {
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      for (let i = 0; i < coords.length; i++) {
+        const c = coords[i];
+        const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : 0);
+        const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : 0);
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      }
+      const margin = 0.045; // ~5 km
+      const filtered = candidates.filter(f => {
+        if (!f._bbox) f._bbox = this.calculateFeatureBbox(f);
+        if (!f._bbox) return true;
+        return maxLat >= f._bbox[0] - margin && minLat <= f._bbox[2] + margin &&
+               maxLng >= f._bbox[1] - margin && minLng <= f._bbox[3] + margin;
+      });
+      if (filtered && filtered.length > 0) {
+        trackCandidates = filtered;
+      }
+    }
+
+    // 1. Interpolación de puntos con límite dinámico de pasos para máxima fluidez
+    let roughTrackLen = 0;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const p1 = coords[i]; const p2 = coords[i + 1];
+      const lat1 = p1.lat !== undefined ? p1.lat : (Array.isArray(p1) ? p1[0] : 0);
+      const lng1 = p1.lng !== undefined ? p1.lng : (Array.isArray(p1) ? p1[1] : 0);
+      const lat2 = p2.lat !== undefined ? p2.lat : (Array.isArray(p2) ? p2[0] : 0);
+      const lng2 = p2.lng !== undefined ? p2.lng : (Array.isArray(p2) ? p2[1] : 0);
+      roughTrackLen += this.haversineDistanceM(lat1, lng1, lat2, lng2);
+    }
+
+    const MAX_STEPS = 100;
+    let STEP_M = 10.0;
+    if (roughTrackLen > MAX_STEPS * STEP_M) {
+      STEP_M = roughTrackLen / MAX_STEPS;
+    }
+
     const sampledPoints = [];
     let cumulativeDistM = 0;
 
@@ -1385,7 +1596,7 @@ const SpatialEngine = {
 
     const totalTrackLengthM = cumulativeDistM;
 
-    // 2. Evaluación de cada sub-segmento (punto j a punto j+1)
+    // 2. Evaluación de cada sub-segmento (punto j a punto j+1) con trackCandidates
     const evaluatedSteps = [];
     let vMax = null;
     let maxDistM = 0;
@@ -1397,7 +1608,7 @@ const SpatialEngine = {
       const midLat = (ptA.lat + ptB.lat) / 2;
       const midLng = (ptA.lng + ptB.lng) / 2;
 
-      const proj = this.findClosestProjectionToRoads(midLat, midLng, candidates);
+      const proj = this.findClosestProjectionToRoads(midLat, midLng, trackCandidates);
       const distM = proj.distM;
       const cumple = distM <= this.BUFFER_TOLERANCIA_M;
 
@@ -1507,20 +1718,28 @@ const SpatialEngine = {
     const geo = project.georreferenciacion || project.fase1B || {};
     var tramosConformes = 0;
 
-    // Deduplicación defensiva de tramos por coordenadas exactas
+    // Filtrado territorial y deduplicación defensiva de tramos por coordenadas exactas
     if (geo.tramos && Array.isArray(geo.tramos)) {
       const seenT = new Set();
       geo.tramos = geo.tramos.filter(t => {
         const coords = t.coordenadas || [];
+        if (coords.length > 0) {
+          const hasInAntioquia = coords.some(c => {
+            const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : 0);
+            const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : 0);
+            return lat >= 5.0 && lat <= 9.2 && lng >= -77.6 && lng <= -73.6;
+          });
+          if (!hasInAntioquia) return false;
+        }
         if (coords.length > 1) {
-          const firstLat = coords[0].lat;
-          const firstLng = coords[0].lng;
+          const firstLat = coords[0].lat !== undefined ? coords[0].lat : (Array.isArray(coords[0]) ? coords[0][0] : 0);
+          const firstLng = coords[0].lng !== undefined ? coords[0].lng : (Array.isArray(coords[0]) ? coords[0][1] : 0);
           const midIdx = Math.floor(coords.length / 2);
-          const midLat = coords[midIdx].lat;
-          const midLng = coords[midIdx].lng;
+          const midLat = coords[midIdx].lat !== undefined ? coords[midIdx].lat : (Array.isArray(coords[midIdx]) ? coords[midIdx][0] : 0);
+          const midLng = coords[midIdx].lng !== undefined ? coords[midIdx].lng : (Array.isArray(coords[midIdx]) ? coords[midIdx][1] : 0);
           const lastIdx = coords.length - 1;
-          const lastLat = coords[lastIdx].lat;
-          const lastLng = coords[lastIdx].lng;
+          const lastLat = coords[lastIdx].lat !== undefined ? coords[lastIdx].lat : (Array.isArray(coords[lastIdx]) ? coords[lastIdx][0] : 0);
+          const lastLng = coords[lastIdx].lng !== undefined ? coords[lastIdx].lng : (Array.isArray(coords[lastIdx]) ? coords[lastIdx][1] : 0);
           const key = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
           const revKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
           if (seenT.has(key) || seenT.has(revKey)) return false;
@@ -1531,17 +1750,27 @@ const SpatialEngine = {
       });
     }
 
-    // Deduplicación defensiva de puntos de inspección por coordenadas exactas
+    // Filtrado territorial y deduplicación defensiva de puntos de inspección por coordenadas exactas
     if (geo.puntos && Array.isArray(geo.puntos) && geo.puntos !== geo.puntosContraste) {
       const seenP = new Set();
       geo.puntos = geo.puntos.filter(p => {
         const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
         const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
+        if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) return false;
         if (lat && lng) {
           const key = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
           if (seenP.has(key)) return false;
           seenP.add(key);
         }
+        return true;
+      });
+    }
+
+    if (geo.puntosInspeccion && Array.isArray(geo.puntosInspeccion)) {
+      geo.puntosInspeccion = geo.puntosInspeccion.filter(p => {
+        const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
+        const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
+        if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) return false;
         return true;
       });
     }
@@ -1818,13 +2047,23 @@ const SpatialEngine = {
     let subtitleText = "";
 
     const activeMpio = this.currentProject && this.currentProject.municipio;
+    const pId = this.currentProject ? (this.currentProject.id || this.currentProject.codigo) : null;
+    const normMpio = this.normalizeMpioName(activeMpio);
 
     if (this.filterByActiveMunicipio) {
       // 1. MODO RECORTADA AL MUNICIPIO / PROYECTO
       const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
       let mpioFeatures = [];
-      if (this.projectRoadsData && this.projectRoadsData.terciaria && this.projectRoadsData.terciaria.features && this.projectRoadsData.terciaria.features.length > 0) {
-        mpioFeatures = [...this.projectRoadsData.terciaria.features];
+      const roadsData = (this.projectRoadsData && (this.projectRoadsData.projectId === pId || this.municipiosCoinciden(this.projectRoadsData.municipio, activeMpio)))
+        ? this.projectRoadsData
+        : (pId && this.roadsByProject && this.roadsByProject[pId]) ||
+          (this.currentProject && this.currentProject.fase1B && this.currentProject.fase1B.redVialRecortada) ||
+          (this.currentProject && this.currentProject.georreferenciacion && this.currentProject.georreferenciacion.redVialRecortada) ||
+          (daneCode && this.roadsByMunicipio && this.roadsByMunicipio[daneCode]) ||
+          (normMpio && this.roadsByMunicipio && this.roadsByMunicipio[normMpio]) || null;
+
+      if (roadsData && roadsData.terciaria && Array.isArray(roadsData.terciaria.features) && roadsData.terciaria.features.length > 0) {
+        mpioFeatures = [...roadsData.terciaria.features];
       } else if (daneCode && this.terciariaByMpio && this.terciariaByMpio[daneCode] && this.terciariaByMpio[daneCode].length > 0) {
         mpioFeatures = [...this.terciariaByMpio[daneCode]];
       }
@@ -1901,7 +2140,17 @@ const SpatialEngine = {
 
     let featuresToRender = [];
     if (this.filterByActiveMunicipio) {
-      featuresToRender = (this.projectRoadsData && this.projectRoadsData.secundaria && this.projectRoadsData.secundaria.features) || [];
+      const pId = this.currentProject ? (this.currentProject.id || this.currentProject.codigo) : null;
+      const activeMpio = this.currentProject && this.currentProject.municipio;
+      const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+      const normMpio = this.normalizeMpioName(activeMpio);
+      const roadsData = (this.projectRoadsData && (this.projectRoadsData.projectId === pId || this.municipiosCoinciden(this.projectRoadsData.municipio, activeMpio)))
+        ? this.projectRoadsData
+        : (pId && this.roadsByProject && this.roadsByProject[pId]) ||
+          (this.currentProject && this.currentProject.fase1B && this.currentProject.fase1B.redVialRecortada) ||
+          (daneCode && this.roadsByMunicipio && this.roadsByMunicipio[daneCode]) ||
+          (normMpio && this.roadsByMunicipio && this.roadsByMunicipio[normMpio]) || null;
+      featuresToRender = (roadsData && roadsData.secundaria && roadsData.secundaria.features) || [];
     } else {
       featuresToRender = (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.secundaria && window.redVialDepartamentalCompleta.secundaria.features)
         || ((this.cachedGeoData.secundaria && this.cachedGeoData.secundaria.features) || []);
@@ -1957,7 +2206,17 @@ const SpatialEngine = {
 
     let featuresToRender = [];
     if (this.filterByActiveMunicipio) {
-      featuresToRender = (this.projectRoadsData && this.projectRoadsData.primaria && this.projectRoadsData.primaria.features) || [];
+      const pId = this.currentProject ? (this.currentProject.id || this.currentProject.codigo) : null;
+      const activeMpio = this.currentProject && this.currentProject.municipio;
+      const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+      const normMpio = this.normalizeMpioName(activeMpio);
+      const roadsData = (this.projectRoadsData && (this.projectRoadsData.projectId === pId || this.municipiosCoinciden(this.projectRoadsData.municipio, activeMpio)))
+        ? this.projectRoadsData
+        : (pId && this.roadsByProject && this.roadsByProject[pId]) ||
+          (this.currentProject && this.currentProject.fase1B && this.currentProject.fase1B.redVialRecortada) ||
+          (daneCode && this.roadsByMunicipio && this.roadsByMunicipio[daneCode]) ||
+          (normMpio && this.roadsByMunicipio && this.roadsByMunicipio[normMpio]) || null;
+      featuresToRender = (roadsData && roadsData.primaria && roadsData.primaria.features) || [];
     } else {
       featuresToRender = (window.redVialDepartamentalCompleta && window.redVialDepartamentalCompleta.primaria && window.redVialDepartamentalCompleta.primaria.features)
         || ((this.cachedGeoData.primaria && this.cachedGeoData.primaria.features) || []);
@@ -2325,6 +2584,8 @@ const SpatialEngine = {
       const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
       const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
       if (!lat || !lng) return;
+      // Filtro territorial Antioquia: descartar puntos fuera de límites departamentales
+      if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) return;
 
       const isOk = p.cumple;
       const pointLatLng = [lat, lng];
@@ -2417,6 +2678,8 @@ const SpatialEngine = {
         lng2 = v.coordMasCercanaEje.lng;
       }
       if (lat1 == null || lng1 == null || lat2 == null || lng2 == null || isNaN(lat1) || isNaN(lat2)) return null;
+      // Filtro territorial: descartar vectores cuyo origen KML esté fuera de Antioquia
+      if (lat1 < 5.0 || lat1 > 9.2 || lng1 < -77.6 || lng1 > -73.6) return null;
 
       const dist = v.distM !== undefined ? v.distM : (v.distanciaEjeM || 0);
       const cumple = dist <= this.BUFFER_TOLERANCIA_M;
@@ -2636,10 +2899,16 @@ const SpatialEngine = {
 
     tramos.forEach(t => {
       (t.coordenadas || []).forEach(c => {
+        let lat, lng;
         if (Array.isArray(c) && c.length >= 2 && !isNaN(c[0]) && !isNaN(c[1])) {
-          allLatLngs.push([c[0], c[1]]);
+          lat = c[0];
+          lng = c[1];
         } else if (c && c.lat !== undefined && c.lng !== undefined && !isNaN(c.lat) && !isNaN(c.lng)) {
-          allLatLngs.push([c.lat, c.lng]);
+          lat = c.lat;
+          lng = c.lng;
+        }
+        if (lat !== undefined && lng !== undefined && lat >= 5.0 && lat <= 9.2 && lng >= -77.6 && lng <= -73.6) {
+          allLatLngs.push([lat, lng]);
         }
       });
     });
@@ -2648,11 +2917,15 @@ const SpatialEngine = {
       const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
       const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
       if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
-        allLatLngs.push([lat, lng]);
+        if (lat >= 5.0 && lat <= 9.2 && lng >= -77.6 && lng <= -73.6) {
+          allLatLngs.push([lat, lng]);
+        }
       } else if (p.coordsTrack && p.coordsTrack.length > 0) {
         p.coordsTrack.forEach(c => {
           if (c.lat !== undefined && c.lng !== undefined && !isNaN(c.lat) && !isNaN(c.lng)) {
-            allLatLngs.push([c.lat, c.lng]);
+            if (c.lat >= 5.0 && c.lat <= 9.2 && c.lng >= -77.6 && c.lng <= -73.6) {
+              allLatLngs.push([c.lat, c.lng]);
+            }
           }
         });
       }
@@ -2793,7 +3066,57 @@ const SpatialEngine = {
         this.leafletMap.createPane('tramosProyectoPane');
         this.leafletMap.getPane('tramosProyectoPane').style.zIndex = '680';
       }
+      // Limpieza atómica de todas las capas anteriores para aislar completamente el cambio entre carpetas/municipios
+      if (this.layers.terciariaLayer) this.layers.terciariaLayer.clearLayers();
+      if (this.layers.secundariaLayer) this.layers.secundariaLayer.clearLayers();
+      if (this.layers.primariaLayer) this.layers.primariaLayer.clearLayers();
+      if (this.layers.customLayer) this.layers.customLayer.clearLayers();
+      if (this.layers.bufferLayer) this.layers.bufferLayer.clearLayers();
+      if (this.layers.projectTrackLayer) this.layers.projectTrackLayer.clearLayers();
+      if (this.layers.pointsLayer) this.layers.pointsLayer.clearLayers();
+      if (this.layers.measurementVectorsLayer) this.layers.measurementVectorsLayer.clearLayers();
     }
+
+    const pId = this.currentProject.id || this.currentProject.codigo || (window.App && window.App.currentProjectId);
+    const activeMpio = this.currentProject.municipio;
+    const daneCode = activeMpio ? this.getDaneCodeForMunicipio(activeMpio) : null;
+    const normMpio = this.normalizeMpioName(activeMpio);
+
+    this.roadsByProject = this.roadsByProject || {};
+    this.roadsByMunicipio = this.roadsByMunicipio || {};
+
+    const savedRoads = (pId && this.roadsByProject[pId]) ||
+                       (this.currentProject.fase1B && this.currentProject.fase1B.redVialRecortada) ||
+                       (this.currentProject.georreferenciacion && this.currentProject.georreferenciacion.redVialRecortada) ||
+                       (daneCode && this.roadsByMunicipio[daneCode]) ||
+                       (normMpio && this.roadsByMunicipio[normMpio]) || null;
+
+    if (savedRoads && (savedRoads.terciaria || savedRoads.features)) {
+      this.projectRoadsData = {
+        municipio: activeMpio,
+        daneCode: daneCode,
+        projectId: pId,
+        terciaria: savedRoads.terciaria || { type: "FeatureCollection", features: savedRoads.features || [] },
+        secundaria: savedRoads.secundaria || { type: "FeatureCollection", features: [] },
+        primaria: savedRoads.primaria || { type: "FeatureCollection", features: [] }
+      };
+    } else {
+      // Si no tenemos vías previas de este municipio específico, reiniciar projectRoadsData a vacío
+      // ¡JAMÁS dejar las vías del municipio anterior!
+      this.projectRoadsData = {
+        municipio: activeMpio,
+        daneCode: daneCode,
+        projectId: pId,
+        terciaria: { type: "FeatureCollection", features: [] },
+        secundaria: { type: "FeatureCollection", features: [] },
+        primaria: { type: "FeatureCollection", features: [] }
+      };
+    }
+
+    this.updateLayerBadges();
+
+    // Recalcular proximidad territorial y alineación con las vías aisladas de este municipio
+    this.recalculateProjectProximity(this.currentProject);
 
     // Renderizar capas viales
     this.renderTerciariaLayer();

@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIPRO-PH | Instructivo y Manual de Operación y Supervisión</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #00412E;
+      --primary-dark: #19370D;
+      --primary-light: #0B5A41;
+      --accent: #96BF8A;
+      --accent-bright: #BED66F;
+      --accent-soft: rgba(150, 191, 138, 0.15);
+      --bg: #F4F6F2;
+      --surface: #FFFFFF;
+      --surface-alt: #EBF0E7;
+      --text: #152414;
+      --text-muted: #536650;
+      --border: #D1DCD0;
+      --border-focus: #00412E;
+      --danger: #DC2626;
+      --danger-bg: #FEF2F2;
+      --danger-border: #FCA5A5;
+      --warning: #D97706;
+      --warning-bg: #FFFBEB;
+      --warning-border: #FDE68A;
+      --success: #15803D;
+      --success-bg: #F0FDF4;
+      --success-border: #86EFAC;
+      --info: #0284C7;
+      --info-bg: #F0F9FF;
+      --info-border: #BAE6FD;
+      --shadow-sm: 0 2px 8px rgba(0, 65, 46, 0.06);
+      --shadow-md: 0 6px 20px rgba(0, 65, 46, 0.10);
+      --shadow-lg: 0 12px 36px rgba(0, 65, 46, 0.14);
+      --radius: 12px;
+      --radius-lg: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 24px 16px 80px 16px;
+    }
+
+    .container {
+      max-width: 1140px;
+      margin: 0 auto;
+    }
+
+    /* HEADER INSTITUCIONAL */
+    .guide-header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 60%, var(--primary-dark) 100%);
+      color: #FFFFFF;
+      padding: 36px 32px;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      margin-bottom: 28px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .guide-header::before {
+      content: "";
+      position: absolute;
+      top: -60px;
+      right: -60px;
+      width: 240px;
+      height: 240px;
+      background: radial-gradient(circle, rgba(190, 214, 111, 0.25) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .header-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-logo-img {
+      height: 58px;
+      width: auto;
+      background: #FFFFFF;
+      padding: 6px 12px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .gov-badge-text {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      font-weight: 800;
+      color: var(--accent-bright);
+      display: block;
+    }
+
+    .gov-dept-text {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.85);
+      font-weight: 500;
+    }
+
+    .guide-title {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.25;
+      margin-bottom: 8px;
+      color: #FFFFFF;
+    }
+
+    .guide-subtitle {
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 400;
+      max-width: 820px;
+    }
+
+    .guide-meta-bar {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .guide-meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.12);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+      color: #FFFFFF;
+    }
+
+    /* SECCIÓN DE ADVERTENCIA AL SUPERVISOR (CRÍTICO) */
+    .supervisor-disclaimer-card {
+      background: #FFFDF9;
+      border: 2px solid var(--danger);
+      border-left-width: 8px;
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      margin-bottom: 32px;
+      box-shadow: 0 4px 16px rgba(220, 38, 38, 0.08);
+      position: relative;
+    }
+
+    .disclaimer-title-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .disclaimer-icon {
+      background: var(--danger);
+      color: #FFFFFF;
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .disclaimer-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--danger);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .disclaimer-body {
+      font-size: 14px;
+      color: #2F382E;
+      line-height: 1.65;
+    }
+
+    .disclaimer-body strong {
+      color: #B91C1C;
+    }
+
+    .disclaimer-list {
+      margin-top: 12px;
+      padding-left: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 8px;
+    }
+
+    .disclaimer-list li {
+      font-size: 13px;
+      color: #374151;
+    }
+
+    /* LINEA TEMPORAL SECUENCIAL (WORKFLOW EN LÍNEA) */
+    .workflow-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 24px;
+      margin-bottom: 32px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .section-title-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--primary);
+      background: var(--surface-alt);
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 6px;
+    }
+
+    .section-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--primary);
+      margin-bottom: 6px;
+    }
+
+    .section-description {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+
+    /* STEPPER GRAPHIC */
+    .stepper-timeline {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      position: relative;
+      margin-bottom: 16px;
+    }
+
+    .step-item {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 12px;
+      text-align: center;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .step-item:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-sm);
+      border-color: var(--primary);
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      color: #FFFFFF;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      margin: 0 auto 8px auto;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .step-tag {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .step-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.25;
+    }
+
+    /* BOTONES VISUALES SIMULADOS (EXACT REPLICAS) */
+    .visual-catalog-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .button-sample-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .btn-preview-container {
+      background: #F8FAF6;
+      border: 1px dashed var(--border);
+      padding: 16px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 64px;
+    }
+
+    /* CSS REPLICAS DE BOTONES DE SIPRO-PH */
+    .sipro-btn-primary {
+      background: linear-gradient(180deg, #00412E 0%, #084D38 100%);
+      color: #FFFFFF;
+      border: 1px solid #00412E;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 2px 6px rgba(0, 65, 46, 0.25);
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .sipro-btn-secondary {
+      background: #FFFFFF;
+      color: #19370D;
+      border: 1px solid #DCE5D8;
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .sipro-btn-modalidad-group {
+      display: inline-flex;
+      background: #E8EAE5;
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid #DCE5D8;
+      gap: 2px;
+    }
+
+    .sipro-btn-mod {
+      border: none;
+      background: transparent;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 800;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #556B2F;
+    }
+
+    .sipro-btn-mod.active {
+      background: #BED66F;
+      color: #19370D;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .sipro-gate-step {
+      background: #FFFFFF;
+      border: 2px solid #00412E;
+      border-radius: 10px;
+      padding: 8px 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 2px 6px rgba(0, 65, 46, 0.12);
+    }
+
+    .sipro-gate-number {
+      width: 26px;
+      height: 26px;
+      background: #00412E;
+      color: #FFFFFF;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .sipro-btn-cyan {
+      background: #0284C7;
+      color: #FFFFFF;
+      border: 1px solid #0284C7;
+      padding: 7px 13px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .sipro-btn-emerald {
+      background: #059669;
+      color: #FFFFFF;
+      border: 1px solid #10B981;
+      padding: 7px 13px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .sipro-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .sipro-status-pill.cumple {
+      background: #DCFCE7;
+      color: #15803D;
+      border: 1px solid #86EFAC;
+    }
+
+    .sipro-status-pill.nocumple {
+      background: #FEE2E2;
+      color: #B91C1C;
+      border: 1px solid #FCA5A5;
+    }
+
+    .sipro-status-pill.vencido {
+      background: #FEF3C7;
+      color: #B45309;
+      border: 1px solid #FDE68A;
+    }
+
+    .btn-desc-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--primary);
+    }
+
+    .btn-desc-location {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--info);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-desc-text {
+      font-size: 13px;
+      color: #4B5563;
+      line-height: 1.45;
+    }
+
+    .btn-desc-alert {
+      font-size: 12px;
+      color: #92400E;
+      background: #FEF3C7;
+      border-left: 3px solid #D97706;
+      padding: 6px 10px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+
+    /* SECCIÓN DETALLADA COMPUERTA POR COMPUERTA */
+    .gate-detail-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      margin-bottom: 28px;
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    .gate-detail-header {
+      background: linear-gradient(90deg, var(--surface-alt) 0%, #FFFFFF 100%);
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .gate-header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .gate-badge-circle {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--primary);
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      box-shadow: 0 4px 10px rgba(0, 65, 46, 0.2);
+    }
+
+    .gate-header-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--primary);
+    }
+
+    .gate-header-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .gate-detail-body {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .gate-grid-2col {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .gate-box {
+      background: #F9FAF8;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+    }
+
+    .gate-box-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .gate-box-content {
+      font-size: 13px;
+      color: #374151;
+      line-height: 1.55;
+    }
+
+    .supervisor-duty-box {
+      background: #FFFBEB;
+      border: 1px solid #FCD34D;
+      border-left: 5px solid #D97706;
+      border-radius: var(--radius);
+      padding: 16px 20px;
+    }
+
+    .supervisor-duty-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #92400E;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .supervisor-duty-list {
+      padding-left: 20px;
+      font-size: 13px;
+      color: #78350F;
+      line-height: 1.6;
+    }
+
+    /* TABLA RESUMEN DE LOS 27 ÍTEMS */
+    .table-container {
+      overflow-x: auto;
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .items-table th {
+      background: var(--primary);
+      color: #FFFFFF;
+      padding: 10px 14px;
+      font-weight: 700;
+    }
+
+    .items-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: #2F382E;
+    }
+
+    .items-table tr:nth-child(even) {
+      background: #F8FAF7;
+    }
+
+    .items-table tr:hover {
+      background: #F0F4EE;
+    }
+
+    /* PRINT STYLES */
+    @media print {
+      body {
+        padding: 0;
+        background: #FFFFFF;
+        color: #000000;
+      }
+      .guide-header {
+        background: #00412E !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .supervisor-disclaimer-card {
+        border: 2px solid #DC2626 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .gate-detail-card {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+
+    <!-- HEADER INSTITUCIONAL -->
+    <header class="guide-header">
+      <div class="header-top-row">
+        <div class="header-brand">
+          <img src="data:image/png;base64,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" alt="Gobernación de Antioquia" class="header-logo-img">
+          <div>
+            <span class="gov-badge-text">Gobernación de Antioquia</span>
+            <span class="gov-dept-text">Secretaría de Infraestructura Física · Dirección de Infraestructura Física y Apoyo Territorial</span>
+          </div>
+        </div>
+        <div class="guide-meta-pill">
+          <span>Manual Oficial · Versión 2026</span>
+        </div>
+      </div>
+
+      <h1 class="guide-title">SIPRO-PH: Instructivo y Manual de Operación y Supervisión</h1>
+      <p class="guide-subtitle">
+        Guía paso a paso en línea para la carga del expediente municipal, la auditoría secuencial por compuertas técnicas y la emisión de la Ficha de Observaciones Oficial.
+      </p>
+
+      <div class="guide-meta-bar">
+        <div>
+          <b>Desarrollado por:</b> Isabela Ramírez Restrepo &amp; Ronaldo Rubio Rodríguez
+        </div>
+        <div>
+          <b>Estándar:</b> Criterios Técnicos de Pavimentos con Placa-huella (Cuantía Mínima: 26.25 kg/m)
+        </div>
+      </div>
+    </header>
+
+    <!-- DECLARACIÓN CRÍTICA: ROL Y OBLIGATORIEDAD DEL SUPERVISOR -->
+    <section class="supervisor-disclaimer-card">
+      <div class="disclaimer-title-row">
+        <div class="disclaimer-icon">⚠️</div>
+        <h2 class="disclaimer-title">Advertencia Técnica y Jurídica: Alcance del Software y Rol del Supervisor</h2>
+      </div>
+      <div class="disclaimer-body">
+        <p>
+          El programa <strong>SIPRO-PH</strong> es un sistema de asistencia tecnológica, cálculo paramétrico y screening preliminar diseñado para agilizar y estructurar la revisión de expedientes municipales.
+        </p>
+        <p style="margin-top: 8px;">
+          <strong>EL PROGRAMA NO REEMPLAZA LAS FUNCIONES, EL JUICIO TÉCNICO NI LA RESPONSABILIDAD PROFESIONAL, CIVIL O PENAL DEL INGENIERO SUPERVISOR O AUDITOR.</strong> La inteligencia analítica del sistema realiza cálculos sobre los archivos aportados, pero es responsabilidad legal e ineludible del supervisor humano revisar con sumo cuidado cada uno de los componentes en las distintas compuertas:
+        </p>
+        <ul class="disclaimer-list">
+          <li><strong>Inspección visual de planos y despieces:</strong> Verificar escalas, notas técnicas, traslapos mínimos (0.54 m para varilla #3), ganchos a 135° (0.16 m) y separación de riostras.</li>
+          <li><strong>Autenticidad documental:</strong> Constatar firmas autógrafas o digitales verificables y matrículas COPNIA de los ingenieros proyectistas.</li>
+          <li><strong>Viabilidad en terreno:</strong> Comprobar que la georreferenciación satelital concuerde con la realidad física, pendientes y estabilidad geológica del corredor.</li>
+          <li><strong>Legalidad institucional:</strong> Verificar que las facultades del alcalde ante el Concejo Municipal y los paz y salvos estén expedidos en el mes calendario en curso.</li>
+          <li><strong>Firma vinculante:</strong> El concepto técnico final de aprobación o subsanación debe ser refrendado por el profesional responsable facultado.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- LÍNEA TEMPORAL SECUENCIAL (WORKFLOW EN LÍNEA) -->
+    <section class="workflow-section">
+      <span class="section-title-badge">Flujo Secuencial en Línea</span>
+      <h2 class="section-title">¿Cómo Usar el Programa? Guía Paso a Paso</h2>
+      <p class="section-description">
+        El sistema opera como un tren secuencial de compuertas estrictas ("Gatekeepers"). Cada fase debe superarse para garantizar la conformidad integral del proyecto.
+      </p>
+
+      <div class="stepper-timeline">
+        <div class="step-item">
+          <div class="step-number">0</div>
+          <div class="step-tag">Paso 0</div>
+          <div class="step-name">Abrir Sistema</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">1</div>
+          <div class="step-tag">Paso 1</div>
+          <div class="step-name">Cargar Carpeta Municipio</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">2</div>
+          <div class="step-tag">Paso 2</div>
+          <div class="step-name">Modalidad del Expediente</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">1A</div>
+          <div class="step-tag">Compuerta 1A</div>
+          <div class="step-name">Control Acero y Concreto</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">1B</div>
+          <div class="step-tag">Compuerta 1B</div>
+          <div class="step-name">Contraste Satelital Vial</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">1C</div>
+          <div class="step-tag">Compuerta 1C</div>
+          <div class="step-name">Coherencia Presupuestal</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">F2</div>
+          <div class="step-tag">Compuerta 2</div>
+          <div class="step-name">Lista 27 Requisitos</div>
+        </div>
+
+        <div class="step-item" style="border-color: var(--primary); background: #E8F5E9;">
+          <div class="step-number" style="background:#15803D;">F3</div>
+          <div class="step-tag" style="color:#15803D;">Salida Final</div>
+          <div class="step-name" style="font-weight:800;color:#15803D;">Ficha de Observaciones</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CATÁLOGO DE REFERENCIAS VISUALES (BOTONES Y CONTROLES) -->
+    <section class="workflow-section">
+      <span class="section-title-badge">Catálogo de Referencias Visuales</span>
+      <h2 class="section-title">Botones, Controles y Partes Clave de la Interfaz</h2>
+      <p class="section-description">
+        Identifique la forma, color, ícono y ubicación de cada botón para operar el programa con total seguridad.
+      </p>
+
+      <div class="visual-catalog-grid">
+
+        <!-- Botón Cargar Carpeta Municipio (Header) -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container">
+            <button class="sipro-btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              Cargar Carpeta Municipio
+            </button>
+          </div>
+          <div>
+            <div class="btn-desc-location">Cabecera Superior (Top Header) y Barra Lateral</div>
+            <div class="btn-desc-title">Carga del Expediente Municipal</div>
+            <div class="btn-desc-text">
+              Abre el explorador de Windows para seleccionar la carpeta física donde reposan los PDFs, archivos Excel y el KMZ del proyecto municipal.
+            </div>
+            <div class="btn-desc-alert">
+              💡 <b>Nota:</b> El sistema lee la carpeta en memoria local y detecta automáticamente el municipio contra los 125 municipios oficiales de Antioquia.
+            </div>
+          </div>
+        </div>
+
+        <!-- Conmutador de Modalidad -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container">
+            <div class="sipro-btn-modalidad-group">
+              <button class="sipro-btn-mod active">🧱 MATERIALES</button>
+              <button class="sipro-btn-mod">💰 RECURSOS</button>
+            </div>
+          </div>
+          <div>
+            <div class="btn-desc-location">Cabecera Superior · Junto al botón de carga</div>
+            <div class="btn-desc-title">Conmutador de Modalidad de Cofinanciación</div>
+            <div class="btn-desc-text">
+              Define la naturaleza del convenio:
+              <br>• <strong>🧱 MATERIALES:</strong> Entrega de cemento y acero (evalúa 27 ítems).
+              <br>• <strong>💰 RECURSOS:</strong> Transferencia económica (activa la Compuerta 1C y el ítem 28 de Presupuesto/APU).
+            </div>
+          </div>
+        </div>
+
+        <!-- Botón Nombrar / Editar Expediente -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container">
+            <button class="sipro-btn-secondary">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+              Nombrar Expediente
+            </button>
+          </div>
+          <div>
+            <div class="btn-desc-location">Cabecera Superior y Banner del Expediente</div>
+            <div class="btn-desc-title">Ajuste de Metadatos del Proyecto</div>
+            <div class="btn-desc-text">
+              Abre la ventana modal para corregir o complementar el nombre del proyecto, municipio, subregión, código de radicado, nombre del alcalde y secretario de planeación.
+            </div>
+          </div>
+        </div>
+
+        <!-- Botón Guardar Avance -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container">
+            <button class="sipro-btn-secondary" style="border-color:#10b981; color:#065f46;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              💾 Guardar Avance
+            </button>
+          </div>
+          <div>
+            <div class="btn-desc-location">Cabecera Superior y Pestaña Fase 3</div>
+            <div class="btn-desc-title">Persistencia de Auditoría</div>
+            <div class="btn-desc-text">
+              Guarda el archivo <code>sipro_auditoria.json</code> con todas las modificaciones, observaciones editadas y hallazgos manuales directamente en la carpeta del proyecto.
+            </div>
+          </div>
+        </div>
+
+        <!-- Barra de Compuertas Secuenciales -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container" style="gap:8px; flex-wrap:wrap;">
+            <div class="sipro-gate-step">
+              <div class="sipro-gate-number">1A</div>
+              <div style="font-size:11px;font-weight:700;">Acero</div>
+            </div>
+            <div class="sipro-gate-step">
+              <div class="sipro-gate-number">1B</div>
+              <div style="font-size:11px;font-weight:700;">Espacial</div>
+            </div>
+            <div class="sipro-gate-step">
+              <div class="sipro-gate-number">F2</div>
+              <div style="font-size:11px;font-weight:700;">27 Ítems</div>
+            </div>
+          </div>
+          <div>
+            <div class="btn-desc-location">Banner Superior de Navegación</div>
+            <div class="btn-desc-title">Pistas de Compuertas ("Gatekeepers")</div>
+            <div class="btn-desc-text">
+              Muestran en tiempo real si el proyecto pasa o está detenido en alguna compuerta. Al hacer clic sobre cualquier píldora se navega de inmediato a la pestaña respectiva.
+            </div>
+          </div>
+        </div>
+
+        <!-- Botones de Mapa Satelital (Fase 1B) -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container" style="gap:6px; flex-wrap:wrap;">
+            <button class="sipro-btn-emerald">🎯 Ir a Tramos / Zoom</button>
+            <button class="sipro-btn-cyan">📤 Subir Red Vial</button>
+          </div>
+          <div>
+            <div class="btn-desc-location">Pestaña Fase 1B · Contraste Espacial</div>
+            <div class="btn-desc-title">Herramientas SIG y Satelitales</div>
+            <div class="btn-desc-text">
+              • <strong>🎯 Ir a Tramos:</strong> Centra y hace zoom automáticamente en las coordenadas de la placa huella.
+              <br>• <strong>📤 Subir Red Vial:</strong> Carga un GeoJSON alternativo si no hay conexión a ArcGIS R10.
+            </div>
+          </div>
+        </div>
+
+        <!-- Botón Ver Documento en Matriz (Fase 2) -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container" style="gap:8px;">
+            <button class="sipro-btn-secondary" style="padding:5px 10px; font-size:11px;">
+              👁️ Ver Documento
+            </button>
+            <span class="sipro-status-pill cumple">✓ Conforme</span>
+            <span class="sipro-status-pill nocumple">✗ Faltante</span>
+          </div>
+          <div>
+            <div class="btn-desc-location">Pestaña Fase 2 · Tabla de 27 Requisitos</div>
+            <div class="btn-desc-title">Inspección Digital y Semáforos</div>
+            <div class="btn-desc-text">
+              Abre el visor modal PDF en pantalla completa para que el supervisor lea el archivo real aportado, examine fechas y compruebe sellos y firmas.
+            </div>
+          </div>
+        </div>
+
+        <!-- Botón Exportar Ficha PDF (Fase 3) -->
+        <div class="button-sample-card">
+          <div class="btn-preview-container">
+            <button class="sipro-btn-primary" style="background:#00412E; border-color:#00412E;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+              📄 Exportar Ficha PDF (Fase 3)
+            </button>
+          </div>
+          <div>
+            <div class="btn-desc-location">Header Superior y Pestaña Fase 3</div>
+            <div class="btn-desc-title">Emisión de la Ficha de Observaciones Oficial</div>
+            <div class="btn-desc-text">
+              Genera el reporte institucional imprimible con formato oficial de la Gobernación de Antioquia, consolidando todas las no conformidades para remitir al municipio.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- GUÍA DETALLADA COMPUERTA POR COMPUERTA -->
+    <section>
+      <span class="section-title-badge">Auditoría Meticulosa</span>
+      <h2 class="section-title">Instrucciones Detalladas por Compuerta</h2>
+      <p class="section-description">
+        Comprenda qué hace el sistema automáticamente y cuáles son las tareas ineludibles que el supervisor debe ejecutar en cada estación.
+      </p>
+
+      <!-- COMPUERTA 1A -->
+      <article class="gate-detail-card">
+        <div class="gate-detail-header">
+          <div class="gate-header-left">
+            <div class="gate-badge-circle">1A</div>
+            <div>
+              <div class="gate-header-title">Compuerta 1A: Control Estructural de Acero y Concreto</div>
+              <div class="gate-header-sub">Documento evaluado: Ítem 3 (Despiece de Acero y Memorias de Concreto en Excel / PDF)</div>
+            </div>
+          </div>
+          <span class="sipro-status-pill cumple">Mínimo: 26.25 kg/m</span>
+        </div>
+        <div class="gate-detail-body">
+          <div class="gate-grid-2col">
+            <div class="gate-box">
+              <div class="gate-box-title">⚙️ Lógica Automatizada del Sistema</div>
+              <div class="gate-box-content">
+                1. <strong>Extracción de Marcas de Acero:</strong> Lee longitudes, diámetros (#2, #3, #4, #5) y cantidades.<br>
+                2. <strong>Cálculo de Cuantía:</strong> Suma pesos nominales por metro lineal (kg/m) y lo compara contra el mínimo departamental de <strong>26.25 kg/m</strong>.<br>
+                3. <strong>Cubicación de Concreto:</strong> Calcula paramétricamente el volumen de huellas (21 MPa), ciclópeo central, riostras y cunetas.<br>
+                4. <strong>Estimación de Cemento:</strong> Aplica factor de ~7.2 sacos/m³ (~7.0 a 7.5 sacos por metro lineal de vía).
+              </div>
+            </div>
+            <div class="supervisor-duty-box">
+              <div class="supervisor-duty-title">👮 Obligación Ineludible del Supervisor Humano</div>
+              <ul class="supervisor-duty-list">
+                <li>Abrir el plano estructural y despiece original para corroborar que la armadura corresponda a la sección de placa huella estándar (banca de 4.30 m).</li>
+                <li>Verificar los traslapos mínimos reglamentarios: al menos <strong>0.54 m</strong> para varilla #3 y <strong>0.72 m</strong> para varilla #4.</li>
+                <li>Verificar que los ganchos a 135° cumplan con la longitud mínima de <strong>0.16 m</strong>.</li>
+                <li>Comprobar que las riostras estén moduladas exactamente cada <strong>3.00 m</strong> de separación máxima.</li>
+                <li>Validar que el cálculo de cemento incluya el desperdicio razonable y que las especificaciones indiquen resistencia f'c = 21 MPa (3.000 PSI).</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- COMPUERTA 1B -->
+      <article class="gate-detail-card">
+        <div class="gate-detail-header">
+          <div class="gate-header-left">
+            <div class="gate-badge-circle" style="background:#0284c7;">1B</div>
+            <div>
+              <div class="gate-header-title">Compuerta 1B: Contraste Espacial y Alineación Vial en Satélite</div>
+              <div class="gate-header-sub">Documento evaluado: Ítem 24 (Archivo KMZ, KML o GPX con coordenadas geográficas)</div>
+            </div>
+          </div>
+          <span class="sipro-status-pill cumple">Tolerancia: Buffer 10 m</span>
+        </div>
+        <div class="gate-detail-body">
+          <div class="gate-grid-2col">
+            <div class="gate-box">
+              <div class="gate-box-title">⚙️ Lógica Automatizada del Sistema</div>
+              <div class="gate-box-content">
+                1. <strong>Extracción de Coordenadas:</strong> Descomprime el KMZ con JSZip y dibuja las líneas de la intervención en Google Satélite.<br>
+                2. <strong>Cruce Espacial Multicapa:</strong> Contrasta el trazado contra la Red Terciaria de Antioquia (ArcGIS FeatureServer R10).<br>
+                3. <strong>Cálculo de Distancia al Eje:</strong> Mide la cota perpendicular punto a punto.<br>
+                4. <strong>Cotejo de Códigos Viales:</strong> Verifica si el código reportado en el informe coincide con el <code>CODIGO_VIA</code> oficial.
+              </div>
+            </div>
+            <div class="supervisor-duty-box">
+              <div class="supervisor-duty-title">👮 Obligación Ineludible del Supervisor Humano</div>
+              <ul class="supervisor-duty-list">
+                <li>Hacer clic en <strong>🎯 Ir a Tramos / Zoom</strong> e inspeccionar visualmente el entorno satelital del proyecto.</li>
+                <li>Verificar que el trazado no afecte rondas de quebradas, zonas de reserva natural ni pase por predios privados no cedidos.</li>
+                <li>Validar si la vía realmente tiene categoría terciaria a cargo del municipio y no departamental o nacional sin convenio.</li>
+                <li>Si el tramo sale fuera de vía (&gt;10 m), analizar si se trata de una variante no inventariada o de un error de levantamiento topográfico municipal.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- COMPUERTA 1C -->
+      <article class="gate-detail-card">
+        <div class="gate-detail-header">
+          <div class="gate-header-left">
+            <div class="gate-badge-circle" style="background:#d97706;">1C</div>
+            <div>
+              <div class="gate-header-title">Compuerta 1C: Coherencia Presupuestal (Exclusiva para Modalidad Recursos)</div>
+              <div class="gate-header-sub">Documentos evaluados: Ítem 3 (Despiece), Ítem 2 (Especificaciones) e Ítem 28 (Presupuesto Oficial)</div>
+            </div>
+          </div>
+          <span class="sipro-status-pill vencido">Solo Modalidad Recursos</span>
+        </div>
+        <div class="gate-detail-body">
+          <div class="gate-grid-2col">
+            <div class="gate-box">
+              <div class="gate-box-title">⚙️ Lógica Automatizada del Sistema</div>
+              <div class="gate-box-content">
+                1. <strong>Filtro de Partidas:</strong> Identifica ítems de concreto 21 MPa, concreto ciclópeo y acero figurado.<br>
+                2. <strong>Regla de Exclusión:</strong> Descarta preliminares, movimientos de tierra, transporte y concretos pobres (solados).<br>
+                3. <strong>Cruce Tripartito de Cantidades:</strong> Compara m³ y kg del presupuesto oficial contra la memoria técnica calculada.
+              </div>
+            </div>
+            <div class="supervisor-duty-box">
+              <div class="supervisor-duty-title">👮 Obligación Ineludible del Supervisor Humano</div>
+              <ul class="supervisor-duty-list">
+                <li>Verificar que los precios unitarios (APU) estén ajustados a los precios de referencia vigentes de la Secretaría de Infraestructura Física.</li>
+                <li>Comprobar que no existan partidas duplicadas entre subbase, afirmado y losas.</li>
+                <li>Verificar que el porcentaje de AIU (Administración, Imprevistos y Utilidades) cumpla con el marco legal contractual aplicable.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- COMPUERTA 2 -->
+      <article class="gate-detail-card">
+        <div class="gate-detail-header">
+          <div class="gate-header-left">
+            <div class="gate-badge-circle" style="background:#6366f1;">F2</div>
+            <div>
+              <div class="gate-header-title">Compuerta 2: Validación Documental Continua (Lista de 27 Requisitos)</div>
+              <div class="gate-header-sub">Inventario estricto de documentos administrativos, jurídicos, técnicos y ambientales</div>
+            </div>
+          </div>
+          <span class="sipro-status-pill cumple">100% Requerido</span>
+        </div>
+        <div class="gate-detail-body">
+          <div class="gate-grid-2col">
+            <div class="gate-box">
+              <div class="gate-box-title">⚙️ Lógica Automatizada del Sistema</div>
+              <div class="gate-box-content">
+                1. <strong>Búsqueda por Patrones de Archivo:</strong> Coteja nombres y palabras clave en los PDFs aportados.<br>
+                2. <strong>Control de Vigencia:</strong> Calcula la antigüedad del archivo. Documentos como RUT, Antecedentes de Procuraduría/Contraloría, PACO y REDAM deben ser del <strong>mes calendario en curso (&le; 30 días)</strong>.<br>
+                3. <strong>Semáforo de Cumplimiento:</strong> Marca en verde (Conforme), amarillo (Vencido) o rojo (Faltante).
+              </div>
+            </div>
+            <div class="supervisor-duty-box">
+              <div class="supervisor-duty-title">👮 Obligación Ineludible del Supervisor Humano</div>
+              <ul class="supervisor-duty-list">
+                <li>Presionar <strong>👁️ Ver Documento</strong> en cada fila para abrir el visor y leer el documento completo.</li>
+                <li>Verificar que la cédula del alcalde coincida con la persona nombrada en el acta de posesión.</li>
+                <li>Comprobar que el Acuerdo del Concejo otorgue facultades <em>claras y expresas</em> para suscribir convenios interadministrativos.</li>
+                <li>Verificar que los paz y salvos de parafiscales estén firmados por el Revisor Fiscal o Representante Legal debidamente acreditado.</li>
+                <li>Validar que las fotos del registro fotográfico tengan georreferenciación y muestren el tramo en condiciones de deterioro real.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- COMPUERTA 3 -->
+      <article class="gate-detail-card">
+        <div class="gate-detail-header">
+          <div class="gate-header-left">
+            <div class="gate-badge-circle" style="background:#15803d;">F3</div>
+            <div>
+              <div class="gate-header-title">Compuerta 3: Salidas Oficiales y Ficha de Observaciones</div>
+              <div class="gate-header-sub">Consolidación de hallazgos, edición de motivos y emisión de dictamen vinculante</div>
+            </div>
+          </div>
+          <span class="sipro-status-pill cumple">Reporte Final Oficial</span>
+        </div>
+        <div class="gate-detail-body">
+          <div class="gate-grid-2col">
+            <div class="gate-box">
+              <div class="gate-box-title">⚙️ Lógica Automatizada del Sistema</div>
+              <div class="gate-box-content">
+                1. <strong>Consolidación Integral:</strong> Agrupa automáticamente las detenciones de las compuertas 1A, 1B, 1C y los ítems no conformes de la Fase 2.<br>
+                2. <strong>Matriz Interactiva:</strong> Permite editar en vivo el texto de los motivos de rechazo.<br>
+                3. <strong>Generación de Reportes:</strong> Maqueta la Ficha de Observaciones lista para exportar a PDF con membrete oficial o Word (.docx).
+              </div>
+            </div>
+            <div class="supervisor-duty-box">
+              <div class="supervisor-duty-title">👮 Obligación Ineludible del Supervisor Humano</div>
+              <ul class="supervisor-duty-list">
+                <li>Revisar la redacción técnica de cada observación para asegurar que sea clara, precisa y oriente al municipio sobre cómo subsanar.</li>
+                <li>Utilizar el botón <strong>➕ Agregar Hallazgo Manual</strong> si se detectó alguna anomalía particular no parametrizada.</li>
+                <li>Seleccionar el Concepto Técnico vinculante: <strong>FAVORABLE</strong> (solo si 100% cumple), <strong>FAVORABLE CON CONDICIONES</strong> o <strong>NO FAVORABLE / REQUIERE SUBSANACIÓN</strong>.</li>
+                <li>Presionar <strong>💾 Guardar Avance</strong> para respaldar la auditoría en la carpeta del proyecto.</li>
+                <li>Imprimir la Ficha PDF oficial y firmar con nombre, cargo y número de matrícula profesional.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- MATRIZ RESUMEN DE LOS 27 ÍTEMS DOCUMENTALES -->
+    <section class="workflow-section">
+      <span class="section-title-badge">Referencia Normativa</span>
+      <h2 class="section-title">Inventario de los 27 Requisitos Documentales</h2>
+      <p class="section-description">
+        Lista continua de documentos exigidos por la Secretaría de Infraestructura Física para la priorización y cofinanciación de proyectos de placa huella.
+      </p>
+
+      <div class="table-container">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width:45px">#</th>
+              <th>Descripción del Documento</th>
+              <th>Entidad Emisora</th>
+              <th>Regla de Validación</th>
+              <th style="width:120px">Vigencia Máxima</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><b>01</b></td><td>Solicitud formal del alcalde dirigida a la Secretaría</td><td>Alcaldía Municipal</td><td>Coincidencia exacta de nombre, cédula y período constitucional.</td><td>&le; 60 días</td></tr>
+            <tr><td><b>02</b></td><td>Esquema de especificaciones técnicas firmado por ingeniero civil</td><td>Ingeniero Proyectista</td><td>Firma y matrícula profesional COPNIA verificable.</td><td>&le; 180 días</td></tr>
+            <tr><td><b>03</b></td><td>Despiece del acero solicitado con longitud, peso total y figuración</td><td>Diseño Estructural</td><td>Cuantía &ge; 26.25 kg/m y coherencia de marcas nominales.</td><td>&le; 180 días</td></tr>
+            <tr><td><b>04</b></td><td>Certificado de vías a intervenir como terciarias a cargo del municipio</td><td>Secretaría de Obras / Planeación</td><td>Coincidencia estricta con código vial de la Red Terciaria.</td><td>&le; 90 días</td></tr>
+            <tr><td><b>05</b></td><td>Acta de socialización con la comunidad beneficiada</td><td>JAC / Alcaldía</td><td>Participación comunitaria y firmas de beneficiarios directos.</td><td>&le; 180 días</td></tr>
+            <tr><td><b>06</b></td><td>Registro fotográfico a color</td><td>Equipo Técnico</td><td>Mínimo 8 tomas a color georreferenciadas del estado crítico.</td><td>&le; 90 días</td></tr>
+            <tr><td><b>07</b></td><td>Fotocopia de la cédula de ciudadanía del alcalde</td><td>Registraduría Nacional</td><td>Cédula legible coincidente con todos los actos administrativos.</td><td>Constitucional</td></tr>
+            <tr><td><b>08</b></td><td>Acta de posesión del alcalde</td><td>Notaría / Juzgado</td><td>Período constitucional vigente debidamente protocolizado.</td><td>Constitucional</td></tr>
+            <tr><td><b>09</b></td><td>Acuerdo del Concejo que faculta al alcalde para contratar</td><td>Concejo Municipal</td><td>Facultades expresas expedidas en el mes calendario en curso.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>10</b></td><td>Copia del RUT del municipio</td><td>DIAN</td><td>Estado Activo, NIT correcto y generado en el mes calendario en curso.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>11</b></td><td>Certificado de Responsables Fiscales de la Contraloría</td><td>Contraloría General</td><td>Estado: NO REPORTADO (Alcalde y Municipio).</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>12</b></td><td>Certificado de Medidas Correctivas del alcalde (RNMC)</td><td>Policía Nacional</td><td>Sin sanciones de convivencia pendientes en el sistema RNMC.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>13</b></td><td>Certificado de Antecedentes Judiciales del alcalde</td><td>Policía Nacional</td><td>Sin asuntos pendientes con las autoridades judiciales.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>14</b></td><td>Certificado de Antecedentes Disciplinarios (Procuraduría)</td><td>Procuraduría General</td><td>Sin inhabilidades ni sanciones disciplinarias vigentes.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>15</b></td><td>Certificado de paz y salvo de seguridad social y parafiscales</td><td>Revisor Fiscal / Tesorería</td><td>Pagos al día firmados por profesional acreditado.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>16</b></td><td>Certificado de Deudores Alimentarios Morosos (REDAM)</td><td>MinTIC / MinJusticia</td><td>Estado: NO REGISTRA deuda alimentaria morosa vigente.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>17</b></td><td>Compromiso anticorrupción (Documento anexo)</td><td>Alcaldía Municipal</td><td>Formato anexo debidamente diligenciado y firmado.</td><td>&le; 90 días</td></tr>
+            <tr><td><b>18</b></td><td>Declaración de no lavado de activos y terrorismo (LA/FT)</td><td>Alcaldía Municipal</td><td>Declaración jurada de prevención de LA/FT firmada.</td><td>&le; 90 días</td></tr>
+            <tr><td><b>19</b></td><td>Declaración de inhabilidades e incompatibilidades</td><td>Alcaldía Municipal</td><td>Declaración expresa suscrita bajo gravedad de juramento.</td><td>&le; 90 días</td></tr>
+            <tr><td><b>20</b></td><td>Declaración de no multas ni sanciones contractuales</td><td>Alcaldía Municipal</td><td>Certificación de no haber sido objeto de caducidad ni multas.</td><td>&le; 90 días</td></tr>
+            <tr><td><b>21</b></td><td>Constancia de consulta en el portal anticorrupción (PACO)</td><td>Presidencia - PACO</td><td>Consulta generada en el mes en curso sin reportes de sanciones.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>22</b></td><td>Certificado de inhabilidades por delitos sexuales (Ley 1918)</td><td>Policía Nacional</td><td>Resultado: NO REGISTRA INHABILIDAD expedido en el mes.</td><td>Mes en curso (30d)</td></tr>
+            <tr><td><b>23</b></td><td>Certificado de banco de programas y proyectos (BPIN)</td><td>Banco de Proyectos</td><td>Registro MGA / BPIN municipal activo con viabilidad técnica.</td><td>&le; 180 días</td></tr>
+            <tr><td><b>24</b></td><td>Georreferenciación de tramos (KML, KMZ o GPX)</td><td>Topografía / SIG</td><td>Archivo vectorial GPS alineado a la Red Terciaria (&le; 10m).</td><td>&le; 180 días</td></tr>
+            <tr><td><b>25</b></td><td>Cronograma de actividades de ejecución</td><td>Secretaría de Obras</td><td>Coherencia en meses con el plazo de vigencia del convenio.</td><td>&le; 180 días</td></tr>
+            <tr><td><b>26</b></td><td>Certificado de articulación con el Plan de Desarrollo</td><td>Planeación Municipal</td><td>Alineación con el plan de desarrollo municipal vigente.</td><td>&le; 180 días</td></tr>
+            <tr><td><b>27</b></td><td>Certificado de financiación y contrapartida</td><td>Hacienda / Tesorería</td><td>Cierre financiero: aporte de la Gobernación + contrapartida local.</td><td>&le; 90 días</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:10px;">
+        * En modalidad <strong>💰 RECURSOS</strong> se incorpora el <strong>Ítem 28: Presupuesto Oficial y APUs</strong>, el cual alimenta el cruce de coherencia en la Compuerta 1C.
+      </p>
+    </section>
+
+    <!-- PREGUNTAS FRECUENTES Y RESOLUCIÓN DE PROBLEMAS -->
+    <section class="workflow-section">
+      <span class="section-title-badge">Soporte y Preguntas Frecuentes</span>
+      <h2 class="section-title">Solución a Inconvenientes Comunes</h2>
+
+      <div style="display:flex; flex-direction:column; gap:16px; margin-top:14px;">
+        <div style="background:#F9FAF8; padding:16px; border-radius:8px; border:1px solid var(--border);">
+          <div style="font-size:14px; font-weight:800; color:var(--primary);">¿Qué hacer si el sistema no detecta el nombre del municipio automáticamente?</div>
+          <div style="font-size:13px; color:#4B5563; margin-top:4px;">
+            El lector coteja el texto de la Ficha de Priorización contra los 125 municipios oficiales de Antioquia. Si el documento municipal está escaneado como imagen de baja resolución, presione el botón <strong>✏️ Nombrar Expediente</strong> en la cabecera superior y seleccione manualmente el municipio del listado desplegable.
+          </div>
+        </div>
+
+        <div style="background:#F9FAF8; padding:16px; border-radius:8px; border:1px solid var(--border);">
+          <div style="font-size:14px; font-weight:800; color:var(--primary);">¿Por qué la cuantía de acero aparece en 0.00 kg/m o la Compuerta 1A se bloquea?</div>
+          <div style="font-size:13px; color:#4B5563; margin-top:4px;">
+            Ocurre cuando no se aportó el archivo del <strong>Ítem 3</strong> o el archivo Excel no contiene la estructura de la plantilla oficial. En la carpeta <code>Base/</code> del programa se incluye el formato estándar <code>Plantilla_Estandar_Despiece_Acero_Gobernacion.xlsx</code> para remitir al municipio en caso de inconsistencia.
+          </div>
+        </div>
+
+        <div style="background:#F9FAF8; padding:16px; border-radius:8px; border:1px solid var(--border);">
+          <div style="font-size:14px; font-weight:800; color:var(--primary);">¿Cómo guardar mis avances si no he terminado de revisar todos los documentos?</div>
+          <div style="font-size:13px; color:#4B5563; margin-top:4px;">
+            Presione el botón <strong>💾 Guardar Avance</strong> ubicado en la cabecera superior. El programa guardará un archivo llamado <code>sipro_auditoria.json</code> dentro de la misma carpeta del municipio. Al volver a abrir esa carpeta en otra sesión, todos sus textos editados y estados se restaurarán al 100%.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PIE DE PÁGINA -->
+    <footer style="text-align:center; padding:24px 0; font-size:12px; color:var(--text-muted); border-top:1px solid var(--border);">
+      SIPRO-PH · Gobernación de Antioquia · Secretaría de Infraestructura Física · Dirección de Infraestructura Física y Apoyo Territorial<br>
+      Desarrollado por: Isabela Ramírez Restrepo &amp; Ronaldo Rubio Rodríguez · Documento Oficial de Consulta Técnica
+    </footer>
+
+  </div>
+
+</body>
+</html>

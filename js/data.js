@@ -436,6 +436,473 @@ const SIPRO_DATA = {
     }
 ],
 
+  // 2.1 Inventario de Requisitos Técnicos para Proceso Especial Convenios "2026 - II" (41 Ítems)
+  // Fuente Oficial: Base/Lista de chqueo ok (1).xlsx - Dirección de Estructuración de Proyectos
+  // En este proceso especial transitorio no se exige Ficha de Priorización
+  items41_2026_2: [
+    {
+      id: 1,
+      num: "01",
+      title: "Solicitud formal del alcalde.",
+      rule: "Solicitud oficial suscrita por el mandatario local dirigida a la Secretaría de Infraestructura Física.",
+      entity: "Alcaldía Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["solicitud", "formal", "carta", "oficio", "intencion", "peticion"]
+    },
+    {
+      id: 2,
+      num: "02",
+      title: "Presentar plano de localización e implantación de la infraestructura conforme a lo consignado en la localización del proyecto en la MGA, en coordenadas MAGNA SIRGAS, con norte geográfico y ubicación espacial del proyecto respecto de la cabecera municipal o centro poblado.",
+      rule: "Plano en coordenadas oficiales MAGNA SIRGAS con norte geográfico y vinculación espacial MGA.",
+      entity: "Topografía / SIG Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["plano", "localizacion", "implantacion", "magna", "sirgas", "georref", "mga", "kmz", "kml"]
+    },
+    {
+      id: 3,
+      num: "03",
+      title: "Estudio hidrologico, hidraulico e hidrosanitario (En el evento de requerir planos transversales e incluir planos de localización)",
+      rule: "Estudio de caudales, hidrología de cuencas, dimensionamiento hidráulico de drenajes y obras transversales.",
+      entity: "Ingeniero Hidráulico / Especialista",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["hidrolog", "hidraul", "hidrosanitar", "drenaje", "obras transversales", "socavacion"]
+    },
+    {
+      id: 4,
+      num: "04",
+      title: "Estudio de suelos (Informe de ensayos de CBR) De requerir.",
+      rule: "Informe geotécnico con ensayos de laboratorio, capacidad portante del terreno y valores de CBR.",
+      entity: "Laboratorio de Suelos / Geotecnista",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["suelos", "cbr", "geotecn", "ensayo de suelos", "estudio de suelos", "laboratorio"]
+    },
+    {
+      id: 5,
+      num: "05",
+      title: "Diseño de estructuras, en el evento de requerir obras transversales y obras de contención.",
+      rule: "Cálculo y memoria estructural de muros de contención, pontones, box culverts o alcantarillas proyectadas.",
+      entity: "Ingeniero Estructural",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["diseno estructuras", "obras transversales", "obras de contencion", "muros de contencion", "muros", "box culvert", "alcantarilla", "estructuras"]
+    },
+    {
+      id: 6,
+      num: "06",
+      title: "Los planos de construcción generales y de detalle, como planta, perfiles, cortes, estructurales y obras de drenaje. Estos deben ir firmados por el personal idoneo y con tarjeta o matricula profesional.De requerir.",
+      rule: "Planos constructivos firmados con matrícula profesional: planta, perfil longitudinal, secciones y detalles.",
+      entity: "Proyectista / Diseñador",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["planos de construccion", "planta y perfil", "planta", "perfiles", "cortes", "planos generales", "detalles constructivos", "dwg"]
+    },
+    {
+      id: 7,
+      num: "07",
+      title: "Especificaciones técnicas.",
+      rule: "Documento detallado de especificaciones particulares de construcción para cada una de las actividades.",
+      entity: "Secretaría de Planeación / Obras",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["especificaciones tecnicas", "especificaciones", "especificac", "especif"]
+    },
+    {
+      id: 8,
+      num: "08",
+      title: "Plan de manejo ambiental (PMA, PAGA y PGYO) según sea el caso y carta de compromiso firmada por el representante de la entidad en la que garantiza que se gestionarán los permisos y licencias necesarios (Si aplica).",
+      rule: "PMA / PAGA / PGYO aprobado y carta de compromiso de trámite de licencias/permisos suscrita.",
+      entity: "Gestión Ambiental Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["pma", "p.m.a", "paga", "pgyo", "pmas", "pgir", "manejo ambiental", "plan ambiental", "gestion ambiental", "licencia ambiental", "licencias ambientales", "permiso ambiental", "permisos ambientales", "compromiso ambiental", "carta compromiso ambiental", "estudio ambiental", "ambiental"]
+    },
+    {
+      id: 9,
+      num: "09",
+      title: "Plan de manejo de transito y el costeo para su implementación (Si aplica).",
+      rule: "Plan de señalización y desvíos durante la ejecución de obras viales con presupuesto de implementación.",
+      entity: "Tránsito y Movilidad Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["pmt", "p.m.t", "costeo pmt", "manejo de transito", "manejo transito", "plan de transito", "desvios", "senalizacion y desvios"]
+    },
+    {
+      id: 10,
+      num: "10",
+      title: "Estudio de tránsito. (Si aplica).",
+      rule: "Aforos vehiculares, determinación de TPDA y composición de tráfico sobre el corredor a intervenir.",
+      entity: "Especialista en Tránsito y Transporte",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["estudio de transito", "estudio transito", "aforo", "volumen vehicular", "tpda", "tpd"]
+    },
+    {
+      id: 11,
+      num: "11",
+      title: "Diseño de estructura del pavimento. (Si aplica).",
+      rule: "Memoria técnica de dimensionamiento del paquete estructural del pavimento según tránsito y subrasante.",
+      entity: "Especialista en Pavimentos",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["diseno de pavimento", "diseno pavimento", "estructura de pavimento", "estructura pavimento", "pavimento", "paquete estructural"]
+    },
+    {
+      id: 12,
+      num: "12",
+      title: "Certificación de no puntos críticos, no localización en zonas de riesgo y de conformidad al instrumento de ordenamiento territorial.",
+      rule: "Certificación suscrita por Planeación Municipal avalando ausencia de riesgos geológicos y armonía con POT/PBOT/EOT.",
+      entity: "Secretaría de Planeación Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["no puntos criticos", "zonas de riesgo", "riesgo", "amenaza", "gestion del riesgo", "ordenamiento territorial", "pot", "eot", "pbot"]
+    },
+    {
+      id: 13,
+      num: "13",
+      title: "Esquema de localización o la certificación de la ubicación de las fuentes de materiales que se van a utilizar en el proyecto y que garanticen el suministro con las distancias de acarreo, suscrito por el representante legal de la entidad que presenta el presenta el proyecto de inversión. Estas fuentes de materiales deberan ser las mas cercanas al proyecto y constar que cuentan con los permisos correspondientes.",
+      rule: "Certificado de canteras y fuentes de materiales con permisos mineros/ambientales y distancias de acarreo.",
+      entity: "Alcaldía / Representante Legal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["fuentes de materiales", "fuente de materiales", "cantera", "canteras", "acarreo", "distancias de acarreo", "materiales petreos", "suministro materiales"]
+    },
+    {
+      id: 14,
+      num: "14",
+      title: "Presupuesto detallado con indicación de su fecha de elaboración y firmado por el Representante Legal de la entidad o instancia que presenta el proyecto de inversión, que contenga las actividades necesarias para lograr los productos esperados, acompañado de la estimación de costos y las memorias de cantidades.",
+      rule: "Presupuesto detallado en Excel/PDF firmado por el mandatario con fecha, APUs y memorias de cantidades.",
+      entity: "Secretaría de Obras / Proyectista",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["presupuesto", "pto", "apu", "analisis de precios", "cantidades de obra", "memorias de calculo", "memorias"]
+    },
+    {
+      id: 15,
+      num: "15",
+      title: "Certificación en la que se indique que las vías no están siendo intervenidas con otro tipo de obras. En caso contrario, se debe especificar que las características de las obras son concordantes con el proyecto de inversión y con qué fuentes de recursos están siendo ejecutadas.",
+      rule: "Certificación de no duplicidad de obras ni concurrencia de intervenciones sobre la misma vía.",
+      entity: "Secretaría de Planeación / Obras",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["no intervenidas", "no intervencion", "no doble intervencion", "doble intervencion", "no intervenida", "no estan siendo intervenidas", "no estan intervenidas", "duplicidad", "no duplicidad", "sin duplicidad", "concurrencia", "no concurrencia", "superposicion", "no superposicion", "otra obra", "otras obras", "otro tipo de obras", "otras intervenciones", "otra intervencion", "no cruce de obras", "no cruce", "cruce de obras"]
+    },
+    {
+      id: 16,
+      num: "16",
+      title: "Certificación expedida por el representante legal o el jefe de planeación o quien haga sus veces, de la entidad que presenta el proyecto, en la que conste que los documentos o planos originales están debidamente firmados por el diseñador del proyecto con su respectiva matrícula profesional y certificado de vigencia.",
+      rule: "Certificación de custodia de planos y estudios originales firmados por diseñadores con matrícula y vigencia COPNIA.",
+      entity: "Alcalde / Jefe de Planeación",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["planos originales", "documentos originales", "originales firmados", "matricula profesional", "vigencia matricula", "copnia", "disenador"]
+    },
+    {
+      id: 17,
+      num: "17",
+      title: "Memorial de responsabilidad profesional para cada una de las especialidades incluidas en el proyecto, en el cual conste el cumplimiento de la normativa y reglamentos vigentes en la elaboración de los estudios y diseños y que estos no pueden ser modificados sin su autorización una vez sea viabilizado el proyecto. Para los estudios que adjunten.",
+      rule: "Memorial de responsabilidad firmado por cada profesional por especialidad conforme a normatividad vigente.",
+      entity: "Profesionales Proyectistas",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["memorial", "responsabilidad profesional", "memorial de responsabilidad", "responsabilidad"]
+    },
+    {
+      id: 18,
+      num: "18",
+      title: "Para vias urbanas, certificación suscrita por el Representante Legal de la entidad que presenta el proyecto, en la que se indique que la vía por intervenir cuenta con redes de servicios públicos en buen estado y que no se planean intervenir. Dicho certificado debe relacionar la localización de las redes de servicios públicos.",
+      rule: "Certificación del estado de redes de servicios públicos (acueducto/alcantarillado) en tramos urbanos.",
+      entity: "Empresa de Servicios Públicos / Alcaldía",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["servicios publicos", "redes de servicios", "redes", "acueducto", "alcantarillado", "vias urbanas"]
+    },
+    {
+      id: 19,
+      num: "19",
+      title: "Certificación suscrita por el Representante Legal de la entidad que presenta el proyecto, en la que se indique que la intervención en la vía es competencia de dicha entidad. Si la intervención en la vía es competencia de otra entidad, adjuntar el documento que avale la intervención a realizar, suscrito por el funcionario competente.",
+      rule: "Acreditación de titularidad o competencia vial de la vía terciaria/urbana o aval de la entidad competente.",
+      entity: "Alcaldía Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["competencia", "competencia via", "via a cargo", "propiedad de la via", "competencia municipal"]
+    },
+    {
+      id: 20,
+      num: "20",
+      title: "Acta de socialización con la comunidad beneficiada con las obras y registro de asistencia y registro fotografico del mismo.",
+      rule: "Acta de socialización con la comunidad con listado de firmas legibles y registro fotográfico de la reunión.",
+      entity: "Junta de Acción Comunal / Alcaldía",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["socializacion", "socializ", "comunidad", "asistencia", "acta socializacion", "reunion comunitaria"]
+    },
+    {
+      id: 21,
+      num: "21",
+      title: "Registro fotográfico de la vía a color, con marca que incluya fecha y coordenadas",
+      rule: "Reporte fotográfico a color con marca de agua de fecha y coordenadas georreferenciadas del estado de la vía.",
+      entity: "Equipo Técnico Municipal",
+      validity: "Vigente",
+      daysMax: 90,
+      esMensual: false,
+      expectedFilePattern: ["registro fotografico", "fotografico", "fotos", "fotos via", "evidencia fotografica"]
+    },
+    {
+      id: 22,
+      num: "22",
+      title: "Cronograma de actividades, especificando las etapas de contratación, ejecución y entrega o recibo de actividades.",
+      rule: "Cronograma mensualizado de actividades: proceso precontractual, ejecución de obra y liquidación.",
+      entity: "Secretaría de Obras Públicas",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["cronograma", "plan de trabajo", "etapas de contratacion", "plazos"]
+    },
+    {
+      id: 23,
+      num: "23",
+      title: "Certificado de financiación (especificando valor del proyecto, CDP del Departamento y aporte del municipio; se anexa ejemplo).",
+      rule: "Cierre financiero suscrito con desglose de fuentes: aporte del Departamento (CDP) y cofinanciación municipal.",
+      entity: "Hacienda / Tesorería Municipal",
+      validity: "Vigente",
+      daysMax: 90,
+      esMensual: false,
+      expectedFilePattern: ["financiacion", "cofinanciacion", "cdp", "aporte municipio", "contrapartida", "certificado de financiacion"]
+    },
+    {
+      id: 24,
+      num: "24",
+      title: "Si los recursos del municipio son con regalías municipales, se debe aportar resoluciones de viabilidad, en el que se evidencie que el proyecto requiere recursos del Departamento.",
+      rule: "Resoluciones de viabilidad o acuerdos OCAD en caso de concurrencia de recursos del SGR / Regalías.",
+      entity: "OCAD / Secretaría de Planeación",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["regalias", "sgr", "regalias municipales", "resolucion viabilidad regalias", "acuerdo ocad"]
+    },
+    {
+      id: 25,
+      num: "25",
+      title: "Fotocopia de la cédula del alcalde.",
+      rule: "Copia legible de la cédula de ciudadanía del mandatario local en ejercicio.",
+      entity: "Registraduría Nacional",
+      validity: "Vigente",
+      daysMax: 1460,
+      esMensual: false,
+      expectedFilePattern: ["cedula", "cc alcalde", "cedula alcalde", "identificacion alcalde"]
+    },
+    {
+      id: 26,
+      num: "26",
+      title: "Acta de posesión del alcalde.",
+      rule: "Copia del acta de posesión del mandatario constitucional ante Notaría o Juzgado.",
+      entity: "Notaría / Juzgado Municipal",
+      validity: "Vigente",
+      daysMax: 1460,
+      esMensual: false,
+      expectedFilePattern: ["posesion", "acta de posesion", "posesion alcalde"]
+    },
+    {
+      id: 27,
+      num: "27",
+      title: "Acuerdo del Concejo donde se faculta al alcalde para contratar, con fecha de expedición o suscripción menor a un mes.",
+      rule: "Acuerdo municipal de facultades para celebrar convenios interadministrativos expedido dentro del mes en curso.",
+      entity: "Concejo Municipal",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["acuerdo concejo", "acuerdo", "concejo", "facultades contratar", "autorizacion concejo"]
+    },
+    {
+      id: 28,
+      num: "28",
+      title: "Copia del RUT del municipio, con fecha de expedición o suscripción menor a un mes.",
+      rule: "Registro Único Tributario del Municipio descargado de la DIAN en el mes calendario en curso, estado Activo.",
+      entity: "DIAN",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["rut", "dian", "registro unico tributario"]
+    },
+    {
+      id: 29,
+      num: "29",
+      title: "Certificado de Responsables Fiscales de la Contraloría General de la República, con fecha de expedición o suscripción menor a un mes (municipio y alcalde).",
+      rule: "Certificado SIREC de la Contraloría expedido dentro del mes: 'NO REPORTADO COMO RESPONSABLE FISCAL'.",
+      entity: "Contraloría General de la República",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["contraloria", "responsables fiscales", "sirec", "boletin fiscal"]
+    },
+    {
+      id: 30,
+      num: "30",
+      title: "Certificado de Medidas Correctivas del alcalde, con fecha de expedición o suscripción menor a un mes.",
+      rule: "Certificado del RNMC Policía Nacional expedido dentro del mes sin sanciones correctivas pendientes.",
+      entity: "Policía Nacional - RNMC",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["medidas correctivas", "rnmc", "correctivas", "policia correctivas"]
+    },
+    {
+      id: 31,
+      num: "31",
+      title: "Certificado de Antecedentes Judiciales del alcalde, con fecha de expedición o suscripción menor a un mes.",
+      rule: "Certificado de antecedentes judiciales de la Policía Nacional con fecha de consulta menor a un mes.",
+      entity: "Policía Nacional",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["judiciales", "antecedentes judiciales", "pasado judicial"]
+    },
+    {
+      id: 32,
+      num: "32",
+      title: "Certificado de Antecedentes Disciplinarios de la Procuraduría General de la Nación, con fecha de expedición o suscripción menor a un mes.",
+      rule: "Certificado ordinario/especial SIRI de la Procuraduría expedido en el mes en curso sin sanciones ni inhabilidades.",
+      entity: "Procuraduría General de la Nación",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["procuraduria", "disciplinarios", "siri", "antecedentes disciplinarios"]
+    },
+    {
+      id: 33,
+      num: "33",
+      title: "Certificado de paz y salvo de seguridad social y parafiscales del mes presente.",
+      rule: "Certificado expedido en el mes presente por revisor fiscal o tesorero acreditando pago de aportes al día.",
+      entity: "Revisor Fiscal / Tesorería",
+      validity: "Mes presente",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["seguridad social", "parafiscales", "paz y salvo parafiscales", "aportes parafiscales"]
+    },
+    {
+      id: 34,
+      num: "34",
+      title: "Certificado Registro de Deudores Alimentarios Morosos (REDAM).",
+      rule: "Certificado del sistema REDAM expedido en el mes calendario: 'NO REGISTRA DEUDA ALIMENTARIA MOROSA'.",
+      entity: "Ministerio de Tecnologías / MinJusticia",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["redam", "deudores alimentarios", "alimentos", "deudores"]
+    },
+    {
+      id: 35,
+      num: "35",
+      title: "Compromiso anticorrupción (Documento anexo).",
+      rule: "Formato anexo debidamente firmado con firma autógrafa/digital por el mandatario local.",
+      entity: "Alcaldía Municipal",
+      validity: "Vigente",
+      daysMax: 90,
+      esMensual: false,
+      expectedFilePattern: ["anticorrupcion", "compromiso anticorrupcion", "pacto transparencia"]
+    },
+    {
+      id: 36,
+      num: "36",
+      title: "Declaración de no lavado de activos ni financiación del terrorismo (Documento anexo).",
+      rule: "Declaración jurada LA/FT / SARLAFT suscrita por el mandatario local.",
+      entity: "Alcaldía Municipal",
+      validity: "Vigente",
+      daysMax: 90,
+      esMensual: false,
+      expectedFilePattern: ["lavado", "activos", "terrorismo", "sarlaft", "laft"]
+    },
+    {
+      id: 37,
+      num: "37",
+      title: "Declaración de inhabilidades, incompatibilidades, prohibiciones y conflictos de intereses (Documento anexo).",
+      rule: "Declaración de no encontrarse incurso en causales de inhabilidad o conflicto de intereses de ley.",
+      entity: "Alcaldía Municipal",
+      validity: "Vigente",
+      daysMax: 90,
+      esMensual: false,
+      expectedFilePattern: ["inhabilidades", "incompatibilidades", "conflictos", "prohibiciones"]
+    },
+    {
+      id: 38,
+      num: "38",
+      title: "Declaración de no multas, sanciones y declaratorias de incumplimiento (Documento anexo).",
+      rule: "Certificación de no haber recibido declaratorias de caducidad ni multas contractuales vigentes.",
+      entity: "Alcaldía Municipal",
+      validity: "Vigente",
+      daysMax: 90,
+      esMensual: false,
+      expectedFilePattern: ["no multas", "multas", "sanciones", "incumplimiento"]
+    },
+    {
+      id: 39,
+      num: "39",
+      title: "Constancia de consulta portal anticorrupción de Colombia - PACO (municipio y alcalde).",
+      rule: "Constancia de consulta en PACO (Secretaría de Transparencia de la Presidencia) expedida en el mes.",
+      entity: "Presidencia de la República - PACO",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["paco", "portal anticorrupcion", "transparencia"]
+    },
+    {
+      id: 40,
+      num: "40",
+      title: "Certificado de inhabilidades por delitos sexuales contra menores de edad del alcalde.",
+      rule: "Certificado Ley 1918 de 2018 expedido por Policía Nacional en el mes: 'NO REGISTRA INHABILIDAD'.",
+      entity: "Policía Nacional",
+      validity: "Menor a 1 mes",
+      daysMax: 30,
+      esMensual: true,
+      expectedFilePattern: ["delitos sexuales", "menores", "ley 1918", "sexuales"]
+    },
+    {
+      id: 41,
+      num: "41",
+      title: "Certificado de banco y programas de proyectos del municipio.",
+      rule: "Registro activo del proyecto en el Banco Municipal de Programas y Proyectos con código BPIN.",
+      entity: "Banco de Proyectos Municipal",
+      validity: "Vigente",
+      daysMax: 180,
+      esMensual: false,
+      expectedFilePattern: ["banco de proyectos", "banco proyectos", "bpin", "radicacion banco", "registro mga"]
+    }
+  ],
+
+  /**
+   * Helper para obtener los ítems según el proceso activo
+   */
+  getItems(processMode = "ORDINARIO", modalidad = "MATERIALES") {
+    if (processMode === "2026_2" || processMode === "CONVENIOS_2026_2") {
+      return this.items41_2026_2;
+    }
+    return modalidad === "RECURSOS" ? this.items27 : this.items27.filter(i => !i.soloRecursos);
+  },
+
   // 3. Catálogo oficial de Municipios de Antioquia
   municipios: [
     {

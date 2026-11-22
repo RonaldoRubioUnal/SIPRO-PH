@@ -202,14 +202,41 @@ const FolderReader = {
   /**
    * Limpia el nombre del archivo quitando números iniciales, tildes y caracteres especiales
    */
+  ADMIN_EXCLUSIONS: [
+    "cedula", "identidad", "identificacion", "representante legal",
+    "rut", "dian", "tributario",
+    "posesion", "acta de posesion",
+    "concejo", "acuerdo", "facultades",
+    "contralor", "sirec", "responsables fiscales",
+    "procurad", "disciplinario", "siri",
+    "policia", "judicial", "pasado judicial",
+    "rnmc", "medidas correctivas",
+    "redam", "alimentos", "deudores",
+    "parafiscal", "parfiscal", "seguridad social",
+    "anticorrupcion", "sarlaft", "lavado", "inhabilidad", "multas", "sancion",
+    "compromiso anticorrupcion", "declaracion sarlaft", "declaracion lavado", "declaracion inhabilidad", "declaracion de no multas", "declaracion juramentada anticorrupcion",
+    "resolucion cae", "analisis del sector", "matriz de riesgos", "balance contrato", "lista de precios"
+  ],
+
+  hasAdminExclusion(clean) {
+    if (!clean) return false;
+    return this.ADMIN_EXCLUSIONS.some(e => clean.includes(e));
+  },
+
+  isConvocatoriaDoc(clean) {
+    if (!clean) return false;
+    return ["resolucion cae", "analisis del sector", "matriz de riesgos", "mantenimiento rvt", "balance contrato", "lista de precios", "precios abril"].some(k => clean.includes(k));
+  },
+
   cleanFileNameForSemanticMatch(fileName) {
     if (!fileName) return "";
     return fileName
       .replace(/\.[^/.]+$/, '')
-      .replace(/^\s*\d+[\s.\-_)]*/, '')
+      .replace(/^\s*(\d+[\d.\-_)]*)+/, '')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
+      .toLowerCase()
+      .trim();
   },
 
   /**
@@ -225,200 +252,597 @@ const FolderReader = {
   },
 
   /**
-   * Evalúa la coincidencia semántica flexible por raíces para clasificar un archivo en uno o varios ítems
+   * Evalúa la coincidencia semántica flexible por raíces para clasificar un archivo en uno o varios ítems (27/28 requisitos)
    */
-  matchFileToItems(file) {
+  matchFileToItems(file, processMode = "ORDINARIO") {
+    if (processMode === "2026_2" || processMode === "CONVENIOS_2026_2") {
+      return this.matchFileToItems2026_2(file);
+    }
     const fileName = file.name || "";
     const clean = this.cleanFileNameForSemanticMatch(fileName);
     const cleanNorm = clean.replace(/[^a-z0-9]/g, ' ');
     const ext = this.getFileExtension(file);
-    const matchedItemIds = [];
+    const matched = [];
 
-    // 1. Regla universal Item 24 (Georreferenciación):
-    // Todo archivo con extensión .kmz o .kml (o si contiene georref/trazado/track/tramo)
-    if (ext === "kmz" || ext === "kml" || ["georref", "trazado", "track", "tramos"].some(k => clean.includes(k))) {
-      matchedItemIds.push(24);
+    // Ignorar explícitamente documentos administrativos de la convocatoria departamental
+    if (this.isConvocatoriaDoc(clean)) {
+      return [];
     }
 
-    // 2. Regla estricta Item 28 (Presupuesto Oficial):
-    // Extensión obligatoria de hoja de cálculo Y coincidencia semántica con "presupuesto" o "pto"
-    if (["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext) && (clean.includes("presupuesto") || clean.includes("pto")) && !clean.includes("despiece")) {
-      matchedItemIds.push(28);
+    // Soporte para etiquetado explícito del usuario: "item 24", "requisito_04", "anexo 28"
+    const explicitItemMatch = fileName.match(/\b(?:item|requisito|anexo)\s*[-_]?\s*(\d{1,2})\b/i);
+    if (explicitItemMatch) {
+      const n = parseInt(explicitItemMatch[1], 10);
+      if (n >= 1 && n <= 28) {
+        matched.push(n);
+      }
     }
 
-    // 3. Items 17, 18, 19, 20 Bundle (Declaraciones y compromisos anexos)
-    const isBundle = clean.includes("declaracion") && (clean.includes("compromiso") || clean.includes("anexo"));
-    if (isBundle) {
-      matchedItemIds.push(17, 18, 19, 20);
+    // Item 24: Georreferenciación (KMZ / KML o ZIP/RAR de georreferenciación)
+    if (ext === "kmz" || ext === "kml" || (["zip", "rar", "7z"].includes(ext) && ["georref", "georef", "trazado", "track"].some(k => clean.includes(k))) ||
+       (["georreferenciacion", "georref", "georef", "trazado de via", "tracks"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean))) {
+      matched.push(24);
     }
 
-    // 4. Reglas semánticas individuales para cada ítem (usando raíces flexibles y raíz 'alcald'):
-    // Item 1: Solicitud
-    if (["solicitud", "carta", "oficio", "intencion", "formal", "peticion"].some(k => clean.includes(k)) &&
-      !["despiece", "especificac", "cedula", "rut", "posesion"].some(e => clean.includes(e))) {
-      matchedItemIds.push(1);
+    // Item 28: Presupuesto oficial detallado
+    if ((["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext) && ["presupuesto", "pto", "apu", "cantidades de obra"].some(k => clean.includes(k)) && !clean.includes("despiece")) ||
+       (["presupuesto oficial", "presupuesto de obra", "presupuesto detallado", "analisis de precios", "cantidades de obra", "memorias de cantidades", "apu", "apus"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean) && !clean.includes("despiece"))) {
+      matched.push(28);
     }
 
-    // Item 2: Especificaciones y diseño
-    if (["especificac", "especif", "esquema", "memoria tecnica", "estudios", "diseno"].some(k => clean.includes(k)) &&
-      !["despiece", "presupuesto", "apu"].some(e => clean.includes(e))) {
-      matchedItemIds.push(2);
+    // Item 1: Solicitud formal del alcalde
+    if ((clean.includes("solicitud") && ["formal", "alcalde", "priorizacion", "carta", "oficio"].some(k => clean.includes(k))) ||
+        clean.startsWith("solicitud") || clean.startsWith("carta de solicitud") ||
+        (clean.includes("carta") && clean.includes("solicitud"))) {
+      if (!["cedula", "rut", "posesion", "planos", "presupuesto", "fotos", "acuerdo", "compromiso", "intencion"].some(e => clean.includes(e))) {
+        matched.push(1);
+      }
     }
 
-    // Item 3: Despiece de acero (REGLA ESTRICTA)
-    // Condición obligatoria: contener obligatoriamente "despiece", "acero" o "figuracion"
-    // Exclusión estricta: Jamás asignar si contiene nombres de otros documentos
-    const item3Exclusiones = [
-      "vigencias", "cdp", "disponibilidad", "certificado", "solicitud",
-      "acta", "socializacion", "socializ", "rut", "cedula", "antecedentes",
-      "cronograma", "ficha", "presupuesto", "especificaciones", "especificac", "fotografico", "fotos"
-    ];
-    const tieneExclusionItem3 = item3Exclusiones.some(e => clean.includes(e));
-    const tienePalabraItem3 = ["despiece", "acero", "figuracion"].some(k => clean.includes(k));
-
-    if (tienePalabraItem3 && !tieneExclusionItem3) {
-      matchedItemIds.push(3);
+    // Item 2: Esquema de especificaciones técnicas
+    if (["especificaciones tecnicas", "especificacion tecnica", "especificaciones", "esquema de especificaciones"].some(k => clean.includes(k)) ||
+        (clean.startsWith("esquema") && ["placa", "placah", "tecnico", "act"].some(k => clean.includes(k)))) {
+      if (ext !== "dwg" && !["acuerdo", "concejo", "posesion", "despiece", "presupuesto"].some(e => clean.includes(e))) {
+        matched.push(2);
+      }
     }
 
-    // Item 4: Certificado vías a cargo / terciarias
-    if ((["vias a cargo", "terciaria", "red vial", "vias terciarias"].some(k => clean.includes(k)) ||
-      (clean.includes("certificado") && clean.includes("via"))) &&
-      !["especificac", "despiece", "posesion"].some(e => clean.includes(e))) {
-      matchedItemIds.push(4);
+    // Item 3: Despiece del acero solicitado
+    if (["despiece", "figuracion"].some(k => clean.includes(k)) ||
+        (clean.includes("acero") && ["despiece", "planilla", "hierro", "armado", "cuantia"].some(k => clean.includes(k))) ||
+        clean.startsWith("despiece")) {
+      if (!["solicitud", "socializ", "posesion", "cedula", "rut", "cronograma", "presupuesto"].some(e => clean.includes(e))) {
+        matched.push(3);
+      }
     }
 
-    // Item 5: Socialización
-    if ((["socializ", "concertacion"].some(k => clean.includes(k)) ||
-      (clean.includes("comunitaria") && clean.includes("asistencia")) ||
-      (clean.includes("acta") && ["comunidad", "asistencia", "reunion", "participacion"].some(k => clean.includes(k)))) &&
-      !["posesion", "especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(5);
+    // Item 4: Certificado de vías a intervenir como terciarias
+    if (["vias a intervenir", "vias terciarias", "via a cargo", "red vial municipal", "competencia via"].some(k => clean.includes(k)) ||
+        (["certific", "certificado"].some(k => clean.includes(k)) && ["via", "vias"].some(k => clean.includes(k)))) {
+      if (ext !== "kmz" && ext !== "kml" && !["posesion", "especificac", "despiece", "acuerdo", "intencion", "carta de intencion"].some(e => clean.includes(e))) {
+        matched.push(4);
+      }
+    }
+
+    // Item 5: Socialización con la comunidad
+    if (["socializacion", "socializ"].some(k => clean.includes(k)) ||
+        (clean.includes("acta") && ["comunidad", "asistencia", "reunion", "participacion", "concertacion"].some(k => clean.includes(k)))) {
+      if (!["posesion", "especificac", "despiece"].some(e => clean.includes(e))) {
+        matched.push(5);
+      }
     }
 
     // Item 6: Registro fotográfico
-    if (["fotograf", "fotos", "foto", "evidencia"].some(k => clean.includes(k)) &&
-      !["especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(6);
+    if (["fotograf", "fotos via", "fotos de la via", "evidencia fotografica", "panel fotografico", "registro fotog"].some(k => clean.includes(k))) {
+      if (!["especificac", "despiece"].some(e => clean.includes(e))) {
+        matched.push(6);
+      }
     }
 
-    // Item 7: Cédula Alcalde / Alcaldesa
-    if ((["cedula", "identidad", "identificacion"].some(k => clean.includes(k)) || /\bcc\b/.test(cleanNorm)) &&
-      !["rut", "foto"].some(e => clean.includes(e))) {
-      matchedItemIds.push(7);
+    // Item 7: Cédula del alcalde
+    if (["cedula", "identidad", "identificacion"].some(k => clean.includes(k)) || /\bcc\b/.test(cleanNorm)) {
+      if (!["rut", "foto", "posesion"].some(e => clean.includes(e))) {
+        matched.push(7);
+      }
     }
 
     // Item 8: Acta de posesión
     if (clean.includes("posesion") && !["socializ", "especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(8);
+      matched.push(8);
     }
 
     // Item 9: Concejo / Facultades para contratar
-    if (["facultad", "facultades", "concejo", "acuerdo", "autorizacion"].some(k => clean.includes(k)) &&
-      !["posesion", "socializ", "especificac"].some(e => clean.includes(e))) {
-      matchedItemIds.push(9);
+    if (["acuerdo concejo", "acuerdo municipal", "facultades para contratar", "facultades contratar", "decreto compilatorio"].some(k => clean.includes(k)) ||
+        (clean.includes("acuerdo") && ["concejo", "facultad", "contratar", "vigencia"].some(k => clean.includes(k))) ||
+        (clean.includes("faculta") && clean.includes("contratar"))) {
+      if (!clean.includes("posesion")) {
+        matched.push(9);
+      }
     }
 
-    // Item 10: RUT
-    if (["rut", "tributario", "dian"].some(k => clean.includes(k)) &&
-      !["especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(10);
+    // Item 10: RUT del municipio
+    if (["rut", "dian", "tributario", "registro unico tributario"].some(k => clean.includes(k)) && !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matched.push(10);
     }
 
-    // Item 11: Contraloría (Alcalde/Alcaldesa y Municipio)
-    if ((["contralor", "sirec", "boletin"].some(k => clean.includes(k)) || (clean.includes("fiscal") && !clean.includes("parafiscal"))) &&
-      !["procurad", "policia"].some(e => clean.includes(e))) {
-      matchedItemIds.push(11);
+    // Item 11: Contraloría (Responsables Fiscales)
+    if (["contralor", "responsables fiscales", "responsabilidad fiscal", "sirec", "boletin fiscal"].some(k => clean.includes(k)) &&
+        !["procurad", "policia"].some(e => clean.includes(e))) {
+      matched.push(11);
     }
 
-    // Item 12: RNMC - Medidas correctivas
+    // Item 12: Medidas Correctivas RNMC
     if (["rnmc", "medidas correctivas", "correctivas"].some(k => clean.includes(k))) {
-      matchedItemIds.push(12);
+      matched.push(12);
     }
 
-    // Item 13: Antecedentes judiciales policía
-    if (["judicial", "policia", "pasado judicial"].some(k => clean.includes(k)) &&
-      !["rnmc", "correctivas", "sexuales"].some(e => clean.includes(e))) {
-      matchedItemIds.push(13);
+    // Item 13: Antecedentes Judiciales Policía
+    if (["antecedentes judiciales", "judicial", "pasado judicial", "policia"].some(k => clean.includes(k)) &&
+        !["rnmc", "correctivas", "sexuales", "procurad", "contralor"].some(e => clean.includes(e))) {
+      matched.push(13);
     }
 
-    // Item 14: Procuraduría (Alcalde/Alcaldesa y Municipio)
-    if (["procurad", "disciplinario", "siri"].some(k => clean.includes(k)) &&
-      !["contralor", "policia"].some(e => clean.includes(e))) {
-      matchedItemIds.push(14);
+    // Item 14: Procuraduría (Disciplinarios)
+    if (["procurad", "disciplinario", "siri"].some(k => clean.includes(k)) && !["contralor", "policia"].some(e => clean.includes(e))) {
+      matched.push(14);
     }
 
     // Item 15: Parafiscales y seguridad social
-    if ((["parafiscal", "seguridad social", "aportes"].some(k => clean.includes(k)) ||
-      (clean.includes("seguridad") && !clean.includes("policia")) ||
-      (clean.includes("paz y salvo") && !clean.includes("alimento"))) &&
-      !["despiece", "especificac"].some(e => clean.includes(e))) {
-      matchedItemIds.push(15);
+    if (["parafiscal", "parfiscal", "seguridad social"].some(k => clean.includes(k)) ||
+        (clean.includes("paz y salvo") && !["alimento", "contralor", "procurad"].some(e => clean.includes(e)))) {
+      matched.push(15);
     }
 
-    // Item 16: REDAM - Deudores alimentarios
+    // Item 16: REDAM (Deudores alimentarios)
     if (["redam", "alimentarios", "alimentos", "deudores"].some(k => clean.includes(k))) {
-      matchedItemIds.push(16);
+      matched.push(16);
     }
 
-    // Item 17: Compromiso anticorrupción
-    if (!isBundle && (["anticorrupcion", "pacto"].some(k => clean.includes(k)) || (clean.includes("compromiso") && clean.includes("corrupcion"))) &&
-      !clean.includes("paco")) {
-      matchedItemIds.push(17);
-    }
-
-    // Item 18: Lavado de activos / SARLAFT
-    if (!isBundle && (["lavado", "sarlaft", "terrorismo"].some(k => clean.includes(k)) || (clean.includes("activos") && !clean.includes("fijo")))) {
-      matchedItemIds.push(18);
-    }
-
-    // Item 19: Inhabilidades e incompatibilidades
-    if (!isBundle && ["inhabilidad", "incompatibilidad", "conflicto"].some(k => clean.includes(k))) {
-      matchedItemIds.push(19);
-    }
-
-    // Item 20: No multas ni sanciones
-    if (!isBundle && ["multas", "sancion", "no multas", "incumplimiento"].some(k => clean.includes(k)) &&
-      !["rnmc", "correctivas"].some(e => clean.includes(e))) {
-      matchedItemIds.push(20);
+    // Bundle declaraciones y compromisos (17, 18, 19, 20)
+    const isBundle = ["declaracion", "declaraciones"].some(k => clean.includes(k)) && ["compromiso", "compromisos", "anexo", "anexos"].some(k => clean.includes(k));
+    if (isBundle) {
+      matched.push(17, 18, 19, 20);
+    } else {
+      if ((["anticorrupcion", "pacto anticorrupcion"].some(k => clean.includes(k)) || (clean.includes("compromiso") && clean.includes("corrupcion"))) && !clean.includes("paco")) {
+        matched.push(17);
+      }
+      if (["lavado", "sarlaft", "terrorismo"].some(k => clean.includes(k)) || (clean.includes("activos") && !clean.includes("fijo"))) {
+        matched.push(18);
+      }
+      if (["inhabilidad", "incompatibilidad", "conflicto"].some(k => clean.includes(k)) && !["sexuales", "menores"].some(e => clean.includes(e))) {
+        matched.push(19);
+      }
+      if (["multas", "sancion", "no multas", "incumplimiento"].some(k => clean.includes(k)) && !["rnmc", "correctivas"].some(e => clean.includes(e))) {
+        matched.push(20);
+      }
     }
 
     // Item 21: PACO
-    if (["paco", "portal anticorrupcion", "transparencia", "cic"].some(k => clean.includes(k))) {
-      matchedItemIds.push(21);
+    if (["paco", "portal anticorrupcion", "transparencia"].some(k => clean.includes(k)) && !["compromiso", "balance contrato"].some(e => clean.includes(e))) {
+      matched.push(21);
     }
 
-    // Item 22: Delitos sexuales menores (Ley 1918)
+    // Item 22: Delitos sexuales menores
     if (["delitos sexuales", "menores", "sexuales", "1918"].some(k => clean.includes(k))) {
-      matchedItemIds.push(22);
+      matched.push(22);
     }
 
-    // Item 23: Banco de proyectos / BPIN
-    if (((clean.includes("banco") && clean.includes("proyecto")) || ["bpin", "radicacion"].some(k => clean.includes(k))) &&
-      !["especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(23);
+    // Item 23: Banco de proyectos / BPIN / BPIM
+    if (((clean.includes("banco") && clean.includes("proyecto")) || ["bppim", "bpim", "bpin", "bpp", "radicacion"].some(k => clean.includes(k))) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matched.push(23);
     }
 
-    // Item 25: Cronograma de obra
-    if (["cronograma", "plan de trabajo"].some(k => clean.includes(k)) &&
-      !["especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(25);
+    // Item 25: Cronograma de actividades
+    if (["cronograma", "plan de trabajo"].some(k => clean.includes(k)) && !["especificac", "despiece", "ficha"].some(e => clean.includes(e))) {
+      matched.push(25);
     }
 
     // Item 26: Plan de Desarrollo Municipal
-    if ((["plan desarrollo", "pdd", "plan de desarrollo"].some(k => clean.includes(k)) ||
-      (clean.includes("desarrollo") && !clean.includes("social") && !clean.includes("trabajo"))) &&
-      !["especificac", "despiece"].some(e => clean.includes(e))) {
-      matchedItemIds.push(26);
+    if (["plan desarrollo", "plan de desarrollo", "pdd"].some(k => clean.includes(k)) && !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matched.push(26);
     }
 
-    // Item 27: Cofinanciación / CDP / Contrapartida
-    if ((["cofinanc", "cofianc", "vigencias futuras", "cdp", "disponibilidad presupuestal", "disponibilidad", "contrapartida"].some(k => clean.includes(k)) ||
-      (clean.includes("compromiso") && ["junta", "jac", "comunitario", "aporte"].some(j => clean.includes(j)))) &&
-      !["especificac", "despiece", "anticorrupcion"].some(e => clean.includes(e))) {
-      matchedItemIds.push(27);
+    // Item 27: Cofinanciación / CDP / Financiación
+    if (["financiacion", "cofinanciacion", "cofianciacion", "cofinanc", "cofianc", "cdp", "disponibilidad presupuestal", "contrapartida", "carta de intencion"].some(k => clean.includes(k)) ||
+        (["certific", "cerific", "certificado"].some(k => clean.includes(k)) && ["recursos", "aporte", "valor del proyecto", "materiales", "maquinaria", "mano de obra"].some(k => clean.includes(k)))) {
+      if (!["regalias", "especificac", "despiece", "anticorrupcion", "banco", "bpim", "bppim"].some(e => clean.includes(e))) {
+        matched.push(27);
+      }
     }
 
-    return [...new Set(matchedItemIds)];
+    return [...new Set(matched)];
+  },
+
+  /**
+   * Evalúa coincidencias para los 41 requisitos de la lista de chequeo oficial de Convenios "2026 - II"
+   * Fuente: Base/Lista de chqueo ok (1).xlsx - Dirección de Estructuración de Proyectos
+   * REGLA ESTRICTA: Cero falsos positivos. Se prohíbe asociar números de prefijo de paquete convocatorio a ítems técnicos.
+   */
+  matchFileToItems2026_2(file) {
+    const fileName = file.name || "";
+    const clean = this.cleanFileNameForSemanticMatch(fileName);
+    const cleanNorm = clean.replace(/[^a-z0-9]/g, ' ');
+    const cleanNoDots = clean.replace(/\./g, '');
+    const cleanNoDotsNorm = cleanNoDots.replace(/[^a-z0-9]/g, ' ');
+    const ext = this.getFileExtension(file);
+    const matched = [];
+
+    // Extracción de prefijo numérico de archivo (ej: "08. ...", "15_...", "09 - ...")
+    const prefixMatch = fileName.match(/^\s*0*(\d{1,2})[\s.\-_)]/);
+    const prefixNum = prefixMatch ? parseInt(prefixMatch[1], 10) : null;
+
+    // Ignorar explícitamente documentos administrativos de la convocatoria departamental
+    if (this.isConvocatoriaDoc(clean)) {
+      return [];
+    }
+
+    // Soporte para etiquetado explícito del usuario: "item 4", "requisito_04", "anexo 41"
+    const explicitItemMatch = fileName.match(/\b(?:item|requisito|anexo)\s*[-_]?\s*(\d{1,2})\b/i);
+    if (explicitItemMatch) {
+      const n = parseInt(explicitItemMatch[1], 10);
+      if (n >= 1 && n <= 41) {
+        matched.push(n);
+      }
+    }
+
+    // Item 1: Solicitud formal del alcalde
+    if ((clean.includes("solicitud") && ["formal", "alcalde", "priorizacion", "carta", "oficio"].some(k => clean.includes(k))) ||
+        clean.startsWith("carta de solicitud") || clean.startsWith("solicitud") ||
+        (clean.includes("carta") && clean.includes("solicitud"))) {
+      if (!["cedula", "rut", "posesion", "planos", "presupuesto", "fotos", "acuerdo", "compromiso", "intencion"].some(e => clean.includes(e))) {
+        matched.push(1);
+      }
+    }
+
+    // Item 2: Plano de localización e implantación MAGNA SIRGAS (KMZ / KML o planos de localización)
+    if (ext === "kmz" || ext === "kml" || (["zip", "rar", "7z"].includes(ext) && ["georref", "georef", "trazado", "track"].some(k => clean.includes(k))) ||
+       (["localizacion", "implantacion", "magna sirgas", "magna", "sirgas"].some(k => clean.includes(k)) && ["plano", "esquema", "espacial"].some(k => clean.includes(k)))) {
+      matched.push(2);
+    }
+
+    // Item 3: Estudio hidrológico, hidráulico e hidrosanitario
+    if (["hidrolog", "hidraul", "hidrosanitar", "estudio de drenaje", "socavacion"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(3);
+    }
+
+    // Item 4: Estudio de suelos (CBR)
+    if ((["estudio de suelos", "estudio suelos", "ensayos de suelos", "ensayo de suelos", "mecanica de suelos", "informe geotecnico", "geotecn"].some(k => clean.includes(k)) ||
+        (/\bcbr\b/.test(cleanNorm) && ["suelo", "estudio", "ensayo", "informe"].some(k => clean.includes(k)))) && !this.hasAdminExclusion(clean)) {
+      matched.push(4);
+    }
+
+    // Item 5: Diseño de estructuras (obras transversales y contención)
+    if ((["diseno estructuras", "diseno de estructuras", "calculo estructural", "memoria estructural", "obras de contencion", "muros de contencion", "box culvert", "alcantarilla"].some(k => clean.includes(k)) ||
+        (clean.includes("estructur") && ["diseno", "calculo", "memoria"].some(k => clean.includes(k)) && !clean.includes("pavimento"))) && !this.hasAdminExclusion(clean)) {
+      matched.push(5);
+    }
+
+    // Item 6: Planos de construcción generales y de detalle (dwg, planta y perfil, cortes)
+    if (ext === "dwg" || (["planos de construccion", "planos constructivos", "planta y perfil", "perfil longitudinal", "cortes y detalles", "detalles constructivos", "planos generales"].some(k => clean.includes(k)) ||
+        (clean.includes("plano") && ["construccion", "obra", "perfil", "corte", "general"].some(k => clean.includes(k)))) && !this.hasAdminExclusion(clean) && ext !== "kmz" && ext !== "kml") {
+      matched.push(6);
+    }
+
+    // Item 7: Especificaciones técnicas
+    if (["especificaciones tecnicas", "especificacion tecnica", "especificaciones", "esquema de especificaciones"].some(k => clean.includes(k)) ||
+        (clean.startsWith("esquema") && ["placa", "placah", "tecnico", "act"].some(k => clean.includes(k)))) {
+      if (ext !== "dwg" && !["acuerdo", "concejo", "posesion", "despiece", "presupuesto"].some(e => clean.includes(e))) {
+        matched.push(7);
+      }
+    }
+
+    // Item 8: Plan de manejo ambiental (PMA, PAGA, PGYO, carta compromiso ambiental)
+    const hasPmaAcronym = /\bpma\b/.test(cleanNoDotsNorm) || (cleanNoDots.startsWith("pma") && (cleanNoDots.length === 3 || /[^a-z]/.test(cleanNoDots[3]))) || cleanNoDots === "pma";
+    const hasEnvKeywords = [
+      "pma", "paga", "pgyo", "pmas", "pgir",
+      "manejo ambiental", "plan ambiental", "gestion ambiental",
+      "licencia ambiental", "licencias ambientales",
+      "permiso ambiental", "permisos ambientales",
+      "compromiso ambiental", "estudio ambiental",
+      "ficha ambiental", "componente ambiental"
+    ].some(k => clean.includes(k)) ||
+    (clean.includes("ambiental") && ["plan", "manejo", "gestion", "compromiso", "permiso", "licencia", "carta", "certificado", "documento"].some(k => clean.includes(k)));
+    const isNonAdminCommitmentForEnv = prefixNum === 8 && ["ambiental", "pma", "compromiso", "licencia", "permiso", "plan"].some(k => clean.includes(k) || cleanNoDots.includes(k));
+    const isBarePrefix8 = prefixNum === 8 && (!clean || clean.length <= 3);
+
+    if ((hasPmaAcronym || hasEnvKeywords || isNonAdminCommitmentForEnv || isBarePrefix8) &&
+        !this.hasAdminExclusion(clean) &&
+        !clean.includes("despiece") &&
+        !["cofinanc", "contrapartida", "recurso", "aporte"].some(k => clean.includes(k))) {
+      matched.push(8);
+    }
+
+    // Item 9: Plan de manejo de tránsito (PMT) y costeo
+    const hasPmtAcronym = /\bpmt\b/.test(cleanNoDotsNorm) || (cleanNoDots.startsWith("pmt") && (cleanNoDots.length === 3 || /[^a-z]/.test(cleanNoDots[3]))) || cleanNoDots === "pmt";
+    const hasPmtKeywords = [
+      "manejo de transito", "manejo transito", "plan de transito",
+      "costeo pmt", "desvios", "senalizacion y desvios", "plan vial de transito"
+    ].some(k => clean.includes(k)) ||
+    (clean.includes("transito") && ["manejo", "plan", "costeo", "senalizacion", "desvio", "desvios"].some(k => clean.includes(k)));
+    const isTransitStudy = [
+      "estudio de transito", "estudio transito", "aforo", "aforos",
+      "tpda", "tpd", "volumen vehicular", "conteo vehicular"
+    ].some(k => clean.includes(k));
+    const isPrefix9Pmt = prefixNum === 9 && ["transito", "pmt", "costeo", "desvio", "senaliz", "plan"].some(k => clean.includes(k) || cleanNoDots.includes(k));
+    const isBarePrefix9 = prefixNum === 9 && (!clean || clean.length <= 3);
+
+    if ((hasPmtAcronym || hasPmtKeywords || isPrefix9Pmt || isBarePrefix9) &&
+        !isTransitStudy &&
+        !this.hasAdminExclusion(clean) &&
+        !clean.includes("despiece")) {
+      matched.push(9);
+    }
+
+    // Item 10: Estudio de tránsito (aforo, TPDA)
+    if (["estudio de transito", "estudio transito", "aforo vehicular", "aforos", "tpda", "volumen vehicular", "conteo vehicular"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(10);
+    }
+
+    // Item 11: Diseño de estructura del pavimento
+    if (["diseno de pavimento", "diseno pavimento", "estructura de pavimento", "estructura pavimento", "paquete estructural", "calculo de pavimento"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(11);
+    }
+
+    // Item 12: Certificación de no puntos críticos / zonas de riesgo / POT
+    if (["puntos criticos", "zonas de riesgo", "zona de riesgo", "amenaza y riesgo", "riesgo geologico"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(12);
+    }
+
+    // Item 13: Fuentes de materiales y distancias de acarreo
+    if (["fuentes de materiales", "fuente de materiales", "fuentes materiales", "cantera", "canteras", "distancias de acarreo", "distancia de acarreo", "suministro de materiales"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(13);
+    }
+
+    // Item 14: Presupuesto detallado y memorias de cantidades
+    if ((["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext) && ["presupuesto", "pto", "apu", "cantidades de obra"].some(k => clean.includes(k)) && !clean.includes("despiece")) ||
+       (["presupuesto oficial", "presupuesto de obra", "presupuesto detallado", "analisis de precios", "cantidades de obra", "memorias de cantidades", "apu", "apus"].some(k => clean.includes(k)) && !clean.includes("pmt") && !this.hasAdminExclusion(clean) && !clean.includes("despiece"))) {
+      matched.push(14);
+    }
+
+    // Item 15: Certificación de vías no intervenidas con otro tipo de obras
+    const hasNoIntervKeywords = [
+      "no intervenidas", "no intervencion", "no intervenida", "no intervenciones",
+      "no estan siendo intervenidas", "no estan intervenidas",
+      "no doble intervencion", "doble intervencion",
+      "duplicidad", "no duplicidad", "sin duplicidad",
+      "concurrencia", "no concurrencia",
+      "superposicion", "no superposicion",
+      "otra obra", "otras obras", "otro tipo de obras", "otras intervenciones", "otra intervencion",
+      "no cruce de obras", "no cruce", "cruce de obras",
+      "intervencion con otro tipo", "intervenidas con otro tipo"
+    ].some(k => clean.includes(k)) ||
+    (clean.includes("interven") && ["otra", "otras", "otro", "doble", "duplic", "cruce"].some(k => clean.includes(k)));
+    const isPrefix15 = prefixNum === 15 && [
+      "intervenc", "interven", "obra", "duplic", "vias", "concurrenc",
+      "superposic", "declaracion", "certific", "cruce"
+    ].some(k => clean.includes(k));
+    const isBarePrefix15 = prefixNum === 15 && (!clean || clean.length <= 3);
+
+    if ((hasNoIntervKeywords || isPrefix15 || isBarePrefix15) &&
+        !this.hasAdminExclusion(clean) &&
+        !clean.includes("despiece") &&
+        !["parafiscal", "seguridad social", "paz y salvo"].some(k => clean.includes(k))) {
+      matched.push(15);
+    }
+
+    // Item 16: Certificación de documentos y planos originales firmados con matrícula COPNIA
+    if (["planos originales", "documentos originales", "originales firmados", "certificado de disenos", "certificacion de disenos", "matricula profesional", "tarjeta profesional", "copnia"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(16);
+    }
+
+    // Item 17: Memorial de responsabilidad profesional por especialidad
+    if (["memorial de responsabilidad", "memorial responsabilidad", "responsabilidad profesional"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(17);
+    }
+
+    // Item 18: Redes de servicios públicos en buen estado (vías urbanas)
+    if (["servicios publicos", "redes de servicios", "redes de acueducto", "acueducto y alcantarillado"].some(k => clean.includes(k)) && !this.hasAdminExclusion(clean)) {
+      matched.push(18);
+    }
+
+    // Item 19: Competencia de la vía a intervenir
+    if (["competencia via", "competencia municipal", "via a cargo", "propiedad de la via", "vias a intervenir", "vias terciarias", "red vial municipal"].some(k => clean.includes(k)) ||
+        (["certific", "certificado"].some(k => clean.includes(k)) && ["via", "vias"].some(k => clean.includes(k)))) {
+      if (ext !== "kmz" && ext !== "kml" && prefixNum !== 15 && !["posesion", "acuerdo", "especificac", "intencion", "carta de intencion", "no doble", "doble intervencion", "duplicidad", "concurrencia", "superposic", "otra obra", "no estan siendo"].some(e => clean.includes(e))) {
+        matched.push(19);
+      }
+    }
+
+    // Item 20: Acta de socialización con la comunidad
+    if (["socializacion", "socializ"].some(k => clean.includes(k)) ||
+        (clean.includes("acta") && ["comunidad", "asistencia", "reunion", "participacion", "concertacion"].some(k => clean.includes(k)))) {
+      if (!["posesion", "especificac", "despiece"].some(e => clean.includes(e))) {
+        matched.push(20);
+      }
+    }
+
+    // Item 21: Registro fotográfico a color con coordenadas
+    if (["fotograf", "fotos via", "fotos de la via", "evidencia fotografica", "panel fotografico", "registro fotog"].some(k => clean.includes(k))) {
+      if (!["especificac", "despiece"].some(e => clean.includes(e))) {
+        matched.push(21);
+      }
+    }
+
+    // Item 22: Cronograma de actividades
+    if (["cronograma", "plan de trabajo"].some(k => clean.includes(k)) && !["especificac", "despiece", "ficha"].some(e => clean.includes(e))) {
+      matched.push(22);
+    }
+
+    // Item 23: Certificado de financiación (CDP + aporte municipio)
+    if (["financiacion", "cofinanciacion", "cofianciacion", "cofinanc", "cofianc", "cdp", "disponibilidad presupuestal", "contrapartida", "carta de intencion"].some(k => clean.includes(k)) ||
+        (["certific", "cerific", "certificado"].some(k => clean.includes(k)) && ["recursos", "aporte", "valor del proyecto", "materiales", "maquinaria", "mano de obra"].some(k => clean.includes(k)))) {
+      if (!["regalias", "especificac", "despiece", "anticorrupcion", "banco", "bpim", "bppim"].some(e => clean.includes(e))) {
+        matched.push(23);
+      }
+    }
+
+    // Item 24: Regalías municipales
+    if (["regalias", "sgr", "regalias municipales", "resolucion viabilidad regalias", "acuerdo ocad"].some(k => clean.includes(k))) {
+      matched.push(24);
+    }
+
+    // Item 25: Cédula del alcalde
+    if (["cedula", "identidad", "identificacion"].some(k => clean.includes(k)) || /\bcc\b/.test(cleanNorm)) {
+      if (!["rut", "foto", "posesion"].some(e => clean.includes(e))) {
+        matched.push(25);
+      }
+    }
+
+    // Item 26: Acta de posesión del alcalde
+    if (clean.includes("posesion") && !["socializ", "especificac", "despiece"].some(e => clean.includes(e))) {
+      matched.push(26);
+    }
+
+    // Item 27: Acuerdo del Concejo (< 1 mes)
+    if (["acuerdo concejo", "acuerdo municipal", "facultades para contratar", "facultades contratar", "decreto compilatorio"].some(k => clean.includes(k)) ||
+        (clean.includes("acuerdo") && ["concejo", "facultad", "contratar", "vigencia"].some(k => clean.includes(k))) ||
+        (clean.includes("faculta") && clean.includes("contratar"))) {
+      if (!clean.includes("posesion")) {
+        matched.push(27);
+      }
+    }
+
+    // Item 28: Copia del RUT del municipio (< 1 mes)
+    if (["rut", "dian", "tributario", "registro unico tributario"].some(k => clean.includes(k)) && !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matched.push(28);
+    }
+
+    // Item 29: Contraloría - Responsables Fiscales (< 1 mes)
+    if (["contralor", "responsables fiscales", "responsabilidad fiscal", "sirec", "boletin fiscal"].some(k => clean.includes(k)) &&
+        !["procurad", "policia"].some(e => clean.includes(e))) {
+      matched.push(29);
+    }
+
+    // Item 30: Medidas Correctivas RNMC (< 1 mes)
+    if (["rnmc", "medidas correctivas", "correctivas"].some(k => clean.includes(k))) {
+      matched.push(30);
+    }
+
+    // Item 31: Antecedentes Judiciales Policía (< 1 mes)
+    if (["antecedentes judiciales", "judicial", "pasado judicial", "policia"].some(k => clean.includes(k)) &&
+        !["rnmc", "correctivas", "sexuales", "procurad", "contralor"].some(e => clean.includes(e))) {
+      matched.push(31);
+    }
+
+    // Item 32: Procuraduría - Antecedentes Disciplinarios (< 1 mes)
+    if (["procurad", "disciplinario", "siri"].some(k => clean.includes(k)) && !["contralor", "policia"].some(e => clean.includes(e))) {
+      matched.push(32);
+    }
+
+    // Item 33: Seguridad social y parafiscales (mes presente)
+    if (["parafiscal", "parfiscal", "seguridad social"].some(k => clean.includes(k)) ||
+        (clean.includes("paz y salvo") && !["alimento", "contralor", "procurad"].some(e => clean.includes(e)))) {
+      matched.push(33);
+    }
+
+    // Item 34: REDAM (< 1 mes)
+    if (["redam", "alimentarios", "alimentos", "deudores"].some(k => clean.includes(k))) {
+      matched.push(34);
+    }
+
+    // Bundle de declaraciones y compromisos (Items 35, 36, 37, 38)
+    const isBundle = ["declaracion", "declaraciones"].some(k => clean.includes(k)) && ["compromiso", "compromisos", "anexo", "anexos"].some(k => clean.includes(k));
+    if (isBundle) {
+      matched.push(35, 36, 37, 38);
+    } else {
+      if ((["anticorrupcion", "pacto anticorrupcion"].some(k => clean.includes(k)) || (clean.includes("compromiso") && clean.includes("corrupcion"))) && !clean.includes("paco")) {
+        matched.push(35);
+      }
+      if (["lavado", "sarlaft", "terrorismo"].some(k => clean.includes(k)) || (clean.includes("activos") && !clean.includes("fijo"))) {
+        matched.push(36);
+      }
+      if (["inhabilidad", "incompatibilidad", "conflicto"].some(k => clean.includes(k)) && !["sexuales", "menores"].some(e => clean.includes(e))) {
+        matched.push(37);
+      }
+      if (["multas", "sancion", "no multas", "incumplimiento"].some(k => clean.includes(k)) && !["rnmc", "correctivas"].some(e => clean.includes(e))) {
+        matched.push(38);
+      }
+    }
+
+    // Item 39: Consulta portal anticorrupción PACO (< 1 mes)
+    if (["paco", "portal anticorrupcion", "transparencia"].some(k => clean.includes(k)) && !["compromiso", "balance contrato"].some(e => clean.includes(e))) {
+      matched.push(39);
+    }
+
+    // Item 40: Inhabilidades delitos sexuales menores (< 1 mes)
+    if (["delitos sexuales", "menores", "sexuales", "1918"].some(k => clean.includes(k))) {
+      matched.push(40);
+    }
+
+    // Item 41: Banco y programas de proyectos del municipio
+    if (((clean.includes("banco") && clean.includes("proyecto")) || ["bppim", "bpim", "bpin", "bpp", "radicacion"].some(k => clean.includes(k))) &&
+        !["especificac", "despiece"].some(e => clean.includes(e))) {
+      matched.push(41);
+    }
+
+    return [...new Set(matched)];
+  },
+
+  /**
+   * Clasifica los archivos en los 41 requisitos de Convenios "2026 - II"
+   */
+  async classifyFilesToItems41(files) {
+    const detectedMap = {};
+    const detectedFilesMap = {};
+    const archivosDetectadosMap = {};
+
+    for (let itemId = 1; itemId <= 41; itemId++) {
+      detectedFilesMap[itemId] = [];
+    }
+
+    // 1. Coincidencias semánticas y por prefijo numérico
+    for (const file of files) {
+      const matchedItemIds = this.matchFileToItems2026_2(file);
+      for (const itemId of matchedItemIds) {
+        if (itemId >= 1 && itemId <= 41) {
+          detectedFilesMap[itemId].push(file);
+        }
+      }
+    }
+
+    // 2. Si el ítem 14 (Presupuesto) no se detectó por nombre, inspeccionar hojas en Excel
+    if (detectedFilesMap[14].length === 0 && typeof XLSX !== "undefined") {
+      for (const file of files) {
+        const ext = this.getFileExtension(file);
+        if (["xlsx", "xlsm", "xls", "xlsb", "ods"].includes(ext)) {
+          try {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: "array", bookSheets: true });
+            if (wb && wb.SheetNames && wb.SheetNames.some(s => {
+              const u = s.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+              return u.includes("PRESUPUESTO") || u.includes("APU") || u.includes("PTO") || u.includes("CANTIDAD");
+            })) {
+              detectedFilesMap[14].push(file);
+              break;
+            }
+          } catch (e) { }
+        }
+      }
+    }
+
+    // 3. Poblar detectedMap y archivosDetectadosMap
+    for (let itemId = 1; itemId <= 41; itemId++) {
+      const matched = detectedFilesMap[itemId];
+      if (matched && matched.length > 0) {
+        detectedMap[itemId] = matched[0];
+        archivosDetectadosMap[itemId] = matched.map(f => f.name).join(", ");
+      } else {
+        detectedMap[itemId] = null;
+      }
+    }
+
+    return { detectedMap, detectedFilesMap, archivosDetectadosMap };
+  },
+
+  /**
+   * Clasifica los archivos delegando al proceso correspondiente (Ordinario o 2026 - II)
+   */
+  async classifyFiles(files, processMode = "ORDINARIO") {
+    if (processMode === "2026_2" || processMode === "CONVENIOS_2026_2") {
+      return await this.classifyFilesToItems41(files);
+    }
+    return await this.classifyFilesToItems27(files);
   },
 
   /**
@@ -545,6 +969,67 @@ const FolderReader = {
   init() {
     this.setupInputs();
     this.setupDropzones();
+    this.initCrossTabSync();
+  },
+
+  /**
+   * Canal de sincronización en paralelo entre pestañas hermanas (Ordinario vs 2026 - II)
+   * Permite que ambas interfaces convivan abiertas simultáneamente sin borrarse
+   */
+  initCrossTabSync() {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
+    try {
+      this.syncChannel = new BroadcastChannel("sipro_parallel_sync");
+      this.syncChannel.onmessage = async (event) => {
+        const data = event.data;
+        if (!data || !data.type) return;
+
+        // 1. Otra pestaña hermana solicita el proyecto activo para sincronizar en paralelo
+        if (data.type === "REQUEST_ACTIVE_PROJECTS") {
+          const activeId = window.App && App.currentProjectId;
+          const rec = (window.proyectosAuditados && window.proyectosAuditados[activeId]) || (window.proyectosAuditados && Object.values(window.proyectosAuditados)[0]);
+          if (rec && this.rawFilesByProject && this.rawFilesByProject[rec.id]) {
+            const files = this.rawFilesByProject[rec.id];
+            try {
+              this.syncChannel.postMessage({
+                type: "RESPONSE_ACTIVE_PROJECTS",
+                proyectoId: rec.id,
+                municipio: rec.municipio,
+                rawFolderName: rec.rawFolderName,
+                files: files,
+                senderProcessMode: (window.App && App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO"
+              });
+            } catch (errPost) {
+              console.warn("No se pudo transmitir archivos por BroadcastChannel:", errPost);
+            }
+          }
+        }
+
+        // 2. Respuesta con el proyecto activo o notificación de nuevo proyecto cargado
+        if (data.type === "RESPONSE_ACTIVE_PROJECTS" || data.type === "BROADCAST_NEW_PROJECT") {
+          const hasLocalProjects = window.proyectosAuditados && Object.keys(window.proyectosAuditados).length > 0;
+          if (!hasLocalProjects && data.files && data.files.length > 0) {
+            console.log(`[PARALELO] Sincronizando expediente "${data.municipio}" desde pestaña paralela...`);
+            this.showToast(`⧉ Expediente "${data.municipio}" sincronizado en paralelo. Evaluando...`);
+            await this.processFileList(data.files, null);
+          }
+        }
+      };
+
+      // Si no tenemos proyectos cargados localmente en esta pestaña, solicitar a la pestaña hermana
+      const hasLocalProjects = window.proyectosAuditados && Object.keys(window.proyectosAuditados).length > 0;
+      if (!hasLocalProjects) {
+        setTimeout(() => {
+          try {
+            if (this.syncChannel) {
+              this.syncChannel.postMessage({ type: "REQUEST_ACTIVE_PROJECTS" });
+            }
+          } catch (e) { }
+        }, 350);
+      }
+    } catch (e) {
+      console.warn("BroadcastChannel no disponible:", e);
+    }
   },
 
   setupInputs() {
@@ -717,6 +1202,7 @@ const FolderReader = {
    */
   async expandirArchivosComprimidos(fileList) {
     if (!fileList || fileList.length === 0) return [];
+    if (fileList._isAlreadyExpanded) return fileList;
     const expandedFiles = [];
 
     // Inicializar Web Worker local mediante Blob para libarchive.js para evitar bloqueos CORS
@@ -741,6 +1227,14 @@ const FolderReader = {
         : null;
       const parentFolder = relDir || (file.webkitRelativePath ? file.webkitRelativePath.split('/')[0] : (file.name.replace(/\.[^/.]+$/, "") || "proyecto"));
 
+      // 0. Si el archivo comprimido es un registro fotográfico / fotos, CONSERVARLO directamente sin descomprimir
+      // Las fotos ocupan cientos de MB en RAM y no contienen KMLs ni documentos de auditoría (el archivo satisface el Ítem 6)
+      const isFotoArchive = /(?:foto|fotograf|registro[\s_-]*fotog|panel[\s_-]*fotog)/i.test(lower);
+      if (isFotoArchive && (lower.endsWith(".zip") || lower.endsWith(".rar") || lower.endsWith(".7z") || lower.endsWith(".tar") || lower.endsWith(".gz") || lower.endsWith(".kmz"))) {
+        expandedFiles.push(file);
+        continue;
+      }
+
       // 1. Archivos .zip y .kmz (Directamente con JSZip.loadAsync(await file.arrayBuffer()))
       if (lower.endsWith(".zip") || lower.endsWith(".kmz")) {
         expandedFiles.push(file); // Conservar archivo contenedor en el inventario
@@ -759,6 +1253,11 @@ const FolderReader = {
               const entryLower = relPath.toLowerCase();
               const cleanEntryName = relPath.split('/').pop();
               if (!cleanEntryName) continue;
+
+              // Omitir imágenes dentro de archivos comprimidos para ahorrar memoria y prevenir congelamiento de navegador
+              if (/\.(?:jpe?g|png|gif|bmp|webp|heic|tiff?)$/i.test(entryLower)) {
+                continue;
+              }
 
               // Si es un .kmz anidado dentro de .zip
               if (entryLower.endsWith(".kmz")) {
@@ -874,6 +1373,11 @@ const FolderReader = {
       // 2. Archivos .7z y .rar (usando libarchive.js con Worker local por Blob)
       else if (lower.endsWith(".7z") || lower.endsWith(".rar")) {
         expandedFiles.push(file); // Conservar archivo contenedor
+        // Si el archivo supera 8 MB, no intentar descompresión WebAssembly en memoria para prevenir cuelgues
+        if (file.size > 8 * 1024 * 1024) {
+          console.warn(`Archivo comprimido ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB) conservado sin descompresión profunda en memoria.`);
+          continue;
+        }
         let extractedCount = 0;
         try {
           if (ArchiveClass) {
@@ -884,6 +1388,11 @@ const FolderReader = {
               let extractedFile = null;
               const cleanEntryName = entryName.split('/').pop();
               if (!cleanEntryName) continue;
+
+              // Omitir imágenes dentro del archivo comprimido para proteger la memoria RAM
+              if (/\.(?:jpe?g|png|gif|bmp|webp|heic|tiff?)$/i.test(cleanEntryName)) {
+                continue;
+              }
 
               if (entryItem instanceof File) {
                 extractedFile = entryItem;
@@ -960,6 +1469,7 @@ const FolderReader = {
       }
     }
 
+    expandedFiles._isAlreadyExpanded = true;
     return expandedFiles;
   },
 
@@ -967,6 +1477,10 @@ const FolderReader = {
    * Alias de lectura de carpeta para compatibilidad con File System Access API
    */
   async readFolder(rawFiles, dirHandle = null) {
+    return this.processFileList(rawFiles, dirHandle);
+  },
+
+  async processFolder(rawFiles, rawFolderName = "", id = "", dirHandle = null) {
     return this.processFileList(rawFiles, dirHandle);
   },
 
@@ -1077,8 +1591,11 @@ const FolderReader = {
    * Ejecuta Fase 1A, Fase 1B y Fase 2 y encapsula el resultado en window.proyectosAuditados[id]
    */
   async processSingleProjectFiles(rawFiles, fichaFile, dirHandle = null) {
-    // Asegurar descompresión completa en memoria
-    const files = await this.expandirArchivosComprimidos(rawFiles);
+    const t0 = performance.now();
+    console.log(`[AUDIT-STEP] Starting project files processing... (${rawFiles.length} files)`);
+    // Asegurar descompresión completa en memoria sin duplicar si ya fue expandido
+    const files = (rawFiles && rawFiles._isAlreadyExpanded) ? rawFiles : await this.expandirArchivosComprimidos(rawFiles);
+    console.log(`[AUDIT-STEP] 0. Expansion finished: ${(performance.now() - t0).toFixed(0)}ms (${files.length} files)`);
 
     // Obtener nombre de la carpeta de forma segura sin split('.') destructivo
     const rawFolderName = this.getRawFolderName(files, dirHandle);
@@ -1291,14 +1808,25 @@ const FolderReader = {
       fichaData.subregion = "ANTIOQUIA";
     }
 
+    console.log(`[AUDIT-STEP] 1. Ficha parsed: ${(performance.now() - t0).toFixed(0)}ms (Mpio: ${fichaData.municipio})`);
+
     // =========================================================================
-    // PASO 2: MAPEO DINÁMICO DE LOS 27/28 ÍTEMS NORMATIVOS (ESTRICTO SEMÁNTICO)
+    // PASO 2: MAPEO DINÁMICO DE ÍTEMS NORMATIVOS (ORDINARIO: 27/28 vs 2026-II: 41)
     // =========================================================================
-    const classification = await this.classifyFilesToItems27(files);
+    const processMode = (window.App && window.App.currentProcessMode) || (window.SIPRO_PROCESS_MODE) || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    
+    // Almacenar archivos en memoria por proyecto para permitir conmutación reactiva inmediata
+    this.rawFilesByProject = this.rawFilesByProject || {};
+    this.rawFilesByProject[proyectoId] = files;
+
+    const classification = await this.classifyFiles(files, processMode);
+    console.log(`[AUDIT-STEP] 2. Classify finished (${processMode}): ${(performance.now() - t0).toFixed(0)}ms`);
     const detectedMap = classification.detectedMap || {};
     const detectedFilesMap = classification.detectedFilesMap || {};
     const archivosDetectadosMap = classification.archivosDetectadosMap || {};
-    const items27 = SIPRO_DATA.items27;
+    const itemsNormativos = is2026_2 ? (SIPRO_DATA.items41_2026_2 || []) : (SIPRO_DATA.items27 || []);
+    const items27 = itemsNormativos;
 
     // =========================================================================
     // PASO 3: METADATOS Y TEXTO DE LOS ARCHIVOS DETECTADOS (BLINDADO CON TRY/CATCH)
@@ -1316,8 +1844,9 @@ const FolderReader = {
     let extractedCcSecretario = null;
     let extractedOrigenSecretario = null;
 
-    // Indexación ágil de metadatos de los 28 ítems sin bloqueo de hilo
-    for (let i = 1; i <= 28; i++) {
+    // Indexación ágil de metadatos de los ítems (hasta 41 en 2026-II o 28 en Ordinario)
+    const maxIndexCount = is2026_2 ? 41 : 28;
+    for (let i = 1; i <= maxIndexCount; i++) {
       const file = detectedMap[i];
       if (file) {
         const allMatched = detectedFilesMap[i] || [file];
@@ -1330,8 +1859,9 @@ const FolderReader = {
       }
     }
 
-    // Extracción rápida de Matrícula e Ingeniero Proyectista (Ítems 2 y 3, máximo 2 páginas)
-    for (const i of [2, 3]) {
+    // Extracción rápida de Matrícula e Ingeniero Proyectista (Ítems 2 y 3 en ordinario, o 6 y 7 en 2026-II)
+    const checkIngItems = is2026_2 ? [6, 16, 17, 7] : [2, 3];
+    for (const i of checkIngItems) {
       const file = detectedMap[i];
       if (file && (!extractedMatricula || !extractedEngineer)) {
         try {
@@ -1357,8 +1887,12 @@ const FolderReader = {
       }
     }
 
-    // Extracción de fecha para ítems sujetos a vigencia mensual estricta (9, 10, 11, 12, 13, 14, 15, 16, 21, 22)
-    const itemsVigencia = [9, 10, 11, 12, 13, 14, 15, 16, 21, 22];
+    // Extracción de fecha para ítems sujetos a vigencia mensual estricta
+    // Ordinario: [9, 10, 11, 12, 13, 14, 15, 16, 21, 22]
+    // Convenios 2026-II: [27, 28, 29, 30, 31, 32, 33, 34, 39, 40]
+    const itemsVigencia = is2026_2
+      ? [27, 28, 29, 30, 31, 32, 33, 34, 39, 40]
+      : [9, 10, 11, 12, 13, 14, 15, 16, 21, 22];
     for (const i of itemsVigencia) {
       const file = detectedMap[i] || detectedMap[String(i)];
       if (file) {
@@ -1397,6 +1931,8 @@ const FolderReader = {
       }
     }
 
+    console.log(`[AUDIT-STEP] 3. Metadata & Vigencia finished: ${(performance.now() - t0).toFixed(0)}ms`);
+
     // Extracción de firmas mediante Motor Heurístico y Recursivo de 5 Capas (Ficha + Fallback Multi-Documento)
     try {
       const firmasFicha = await this.extraerFirmasFichaPriorizacion(files, fichaFile, allFichas, detectedMap, itemTextsMap, fichaData.municipio);
@@ -1417,14 +1953,17 @@ const FolderReader = {
     } catch (eFirmas) {
       console.warn("Aviso al extraer firmas con motor heurístico:", eFirmas);
     }
+    console.log(`[AUDIT-STEP] 4. Signatures finished: ${(performance.now() - t0).toFixed(0)}ms`);
 
     const matchedCount = Object.keys(archivosDetectadosMap).length;
 
     // =========================================================================
     // PASO 4: AUDITORÍA Y RECÁLCULO DE ACERO Y CONCRETO (FASE 1A)
     // =========================================================================
-    const fileDespiece = detectedMap[3];
-    const fileEspec = detectedMap[2];
+    const fileDespiece = files.find(f => /despiece|acero|figuracion|planilla/i.test(f.name)) || (is2026_2 ? null : detectedMap[3]);
+    const fileEspec = is2026_2
+      ? (detectedMap[7] || files.find(f => /especificac/i.test(f.name)))
+      : detectedMap[2];
     let despieceConfig = null;
     if (fileDespiece) {
       try {
@@ -1433,13 +1972,14 @@ const FolderReader = {
         console.warn("Error en parseDespieceFile:", eDespiece);
       }
     }
+    console.log(`[AUDIT-STEP] 5. Despiece finished: ${(performance.now() - t0).toFixed(0)}ms`);
     if (!despieceConfig) {
       despieceConfig = {
         tieneDocumento: false,
         archivoNombre: null,
         totalKilos: 0,
         pesoTotalDeclaradoKg: 0,
-        longitudIntervencionM: fichaData.longitudTotalM || 0,
+        longitudIntervencionM: 0,
         cuantiaKgM: 0,
         cumpleCuantia: false,
         marcas: [],
@@ -1506,6 +2046,7 @@ const FolderReader = {
         console.warn("Error en parseGeorefFiles:", eGeo);
         geoConfig = null;
       }
+      console.log(`[AUDIT-STEP] 6. Georef finished: ${(performance.now() - t0).toFixed(0)}ms (tramos: ${geoConfig && geoConfig.tramos ? geoConfig.tramos.length : 0})`);
 
       const hasValidGeom = Boolean(
         geoConfig &&
@@ -1531,6 +2072,20 @@ const FolderReader = {
           textSnippet: `Georreferenciación verificada en contenedor digital. ${geoConfig.tramos.length} tramos independientes procesados.`
         };
         archivosMetadata["24"] = archivosMetadata[24];
+
+        if (is2026_2) {
+          detectedMap[2] = primaryFile;
+          detectedMap["2"] = primaryFile;
+          archivosDetectadosMap[2] = primaryFile.name;
+          archivosDetectadosMap["2"] = primaryFile.name;
+          archivosMetadata[2] = {
+            fileName: primaryFile.name,
+            sizeBytes: primaryFile.size,
+            lastModified: primaryFile.lastModified,
+            textSnippet: `Plano de localización e implantación espacial en coordenadas MAGNA SIRGAS verificado. ${geoConfig.tramos.length} tramos independientes procesados.`
+          };
+          archivosMetadata["2"] = archivosMetadata[2];
+        }
       } else {
         // Garantizar que no quede registrado como detectado si no hay geometrías válidas
         delete detectedMap[24];
@@ -1628,8 +2183,9 @@ const FolderReader = {
     // =========================================================================
     // DETECCIÓN DE MODALIDAD (MATERIALES vs RECURSOS)
     // =========================================================================
+    const budgetItemId = is2026_2 ? 14 : 28;
     let modalidad = "MATERIALES";
-    if (detectedMap[28]) {
+    if (detectedMap[budgetItemId] || detectedMap[28] || detectedMap[14] || (detectedFilesMap && ((detectedFilesMap[budgetItemId] && detectedFilesMap[budgetItemId].length > 0) || (detectedFilesMap[14] && detectedFilesMap[14].length > 0) || (detectedFilesMap[28] && detectedFilesMap[28].length > 0))) || files.some(f => /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(f.name) && /presupuesto|pto|apu|cantidades/i.test(f.name))) {
       modalidad = "RECURSOS";
     }
     if (savedAuditData && savedAuditData.modalidad) {
@@ -1701,8 +2257,9 @@ const FolderReader = {
         entidadMatricula: "COPNIA",
         vigente: !!extractedMatricula
       },
-      estadoSimulacion: matchedCount === (modalidad === "RECURSOS" ? 28 : 27) ? "APROBADO_CONFORME" : "EN_EVALUACION",
-      faseActiva: matchedCount === (modalidad === "RECURSOS" ? 28 : 27) ? "3_APROBADO" : "2_DOCUMENTAL",
+      estadoSimulacion: matchedCount >= (is2026_2 ? 41 : (modalidad === "RECURSOS" ? 28 : 27)) ? "APROBADO_CONFORME" : "EN_EVALUACION",
+      faseActiva: matchedCount >= (is2026_2 ? 41 : (modalidad === "RECURSOS" ? 28 : 27)) ? "3_APROBADO" : "2_DOCUMENTAL",
+      procesoEspecial: processMode,
       fichaPriorizacion: fichaData,
       totalArchivosCargados: files.length,
       archivosMetadata: archivosMetadata,
@@ -1717,7 +2274,7 @@ const FolderReader = {
       },
       documentosStatus: {
         itemsCumplidos: Object.keys(archivosDetectadosMap).map(Number),
-        itemsSubsanar: items27.filter(i => !archivosDetectadosMap[i.id]).map(i => i.id),
+        itemsSubsanar: itemsNormativos.filter(i => !archivosDetectadosMap[i.id]).map(i => i.id),
         archivosDetectados: archivosDetectadosMap,
         fechasDocumentos: Object.fromEntries(
           itemsVigencia.filter(i => archivosMetadata[i] && archivosMetadata[i].fechaDoc)
@@ -1746,7 +2303,7 @@ const FolderReader = {
       audit2 = DocumentalEngine.auditProject(proyectoData);
     } catch (eC) {
       console.warn("Error en DocumentalEngine.auditProject:", eC);
-      audit2 = { itemsConformes: matchedCount, itemsNoConformes: 27 - matchedCount };
+      audit2 = { itemsConformes: matchedCount, itemsNoConformes: (is2026_2 ? 41 : 27) - matchedCount };
     }
 
     const hasValidKmz = Boolean(
@@ -1772,7 +2329,7 @@ const FolderReader = {
       audit1B.motivoRechazo = 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.';
     }
 
-    const totalItemsCount = (modalidad === "RECURSOS") ? 28 : 27;
+    const totalItemsCount = is2026_2 ? 41 : ((modalidad === "RECURSOS") ? 28 : 27);
     const isApproved = (
       audit1A.cuantiaConforme &&
       hasValidKmz &&
@@ -1818,6 +2375,7 @@ const FolderReader = {
       codMunicipio: fichaData.codMunicipio,
       subregion: fichaData.subregion,
       modalidad: modalidad,
+      procesoEspecial: processMode,
       dirHandle: dirHandle || null,
       fichaPriorizacion: fichaData,
       historialSubsanaciones: (savedAuditData && savedAuditData.historialSubsanaciones) || [],
@@ -1830,8 +2388,8 @@ const FolderReader = {
       despieceExtraido: despieceConfig.despieceExtraido || despieceConfig,
       fase1A: {
         ...audit1A,
-        longitudTramo: finalLength,
-        longitudIntervencionM: finalLength,
+        longitudTramo: (despieceConfig && despieceConfig.tieneDocumento !== false) ? finalLength : 0,
+        longitudIntervencionM: (despieceConfig && despieceConfig.tieneDocumento !== false) ? finalLength : 0,
         tieneDocumento: audit1A.tieneDocumento !== false && despieceConfig.tieneDocumento !== false,
         marcas: (audit1A.tieneDocumento !== false && despieceConfig.tieneDocumento !== false) ? (audit1A.marcas || []) : [],
         concreto: (audit1A.tieneDocumento !== false && despieceConfig.tieneDocumento !== false) ? (audit1A.concreto || []) : []
@@ -1849,7 +2407,8 @@ const FolderReader = {
         motivoRechazo: !hasValidKmz
           ? 'Documento faltante: No se aportó archivo de georreferenciación (.KMZ / .KML) en el expediente.'
           : (audit1B.coberturaConforme ? null : `Desfase de alineación: Cobertura (${audit1B.coberturaBufferPct}%) inferior al 95%.`),
-        puntos: (geoConfig && (geoConfig.puntos || geoConfig.puntosInspeccion)) || []
+        puntos: (geoConfig && (geoConfig.puntos || geoConfig.puntosInspeccion)) || [],
+        redVialRecortada: (geoConfig && geoConfig.redVialRecortada) || null
       },
       fase2: audit2,
       kpis: kpis,
@@ -1857,9 +2416,19 @@ const FolderReader = {
       timestamp: Date.now()
     };
 
-    // Si modalidad es RECURSOS, ejecutar de una vez la auditoría de presupuesto (Fase 1C)
-    if (modalidad === "RECURSOS" && typeof PresupuestoEngine !== "undefined") {
-      const budgetFile = detectedMap[28];
+    if (window.SpatialEngine && geoConfig && geoConfig.redVialRecortada) {
+      window.SpatialEngine.roadsByProject = window.SpatialEngine.roadsByProject || {};
+      window.SpatialEngine.roadsByProject[proyectoId] = geoConfig.redVialRecortada;
+    }
+
+    // Si modalidad es RECURSOS o se detectó presupuesto, ejecutar de una vez la auditoría de presupuesto (Fase 1C)
+    if ((modalidad === "RECURSOS" || is2026_2) && typeof PresupuestoEngine !== "undefined") {
+      const budgetCandidates = (detectedFilesMap && (detectedFilesMap[budgetItemId] || detectedFilesMap[14] || detectedFilesMap[28])) || [];
+      const budgetFile = budgetCandidates.find(f => /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(f.name))
+                      || detectedMap[budgetItemId]
+                      || detectedMap[14]
+                      || detectedMap[28]
+                      || files.find(f => /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(f.name) && /presupuesto|pto|apu|cantidades/i.test(f.name));
       if (budgetFile && /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(budgetFile.name)) {
         try {
           const pData = await PresupuestoEngine.parseExcelBudget(budgetFile, window.proyectosAuditados[proyectoId]?.fase1A || audit1A);
@@ -1949,6 +2518,22 @@ const FolderReader = {
         await SpatialEngine.syncRoadsForProject(window.proyectosAuditados[proyectoId].datos || window.proyectosAuditados[proyectoId]);
       } catch (errSync) {
         console.warn("Aviso en sincronización vial:", errSync);
+      }
+    }
+
+    // Transmitir proyecto a cualquier pestaña hermana abierta en paralelo
+    if (this.syncChannel) {
+      try {
+        this.syncChannel.postMessage({
+          type: "BROADCAST_NEW_PROJECT",
+          proyectoId: proyectoId,
+          municipio: fichaData.municipio,
+          rawFolderName: rawFolderName,
+          files: files,
+          senderProcessMode: processMode
+        });
+      } catch (eBroadcast) {
+        console.warn("Aviso: No se pudo emitir BROADCAST_NEW_PROJECT:", eBroadcast);
       }
     }
 
@@ -2187,152 +2772,206 @@ const FolderReader = {
     // PASO 1: Extraer geometrías crudas (LineStrings, Polygons, Points) de los KMLs
     // =========================================================================
     for (const item of allExtractedKmls) {
+      await new Promise(r => setTimeout(r, 0)); // Ceder control antes de parsear cada archivo KML
       try {
         const xmlDoc = parser.parseFromString(item.kmlText, "text/xml");
         const placemarks = xmlDoc.getElementsByTagName("Placemark");
 
         for (let i = 0; i < placemarks.length; i++) {
           const pm = placemarks[i];
+
+          // 1. Omitir elementos y capas ocultas (<visibility>0</visibility>) en Google Earth
+          const visNode = pm.getElementsByTagName("visibility")[0];
+          if (visNode && visNode.textContent.trim() === "0") {
+            continue; // Elemento oculto en Google Earth
+          }
+          let parentEl = pm.parentElement;
+          let isParentHidden = false;
+          while (parentEl && parentEl.tagName !== "kml" && parentEl !== xmlDoc) {
+            if (parentEl.tagName === "Folder" || parentEl.tagName === "Document") {
+              const pVis = parentEl.querySelector(":scope > visibility");
+              if (pVis && pVis.textContent.trim() === "0") {
+                isParentHidden = true;
+                break;
+              }
+            }
+            parentEl = parentEl.parentElement;
+          }
+          if (isParentHidden) continue;
+
           const nameNode = pm.getElementsByTagName("name")[0];
           const baseName = nameNode ? nameNode.textContent.trim() : `Tramo ${tramoCounter}`;
 
           // Extraer LineStrings independientes (incluso dentro de MultiGeometry)
-          const lineStrings = pm.getElementsByTagName("LineString");
-          for (let lsIdx = 0; lsIdx < lineStrings.length; lsIdx++) {
-            const ls = lineStrings[lsIdx];
-            const coordNode = ls.getElementsByTagName("coordinates")[0];
-            if (coordNode) {
-              const coords = this.parseCoordinatesText(coordNode.textContent);
-              if (coords.length > 1) {
-                // Deduplicación por Coordenadas Geográficas Exactas (primer, medio y último vértice)
-                const firstLat = coords[0].lat;
-                const firstLng = coords[0].lng;
-                const midIdx = Math.floor(coords.length / 2);
-                const midLat = coords[midIdx].lat;
-                const midLng = coords[midIdx].lng;
-                const lastIdx = coords.length - 1;
-                const lastLat = coords[lastIdx].lat;
-                const lastLng = coords[lastIdx].lng;
+          if (rawTramos.length < 60) {
+            const lineStrings = pm.getElementsByTagName("LineString");
+            for (let lsIdx = 0; lsIdx < lineStrings.length; lsIdx++) {
+              if (rawTramos.length >= 60) break;
+              const ls = lineStrings[lsIdx];
+              const coordNode = ls.getElementsByTagName("coordinates")[0];
+              if (coordNode) {
+                const coords = this.parseCoordinatesText(coordNode.textContent);
+                if (coords.length > 1) {
+                  // Deduplicación por Coordenadas Geográficas Exactas (primer, medio y último vértice)
+                  const firstLat = coords[0].lat;
+                  const firstLng = coords[0].lng;
+                  const midIdx = Math.floor(coords.length / 2);
+                  const midLat = coords[midIdx].lat;
+                  const midLng = coords[midIdx].lng;
+                  const lastIdx = coords.length - 1;
+                  const lastLat = coords[lastIdx].lat;
+                  const lastLng = coords[lastIdx].lng;
 
-                const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
-                const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+                  // Filtro territorial estricto: omitir tramos cuyas coordenadas caigan fuera de Antioquia / Colombia
+                  const hasCoordInAntioquia = coords.some(c => c.lat >= 5.0 && c.lat <= 9.2 && c.lng >= -77.6 && c.lng <= -73.6);
+                  if (!hasCoordInAntioquia) continue;
 
-                if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
-                  continue; // Tramo duplicado omitido
+                  const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
+                  const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+
+                  if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
+                    continue; // Tramo duplicado omitido
+                  }
+                  seenTramos.add(lineGeoKey);
+                  seenTramos.add(revLineGeoKey);
+
+                  let lenM = 0;
+                  for (let j = 0; j < coords.length - 1; j++) {
+                    lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
+                  }
+                  if (lenM > 6000) continue; // Un eje continuo mayor a 6 km es una carretera o red territorial completa, no un tramo de obra de placa huella
+                  totalLengthM += lenM;
+
+                  const tramoName = lineStrings.length > 1
+                    ? `${baseName} (Subtramo ${lsIdx + 1})`
+                    : baseName;
+
+                  const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
+
+                  rawTramos.push({
+                    idTramo: idTramo,
+                    nombrePlacemark: tramoName,
+                    sourceFile: item.sourceFile,
+                    tipoGeometria: "LineString",
+                    coords: coords,
+                    lenM: lenM
+                  });
                 }
-                seenTramos.add(lineGeoKey);
-                seenTramos.add(revLineGeoKey);
-
-                let lenM = 0;
-                for (let j = 0; j < coords.length - 1; j++) {
-                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
-                }
-                totalLengthM += lenM;
-
-                const tramoName = lineStrings.length > 1
-                  ? `${baseName} (Subtramo ${lsIdx + 1})`
-                  : baseName;
-
-                const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
-
-                rawTramos.push({
-                  idTramo: idTramo,
-                  nombrePlacemark: tramoName,
-                  sourceFile: item.sourceFile,
-                  tipoGeometria: "LineString",
-                  coords: coords,
-                  lenM: lenM
-                });
               }
             }
           }
 
           // Extraer Polygons independientes (outerBoundaryIs -> LinearRing -> coordinates)
+          // Regla técnica estricta: En proyectos de placa huella los tramos viales son lineales (LineString).
+          // Los polígonos suelen ser límites administrativos ("MPIO DE NARIÑO"), cascos urbanos ("CABECERA MPAL"),
+          // predios catastrales ("GLORIA ELENA") o reservas. Solo se aceptan si expresamente nombran un tramo/vía
+          // o si no existe ningún LineString en el expediente.
           const polygons = pm.getElementsByTagName("Polygon");
-          for (let polyIdx = 0; polyIdx < polygons.length; polyIdx++) {
-            const poly = polygons[polyIdx];
-            const coordNode = poly.getElementsByTagName("coordinates")[0];
-            if (coordNode) {
-              const coords = this.parseCoordinatesText(coordNode.textContent);
-              if (coords.length > 1) {
-                // Deduplicación por Coordenadas Geográficas Exactas para Polígonos
-                const firstLat = coords[0].lat;
-                const firstLng = coords[0].lng;
-                const midIdx = Math.floor(coords.length / 2);
-                const midLat = coords[midIdx].lat;
-                const midLng = coords[midIdx].lng;
-                const lastIdx = coords.length - 1;
-                const lastLat = coords[lastIdx].lat;
-                const lastLng = coords[lastIdx].lng;
+          const isRoadPolygon = /(?:tramo|via\b|vía\b|placa[\s_-]*huella|intervencion|intervención|eje)/i.test(baseName) &&
+            !/(?:mpio|municipio|cabecera|limite|límite|predio|lote|manzana|catast|reserva|cuenca|zona|área|area)/i.test(baseName);
 
-                const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
-                const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+          if (polygons.length > 0 && rawTramos.length < 60 && (isRoadPolygon || (rawTramos.length === 0 && !/(?:mpio|municipio|cabecera|limite|predio|lote|catast)/i.test(baseName)))) {
+            for (let polyIdx = 0; polyIdx < polygons.length; polyIdx++) {
+              if (rawTramos.length >= 60) break;
+              const poly = polygons[polyIdx];
+              const coordNode = poly.getElementsByTagName("coordinates")[0];
+              if (coordNode) {
+                const coords = this.parseCoordinatesText(coordNode.textContent);
+                if (coords.length > 1) {
+                  let lenM = 0;
+                  for (let j = 0; j < coords.length - 1; j++) {
+                    lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
+                  }
+                  if (lenM > 4000) continue; // Un polígono con perímetro > 4km es un predio o zona territorial, no un tramo de placa huella
 
-                if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
-                  continue; // Polígono duplicado omitido
+                  // Deduplicación por Coordenadas Geográficas Exactas para Polígonos
+                  const firstLat = coords[0].lat;
+                  const firstLng = coords[0].lng;
+                  const midIdx = Math.floor(coords.length / 2);
+                  const midLat = coords[midIdx].lat;
+                  const midLng = coords[midIdx].lng;
+                  const lastIdx = coords.length - 1;
+                  const lastLat = coords[lastIdx].lat;
+                  const lastLng = coords[lastIdx].lng;
+
+                  // Filtro territorial estricto: omitir polígonos fuera de Antioquia / Colombia
+                  const hasCoordInAntioquia = coords.some(c => c.lat >= 5.0 && c.lat <= 9.2 && c.lng >= -77.6 && c.lng <= -73.6);
+                  if (!hasCoordInAntioquia) continue;
+
+                  const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
+                  const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+
+                  if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
+                    continue; // Polígono duplicado omitido
+                  }
+                  seenTramos.add(lineGeoKey);
+                  seenTramos.add(revLineGeoKey);
+
+                  totalLengthM += lenM;
+
+                  const tramoName = polygons.length > 1
+                    ? `${baseName} (Polígono ${polyIdx + 1})`
+                    : `${baseName} (Polígono)`;
+
+                  const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
+
+                  rawTramos.push({
+                    idTramo: idTramo,
+                    nombrePlacemark: tramoName,
+                    sourceFile: item.sourceFile,
+                    tipoGeometria: "Polygon",
+                    coords: coords,
+                    lenM: lenM
+                  });
                 }
-                seenTramos.add(lineGeoKey);
-                seenTramos.add(revLineGeoKey);
-
-                let lenM = 0;
-                for (let j = 0; j < coords.length - 1; j++) {
-                  lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
-                }
-                totalLengthM += lenM;
-
-                const tramoName = polygons.length > 1
-                  ? `${baseName} (Polígono ${polyIdx + 1})`
-                  : `${baseName} (Polígono)`;
-
-                const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
-
-                rawTramos.push({
-                  idTramo: idTramo,
-                  nombrePlacemark: tramoName,
-                  sourceFile: item.sourceFile,
-                  tipoGeometria: "Polygon",
-                  coords: coords,
-                  lenM: lenM
-                });
               }
             }
           }
 
           // Extraer Points independientes
-          const points = pm.getElementsByTagName("Point");
-          for (let ptIdx = 0; ptIdx < points.length; ptIdx++) {
-            const pt = points[ptIdx];
-            const coordNode = pt.getElementsByTagName("coordinates")[0];
-            if (coordNode) {
-              const coords = this.parseCoordinatesText(coordNode.textContent);
-              if (coords.length > 0) {
-                const primaryCoord = coords[0];
-                const lat = primaryCoord.lat;
-                const lng = primaryCoord.lng;
+          if (rawPuntos.length < 80) {
+            const points = pm.getElementsByTagName("Point");
+            for (let ptIdx = 0; ptIdx < points.length; ptIdx++) {
+              if (rawPuntos.length >= 80) break;
+              const pt = points[ptIdx];
+              const coordNode = pt.getElementsByTagName("coordinates")[0];
+              if (coordNode) {
+                const coords = this.parseCoordinatesText(coordNode.textContent);
+                if (coords.length > 0) {
+                  const primaryCoord = coords[0];
+                  const lat = primaryCoord.lat;
+                  const lng = primaryCoord.lng;
 
-                // Huella única de punto basada en coordenadas redondeadas a 6 decimales (~0.11 m)
-                const pointGeoKey = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
-                if (seenPoints.has(pointGeoKey)) {
-                  continue; // Punto duplicado en misma coordenada exacta omitido
+                  // Filtro territorial estricto: omitir puntos fuera de Antioquia / Colombia
+                  // Descarta puntos de muestra turísticos o globales (Torre Eiffel, Sydney, Cristo Redentor, etc.)
+                  if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) {
+                    continue;
+                  }
+
+                  // Huella única de punto basada en coordenadas redondeadas a 6 decimales (~0.11 m)
+                  const pointGeoKey = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
+                  if (seenPoints.has(pointGeoKey)) {
+                    continue; // Punto duplicado en misma coordenada exacta omitido
+                  }
+                  seenPoints.add(pointGeoKey);
+
+                  const ptName = points.length > 1
+                    ? `${baseName} (Punto ${ptIdx + 1})`
+                    : baseName;
+
+                  const descNode = pm.getElementsByTagName("description")[0];
+                  const description = descNode ? descNode.textContent.trim() : "";
+
+                  const idPunto = `PTO-${String(puntoCounter++).padStart(2, "0")}`;
+
+                  rawPuntos.push({
+                    idPunto: idPunto,
+                    nombrePlacemark: ptName,
+                    description: description,
+                    sourceFile: item.sourceFile,
+                    primaryCoord: primaryCoord
+                  });
                 }
-                seenPoints.add(pointGeoKey);
-
-                const ptName = points.length > 1
-                  ? `${baseName} (Punto ${ptIdx + 1})`
-                  : baseName;
-
-                const descNode = pm.getElementsByTagName("description")[0];
-                const description = descNode ? descNode.textContent.trim() : "";
-
-                const idPunto = `PTO-${String(puntoCounter++).padStart(2, "0")}`;
-
-                rawPuntos.push({
-                  idPunto: idPunto,
-                  nombrePlacemark: ptName,
-                  description: description,
-                  sourceFile: item.sourceFile,
-                  primaryCoord: primaryCoord
-                });
               }
             }
           }
@@ -2348,9 +2987,13 @@ const FolderReader = {
     let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
     let validCoordCount = 0;
 
+    // Regla de coherencia territorial: Proyectos viales de Antioquia (Colombia)
+    // Latitud válida: [4.0, 10.0], Longitud válida: [-78.5, -73.0].
+    // Excluye marcadores mundiales accidentales (ej. Torre Eiffel, Sydney, Tokio) que deforman el Bbox.
     rawTramos.forEach(t => {
       (t.coords || []).forEach(c => {
         if (c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
+          if (c.lat < 4.0 || c.lat > 10.0 || c.lng < -78.5 || c.lng > -73.0) return;
           validCoordCount++;
           if (c.lng < minLon) minLon = c.lng;
           if (c.lng > maxLon) maxLon = c.lng;
@@ -2363,6 +3006,7 @@ const FolderReader = {
     rawPuntos.forEach(p => {
       const c = p.primaryCoord;
       if (c && c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
+        if (c.lat < 4.0 || c.lat > 10.0 || c.lng < -78.5 || c.lng > -73.0) return;
         validCoordCount++;
         if (c.lng < minLon) minLon = c.lng;
         if (c.lng > maxLon) maxLon = c.lng;
@@ -2388,10 +3032,17 @@ const FolderReader = {
     // PASO 4: Con las vías oficiales YA en memoria, evaluar distancias ortogonales y conformidad
     // =========================================================================
     const candidates = (window.SpatialEngine && typeof window.SpatialEngine.getCandidateFeatures === "function")
-      ? window.SpatialEngine.getCandidateFeatures({ municipio: fichaData.municipio, codMunicipio: fichaData.codMunicipio })
+      ? window.SpatialEngine.getCandidateFeatures({
+          municipio: fichaData.municipio,
+          codMunicipio: fichaData.codMunicipio,
+          bbox: projectBbox,
+          tramos: rawTramos
+        })
       : [];
 
-    rawTramos.forEach(item => {
+    for (let tIdx = 0; tIdx < rawTramos.length; tIdx++) {
+      const item = rawTramos[tIdx];
+      await new Promise(r => setTimeout(r, 0)); // Ceder control al bucle de eventos en cada tramo para mantener la interfaz 100% fluida
       let sub = null;
       if (window.SpatialEngine && typeof window.SpatialEngine.analyzeTrackSubSegments === "function" && item.coords && item.coords.length > 1) {
         sub = window.SpatialEngine.analyzeTrackSubSegments(item.coords, candidates);
@@ -2479,9 +3130,13 @@ const FolderReader = {
           vectoresMedicion: []
         });
       }
-    });
+    }
 
-    rawPuntos.forEach(item => {
+    for (let pIdx = 0; pIdx < rawPuntos.length; pIdx++) {
+      const item = rawPuntos[pIdx];
+      if (pIdx > 0 && pIdx % 10 === 0) {
+        await new Promise(r => setTimeout(r, 0)); // Ceder control periódicamente
+      }
       const primaryCoord = item.primaryCoord;
       let v = null;
       if (window.SpatialEngine && typeof window.SpatialEngine.findClosestProjectionToRoads === "function") {
@@ -2524,7 +3179,7 @@ const FolderReader = {
         vectorPrincipal: v,
         vectoresMedicion: v ? [v] : []
       });
-    });
+    }
 
     // Unificar lista de contraste para compatibilidad de vistas
     const puntosContraste = [];
@@ -2629,6 +3284,19 @@ const FolderReader = {
       puntosContraste: puntosContraste,
       alertaComprimido: alertaComprimido,
       alertasArchivos: tieneGeorreferenciacionValida ? [] : allAlerts,
+      redVialRecortada: (window.SpatialEngine && window.SpatialEngine.projectRoadsData && window.SpatialEngine.projectRoadsData.terciaria) ? {
+        type: "FeatureCollection",
+        municipio: fichaData.municipio,
+        daneCode: fichaData.codMunicipio,
+        features: [
+          ...((window.SpatialEngine.projectRoadsData.terciaria && window.SpatialEngine.projectRoadsData.terciaria.features) || []),
+          ...((window.SpatialEngine.projectRoadsData.secundaria && window.SpatialEngine.projectRoadsData.secundaria.features) || []),
+          ...((window.SpatialEngine.projectRoadsData.primaria && window.SpatialEngine.projectRoadsData.primaria.features) || [])
+        ],
+        terciaria: window.SpatialEngine.projectRoadsData.terciaria,
+        secundaria: window.SpatialEngine.projectRoadsData.secundaria,
+        primaria: window.SpatialEngine.projectRoadsData.primaria
+      } : null,
       estado: !tieneGeorreferenciacionValida
         ? (alertaComprimido ? "Alerta de Extracción" : "No Cumple - Falta archivo KMZ/KML")
         : (coberturaBufferPct >= 95.0 ? "Cumple" : "Alerta de Desfase Espacial")
@@ -3251,6 +3919,7 @@ const FolderReader = {
 
       return {
         sheetName: targetSheetName,
+        sheetNames: workbook.SheetNames || [],
         matrizFilas: matrizFilas,
         matrizConcreto: matrizConcreto
       };
@@ -3370,10 +4039,10 @@ const FolderReader = {
 
   /**
    * MISMO MOTOR DE MAPEO UNIFICADO PARA EXCEL Y PDF
-   * parsearMatrizDespiece(matrizFilas, fileDespiece, matrizConcreto, fichaData, extractedEngineer, extractedMatricula, fileEspec)
+   * parsearMatrizDespiece(matrizFilas, fileDespiece, matrizConcreto, fichaData, extractedEngineer, extractedMatricula, fileEspec, sheetNames)
    * Cero datos de respaldo / fallback. Extrae con 100% fidelidad los valores físicos del documento.
    */
-  parsearMatrizDespiece(matrizFilas, fileDespiece, matrizConcreto, fichaData, extractedEngineer, extractedMatricula, fileEspec) {
+  parsearMatrizDespiece(matrizFilas, fileDespiece, matrizConcreto, fichaData, extractedEngineer, extractedMatricula, fileEspec, sheetNames = []) {
     const fileName = (fileDespiece && fileDespiece.name) || "Despiece_Acero";
     fichaData = fichaData || {};
 
@@ -3400,7 +4069,7 @@ const FolderReader = {
         paginasTexto: [],
         textoCompleto: "",
         marcas: [],
-        longitudIntervencionM: (fichaData && fichaData.longitudTotalM) || 0,
+        longitudIntervencionM: 0,
         pesoTotalDeclaradoKg: 0,
         cuantiaKgM: 0,
         fcMPa: 21,
@@ -3413,23 +4082,54 @@ const FolderReader = {
       return emptyRes;
     }
 
-    // 1. Detección de formato estándar vs. libre
+    // 1. Detección estricta de formato estándar oficial frente a formatos libres/previos
+    // Basado fielmente en: Base/Plantilla_Estandar_Despiece_Acero_y_Concreto_Con_Instructivo.xlsx
     let hasDirectriz = false;
-    let hasCuadro = false;
-    let hasConsolidado = false;
+    let hasCuadroOficial = false;
+    let hasOficialHeader = false;
+    let hasSec1Info = false;
+    let hasSec3Consolidado = false;
+    let hasSec4Solicitados = false;
     let hasRieles = false;
     let hasRiostras = false;
+    let hasNonStandardMarkers = false;
 
     for (const r of matrizFilas) {
       if (!Array.isArray(r)) continue;
-      const line = r.join(" ").toUpperCase();
-      if (line.includes("DIRECTRIZ T")) hasDirectriz = true;
-      if (line.includes("CUADRO DETALLADO DE DESPIECE") || line.includes("DESPIECE DE ACERO")) hasCuadro = true;
-      if (line.includes("CONSOLIDADO POR DI")) hasConsolidado = true;
-      if (line.includes("RIELES")) hasRieles = true;
-      if (line.includes("VIGA RIOSTRA") || line.includes("RIOSTAS")) hasRiostras = true;
+      const rawLine = r.join(" ");
+      const line = this.cleanForRegex(rawLine);
+
+      if (line.includes("directriz tecnica") || line.includes("directriz técnica")) hasDirectriz = true;
+      if (line.includes("cuadro detallado de despiece") || line.includes("2. cuadro detallado")) hasCuadroOficial = true;
+      if (line.includes("gobernacion de antioquia") || line.includes("departamento de antioquia") || line.includes("secretaria de infraestructura") || line.includes("despiece de acero - proyectos placa huellas") || line.includes("plantilla estandar")) hasOficialHeader = true;
+      if (line.includes("1. informacion general del proyecto") || line.includes("1.1 desglose de tramos") || line.includes("informacion general del proyecto y convenio")) hasSec1Info = true;
+      if (line.includes("3. consolidado general por diametro") || line.includes("consolidado general por diametro") || line.includes("consolidado por diametro")) hasSec3Consolidado = true;
+      if (line.includes("4. materiales de acero solicitados") || line.includes("materiales de acero solicitados a la gobernacion")) hasSec4Solicitados = true;
+      if (line.includes("rieles") || line.includes("huellas")) hasRieles = true;
+      if (line.includes("viga riostra") || line.includes("riostras") || line.includes("riostas")) hasRiostras = true;
+
+      // Marcadores inequívocos de formatos libres/previos municipales (ej: tablas con "Figuración", "Disposición", "Ubicación")
+      if (line.includes("figuracion") || line.includes("disposicion") || (line.includes("ubicacion") && line.includes("long. unit"))) {
+        hasNonStandardMarkers = true;
+      }
     }
-    const isStandard = (hasDirectriz && hasCuadro) || (hasConsolidado && hasRieles && hasRiostras) || (hasRieles && hasRiostras);
+
+    const cleanSheetNames = (sheetNames || []).map(s => this.cleanForRegex(String(s)));
+    const hasOfficialSheets = cleanSheetNames.includes("instructivo") || (cleanSheetNames.includes("acero") && cleanSheetNames.includes("concreto"));
+
+    // Puntuación de apego a la estructura institucional oficial
+    let officialScore = 0;
+    if (hasDirectriz) officialScore += 2;
+    if (hasCuadroOficial) officialScore += 2;
+    if (hasOficialHeader) officialScore += 2;
+    if (hasSec1Info) officialScore += 1;
+    if (hasSec3Consolidado) officialScore += 1;
+    if (hasSec4Solicitados) officialScore += 1;
+    if (hasOfficialSheets) officialScore += 1;
+
+    // Solo se califica como Plantilla Estándar Oficial si cuenta con el peso estructural oficial
+    // y no presenta encabezados atípicos de formato libre
+    const isStandard = !hasNonStandardMarkers && (officialScore >= 3) && (hasRieles || hasRiostras);
 
     // 2. Extracción de Datos Generales (Código vía, Longitud, Ancho, Municipio, Subregión)
     const infoGeneral = {
@@ -3659,9 +4359,9 @@ const FolderReader = {
       if (!Array.isArray(r)) continue;
       for (let c = 0; c < r.length; c++) {
         const hText = this.cleanForRegex(String(r[c] || ""));
-        if (hText.includes("longitud corte") || hText.includes("long corte") || hText.includes("corte (m)") || hText.includes("long. corte") || hText === "corte") {
+        if (hText.includes("longitud corte") || hText.includes("long corte") || hText.includes("corte (m)") || hText.includes("long. corte") || hText === "corte" || hText.includes("long. unit") || hText.includes("long unit") || hText.includes("longitud unit")) {
           if (colCorteDetectada === -1) colCorteDetectada = c;
-        } else if (hText.includes("cantidad piezas") || hText.includes("piezas") || hText.includes("cant piezas") || hText.includes("n piezas") || hText.includes("no piezas")) {
+        } else if (hText.includes("cantidad piezas") || hText.includes("piezas") || hText.includes("cant piezas") || hText.includes("n piezas") || hText.includes("no piezas") || hText === "cantidad" || hText.includes("cant.")) {
           if (colPzasDetectada === -1) colPzasDetectada = c;
         } else if (hText.includes("longitud total") || hText.includes("long total") || hText.includes("long. total")) {
           if (colLtDetectada === -1) colLtDetectada = c;
@@ -4337,7 +5037,7 @@ const FolderReader = {
         paginasTexto: [],
         textoCompleto: "",
         marcas: [],
-        longitudIntervencionM: (fichaData && fichaData.longitudTotalM) || 0,
+        longitudIntervencionM: 0,
         pesoTotalDeclaradoKg: 0,
         cuantiaKgM: 0,
         fcMPa: 21,
@@ -4353,6 +5053,7 @@ const FolderReader = {
     const lowerName = fileDespiece.name.toLowerCase();
     let matrizFilas = [];
     let matrizConcreto = null;
+    let sheetNames = [];
 
     // CASO 1: Archivo en formato Excel (.xlsx / .xls / .xlsm)
     if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".xlsm")) {
@@ -4360,6 +5061,7 @@ const FolderReader = {
       if (excelResult) {
         matrizFilas = excelResult.matrizFilas || [];
         matrizConcreto = excelResult.matrizConcreto || null;
+        sheetNames = excelResult.sheetNames || [];
       }
     }
     // CASO 2: Archivo en formato PDF (.pdf)
@@ -4368,7 +5070,7 @@ const FolderReader = {
     }
 
     // CASO 3: MISMO MOTOR DE MAPEO UNIFICADO
-    return this.parsearMatrizDespiece(matrizFilas, fileDespiece, matrizConcreto, fichaData, extractedEngineer, extractedMatricula, fileEspec);
+    return this.parsearMatrizDespiece(matrizFilas, fileDespiece, matrizConcreto, fichaData, extractedEngineer, extractedMatricula, fileEspec, sheetNames);
   },
 
   /**
@@ -4736,17 +5438,18 @@ const FolderReader = {
     const allItems = [];
     const totalPages = pdf.numPages;
     const pagesToScan = [];
-    if (totalPages <= 6) {
+    if (totalPages <= 4) {
       for (let p = 1; p <= totalPages; p++) pagesToScan.push(p);
     } else {
       pagesToScan.push(1);
-      const startP = Math.max(2, totalPages - 3);
+      const startP = Math.max(2, totalPages - 1);
       for (let p = startP; p <= totalPages; p++) {
         if (!pagesToScan.includes(p)) pagesToScan.push(p);
       }
     }
 
     for (const p of pagesToScan) {
+      await new Promise(r => setTimeout(r, 0));
       const page = await pdf.getPage(p);
       const viewport = page.getViewport({ scale: 1.0 });
       const pageH = (viewport && viewport.height) || (page.view ? page.view[3] - page.view[1] : 792);
@@ -4771,7 +5474,9 @@ const FolderReader = {
           page: p,
           pageHeight: pageH
         });
+        if (allItems.length > 600) break;
       }
+      if (allItems.length > 600) break;
     }
 
     if (allItems.length === 0) return { zonaItems: [], allItems: [], cutPage: 1 };
@@ -5131,6 +5836,10 @@ const FolderReader = {
 
   async extraerFirmasPdf(file, mpioName) {
     if (!file || typeof pdfjsLib === "undefined") return null;
+    // Protección contra archivos pesados (> 3.5MB): no bloquear el hilo de ejecución buscando firmas en documentos masivos
+    if (file.size && file.size > 3.5 * 1024 * 1024) {
+      return null;
+    }
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -5209,6 +5918,7 @@ const FolderReader = {
       ];
 
       for (const target of alcaldeItems) {
+        await new Promise(r => setTimeout(r, 0));
         const txt = await getItemText(target.num);
         if (!txt || txt.length < 25) continue;
 
@@ -5289,22 +5999,27 @@ const FolderReader = {
       ];
 
       for (const target of secretarioItems) {
+        await new Promise(r => setTimeout(r, 0));
         const file = detectedMap[target.num];
         let candName = null;
         let candCc = "";
 
         if (file) {
           const ext = this.getFileExtension(file);
-          try {
-            let resDoc = null;
-            if (ext === "pdf") resDoc = await this.extraerFirmasPdf(file, mpioName);
-            else if (["xlsx", "xls", "xlsm", "xlsb"].includes(ext)) resDoc = await this.extraerFirmasExcel(file, mpioName);
+          // Omitir extracción profunda en archivos técnicos pesados (> 2MB como Especificaciones Técnicas)
+          const isHeavyDoc = file.size && file.size > 2 * 1024 * 1024;
+          if (!isHeavyDoc) {
+            try {
+              let resDoc = null;
+              if (ext === "pdf") resDoc = await this.extraerFirmasPdf(file, mpioName);
+              else if (["xlsx", "xls", "xlsm", "xlsb"].includes(ext)) resDoc = await this.extraerFirmasExcel(file, mpioName);
 
-            if (resDoc && resDoc.secretario && resDoc.secretario.nombre) {
-              candName = resDoc.secretario.nombre;
-              candCc = resDoc.secretario.cedula || "";
-            }
-          } catch (eDoc) { }
+              if (resDoc && resDoc.secretario && resDoc.secretario.nombre) {
+                candName = resDoc.secretario.nombre;
+                candCc = resDoc.secretario.cedula || "";
+              }
+            } catch (eDoc) { }
+          }
         }
 
         if (!candName) {

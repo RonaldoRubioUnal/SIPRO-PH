@@ -304,8 +304,8 @@ const PresupuestoEngine = {
           aceroKg: 0,
           concretoSimpleM3: 0,
           concretoCiclopeoM3: 0,
-          longitudM: expediente.datos ? (expediente.datos.longitudM || 0) : 0,
-          valorTotalPresupuesto: expediente.datos ? (expediente.datos.presupuestoTotal || 0) : 0,
+          longitudM: 0,
+          valorTotalPresupuesto: 0,
           archivoOrigen: null,
           objetoProyecto: "",
           esPlacaHuella: false,
@@ -322,8 +322,8 @@ const PresupuestoEngine = {
         aceroKg: 0,
         concretoSimpleM3: 0,
         concretoCiclopeoM3: 0,
-        longitudM: (expediente.datos && expediente.datos.longitudM) || 0,
-        valorTotalPresupuesto: (expediente.datos && expediente.datos.presupuestoTotal) || 0,
+        longitudM: 0,
+        valorTotalPresupuesto: 0,
         archivoOrigen: null,
         objetoProyecto: "",
         esPlacaHuella: false,
@@ -334,11 +334,48 @@ const PresupuestoEngine = {
   },
 
   /**
-   * Extrae cantidades de obra desde un archivo Excel (.xlsx / .xls) buscando estrictamente la hoja "PRESUPUESTO"
+   * Obtiene la instancia File física del presupuesto para el expediente activo
+   * Soporta de manera transparente tanto Convenios 2026 - II (Ítem 14) como Convenios Ordinarios (Ítem 28)
+   */
+  getBudgetFile(expediente) {
+    if (!expediente) return null;
+    const processMode = expediente.procesoEspecial || (expediente.datos && expediente.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    const budgetItemId = is2026_2 ? 14 : 28;
+
+    const fMap = expediente.archivosFileMap || (expediente.datos && expediente.datos.archivosFiles) || {};
+    if (fMap[budgetItemId]) return fMap[budgetItemId];
+    if (fMap[String(budgetItemId)]) return fMap[String(budgetItemId)];
+    if (is2026_2 && (fMap[28] && /\.(xlsx|xlsm|xls|xlsb|ods|pdf)$/i.test(fMap[28].name) && /presupuesto|pto|apu|cantidades/i.test(fMap[28].name))) return fMap[28];
+    if (!is2026_2 && (fMap[14] && /\.(xlsx|xlsm|xls|xlsb|ods|pdf)$/i.test(fMap[14].name) && /presupuesto|pto|apu|cantidades/i.test(fMap[14].name))) return fMap[14];
+
+    // Buscar en lista de archivos físicos del expediente
+    const allFiles = (expediente.archivos) || (expediente.datos && expediente.datos.archivos) || [];
+    // 1. Archivo Excel con nombre de presupuesto / pto / apu / cantidades
+    const excelBudget = allFiles.find(f => /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(f.name) && /presupuesto|pto|apu|cantidades/i.test(f.name) && !/despiece/i.test(f.name));
+    if (excelBudget) return excelBudget;
+
+    // 2. Coincidencia con nombre detectado en Fase 2
+    const detectedName = (expediente.datos && expediente.datos.documentosStatus && expediente.datos.documentosStatus.archivosDetectados && (expediente.datos.documentosStatus.archivosDetectados[budgetItemId] || expediente.datos.documentosStatus.archivosDetectados[String(budgetItemId)]))
+                      || (expediente.fase2 && expediente.fase2.items && expediente.fase2.items.find(i => Number(i.id) === budgetItemId)?.archivoDetectado);
+    if (detectedName) {
+      const found = allFiles.find(f => f.name === detectedName || f.name.toLowerCase() === detectedName.toLowerCase());
+      if (found) return found;
+    }
+
+    // 3. Cualquier archivo con nombre presupuesto
+    const anyBudget = allFiles.find(f => /presupuesto|pto|apu/i.test(f.name) && !/despiece/i.test(f.name));
+    if (anyBudget) return anyBudget;
+
+    return null;
+  },
+
+  /**
+   * Extrae cantidades de obra desde un archivo Excel (.xlsx / .xls) buscando la hoja "PRESUPUESTO"
    */
   async parseExcelBudget(file, f1A = null) {
     if (!f1A && typeof window !== "undefined") {
-      const pId = window.selectedProject;
+      const pId = window.selectedProject || (window.App && window.App.currentProjectId);
       if (pId) {
         f1A = (window.expedientesMap && window.expedientesMap[pId] && window.expedientesMap[pId].fase1A) ||
               (window.proyectosAuditados && window.proyectosAuditados[pId] && window.proyectosAuditados[pId].fase1A) || null;
@@ -370,13 +407,31 @@ const PresupuestoEngine = {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: "array" });
       
-      // 1. Búsqueda estricta de la hoja PRESUPUESTO (insensible a mayúsculas/minúsculas y espacios laterales)
-      let targetSheetName = workbook.SheetNames.find(s => s.trim().toUpperCase().includes("PRESUPUESTO"));
+      // 1. Búsqueda inteligente de la hoja PRESUPUESTO (insensible a mayúsculas/minúsculas, acentos y espacios)
+      const normS = s => s.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      let targetSheetName = workbook.SheetNames.find(s => {
+        const up = normS(s);
+        return up.includes("PRESUPUESTO") || up.includes("PRESUP") || up.includes("PTO");
+      });
       if (!targetSheetName) {
         targetSheetName = workbook.SheetNames.find(s => {
-          const up = s.trim().toUpperCase();
-          return up.includes("PTO") || up.includes("PRESUP");
+          const up = normS(s);
+          return up.includes("CANTIDAD") || up.includes("APU") || up.includes("COSTO");
         });
+      }
+      if (!targetSheetName && workbook.SheetNames.length === 1) {
+        targetSheetName = workbook.SheetNames[0];
+      }
+      if (!targetSheetName) {
+        for (const sName of workbook.SheetNames) {
+          const sh = workbook.Sheets[sName];
+          if (!sh) continue;
+          const txt = ((XLSX.utils && XLSX.utils.sheet_to_txt) ? XLSX.utils.sheet_to_txt(sh) : "").toUpperCase();
+          if ((txt.includes("UNIDAD") || txt.includes("UND") || txt.includes("KG") || txt.includes("M3")) && (txt.includes("CANTIDAD") || txt.includes("VALOR") || txt.includes("PRECIO") || txt.includes("CONCRETO") || txt.includes("ACERO"))) {
+            targetSheetName = sName;
+            break;
+          }
+        }
       }
 
       if (!targetSheetName) {
@@ -507,9 +562,9 @@ const PresupuestoEngine = {
         let foundUnit = null;
         let unitCol = -1;
         for (let cIdx = 0; cIdx < row.length; cIdx++) {
-          const valStr = String(row[cIdx] || "").trim().toLowerCase();
-          if (["kg", "kilos", "ton", "m3", "m³", "m", "ml", "m2", "m²", "und", "gl"].includes(valStr)) {
-            foundUnit = valStr;
+          const rawUnit = String(row[cIdx] || "").trim().toLowerCase().replace(/\./g, "");
+          if (["kg", "kgs", "kilo", "kilos", "ton", "tonelada", "toneladas", "m3", "m³", "m", "ml", "m2", "m²", "und", "gl", "glb"].includes(rawUnit)) {
+            foundUnit = rawUnit.startsWith("k") ? "kg" : (rawUnit.startsWith("ton") ? "ton" : (rawUnit.includes("3") ? "m3" : (rawUnit.includes("2") ? "m2" : (rawUnit === "m" || rawUnit === "ml" ? "m" : rawUnit))));
             unitCol = cIdx;
             break;
           }
@@ -538,7 +593,19 @@ const PresupuestoEngine = {
           let cant = 0;
           for (let cIdx = unitCol + 1; cIdx < Math.min(row.length, unitCol + 4); cIdx++) {
             const val = row[cIdx];
-            const num = (typeof val === "number") ? val : parseFloat(String(val || "").replace(/\./g, "").replace(",", "."));
+            let num = NaN;
+            if (typeof val === "number") {
+              num = val;
+            } else if (val) {
+              const strVal = String(val).trim();
+              if (strVal.includes(".") && strVal.includes(",")) {
+                num = parseFloat(strVal.replace(/\./g, "").replace(",", "."));
+              } else if (strVal.includes(",")) {
+                num = parseFloat(strVal.replace(",", "."));
+              } else {
+                num = parseFloat(strVal);
+              }
+            }
             if (!isNaN(num) && num > 0) {
               cant = num;
               break;
@@ -556,9 +623,10 @@ const PresupuestoEngine = {
             totalSteelKg += kgCant;
             categoria = "acero";
           }
-          // B. Localización, Trazado, Topografía de Ejes y Replanteo
+          // B. Localización, Trazado, Topografía de Ejes y Replanteo, o Ítem lineal de Placa Huella
           else if ((normDesc.includes("replanteo") || normDesc.includes("localizacion") || normDesc.includes("topograf") || 
-                    normDesc.includes("trazado") || normDesc.includes("ejes") || normDesc.includes("demarcacion")) &&
+                    normDesc.includes("trazado") || normDesc.includes("ejes") || normDesc.includes("demarcacion") ||
+                    ((normDesc.includes("placa huella") || normDesc.includes("placahuella")) && !normDesc.includes("concreto") && !normDesc.includes("acero"))) &&
                    (foundUnit === "m" || foundUnit === "ml")) {
             totalLongM = Math.max(totalLongM, Math.round(cant));
             categoria = "replanteo_longitud";
@@ -677,7 +745,7 @@ const PresupuestoEngine = {
           if (cicCandidate) totalCicM3 = cicCandidate;
         }
 
-        if (totalLongM === 0 && (rowText.includes("replanteo") || rowText.includes("longitud") || rowText.includes("demarcacion") || rowText.includes("pavimento"))) {
+        if (totalLongM === 0 && (rowText.includes("replanteo") || rowText.includes("localizacion") || rowText.includes("longitud total") || rowText.includes("longitud via") || rowText.includes("longitud tramo"))) {
           const mCandidate = nums.find(n => n >= 20 && n <= 10000);
           if (mCandidate) totalLongM = Math.round(mCandidate);
         }
@@ -849,47 +917,86 @@ const PresupuestoEngine = {
     // =========================================================================
     // ÚNICA FUENTE DE VERDAD (Single Source of Truth) conectada a expedientesMap[proyectoId].fase1A
     // =========================================================================
+    const processMode = (expediente && expediente.procesoEspecial) || (expediente && expediente.datos && expediente.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    const budgetItemId = is2026_2 ? 14 : 28;
+
     const f1A = (expediente && expediente.fase1A) || (expediente && expediente.auditGlobal && expediente.auditGlobal.audit1A) || {};
-    const acero1A = (f1A.acero && f1A.acero.pesoTotalKg !== undefined) 
+    const f2 = (expediente && expediente.fase2) || {};
+    const item3 = (f2.items && Array.isArray(f2.items)) ? f2.items.find(it => (is2026_2 ? (it.title && /despiece|acero/i.test(it.title)) : (it.id === 3 || it.num === 3))) : null;
+    const hasItem3Doc = item3 ? ((!!item3.archivoDetectado || !!item3.subsanado) && !item3.faltante) : false;
+    const tieneDespiece = Boolean(
+      f1A.tieneDocumento !== false &&
+      f1A.tieneDoc !== false &&
+      (
+        hasItem3Doc ||
+        (f1A.pesoTotalKg > 0 || f1A.pesoTotalDeclaradoKg > 0 || (f1A.marcas && f1A.marcas.length > 0) || f1A.archivoNombre) ||
+        (expediente.archivosFiles && (expediente.archivosFiles[3] || expediente.archivosFiles["3"])) ||
+        (expediente.archivosFileMap && (expediente.archivosFileMap[3] || expediente.archivosFileMap["3"]))
+      )
+    );
+
+    const itemBudget = (f2.items && Array.isArray(f2.items)) ? f2.items.find(it => it.id === budgetItemId || it.num === budgetItemId || it.num === String(budgetItemId) || it.id === 28 || it.num === 28 || (it.title && /presupuesto/i.test(it.title))) : null;
+    const hasBudgetDoc = itemBudget ? ((!!itemBudget.archivoDetectado || !!itemBudget.subsanado) && !itemBudget.faltante) : false;
+    const budgetFileFound = Boolean(
+      hasBudgetDoc ||
+      (expediente.archivosFiles && (expediente.archivosFiles[budgetItemId] || expediente.archivosFiles[String(budgetItemId)] || expediente.archivosFiles[28] || expediente.archivosFiles[14])) ||
+      (expediente.archivosFileMap && (expediente.archivosFileMap[budgetItemId] || expediente.archivosFileMap[String(budgetItemId)] || expediente.archivosFileMap[28] || expediente.archivosFileMap[14])) ||
+      this.getBudgetFile(expediente)
+    );
+    const tienePresupuesto = Boolean(
+      (budgetFileFound || pData.archivoOrigen) &&
+      pData.archivoOrigen &&
+      pData.hojaPresupuestoEncontrada !== false
+    );
+    state.tieneDespiece = tieneDespiece;
+    state.tienePresupuesto = tienePresupuesto;
+
+    const rawAcero1A = (f1A.acero && f1A.acero.pesoTotalKg !== undefined) 
       ? f1A.acero.pesoTotalKg 
-      : (f1A.pesoTotalDeclaradoKg || f1A.pesoTotalCalculadoKg || (expediente.despieceExtraido && expediente.despieceExtraido.pesoTotalDeclaradoKg) || 0);
+      : (f1A.pesoTotalKg || f1A.pesoTotalDeclaradoKg || f1A.pesoTotalCalculadoKg || (expediente.despieceExtraido && expediente.despieceExtraido.pesoTotalDeclaradoKg) || (expediente.datos && expediente.datos.despieceExtraido && expediente.datos.despieceExtraido.pesoTotalDeclaradoKg) || 0);
 
-    const conc21_1A = (f1A.concreto && f1A.concreto.totalConcreto21M3 !== undefined)
+    const rawConc21_1A = (f1A.concreto && f1A.concreto.totalConcreto21M3 !== undefined)
       ? f1A.concreto.totalConcreto21M3
-      : ((f1A.concretoVolumes && f1A.concretoVolumes.totalConcreto21M3) || 0);
+      : ((f1A.concretoVolumes && (f1A.concretoVolumes.totalConcreto21M3 || f1A.concretoVolumes.volumenConcretoM3)) || f1A.volumenConcretoM3 || (expediente.concretoVolumes && (expediente.concretoVolumes.totalConcreto21M3 || expediente.concretoVolumes.volumenConcretoM3)) || 0);
 
-    const concCic_1A = (f1A.concreto && f1A.concreto.totalConcretoCiclopeoM3 !== undefined)
+    const rawConcCic_1A = (f1A.concreto && f1A.concreto.totalConcretoCiclopeoM3 !== undefined)
       ? f1A.concreto.totalConcretoCiclopeoM3
-      : ((f1A.concretoVolumes && f1A.concretoVolumes.totalConcretoCiclopeoM3) || 0);
+      : ((f1A.concretoVolumes && (f1A.concretoVolumes.totalConcretoCiclopeoM3 || f1A.concretoVolumes.volumenCiclopeoM3)) || f1A.volumenCiclopeoM3 || (expediente.concretoVolumes && (expediente.concretoVolumes.totalConcretoCiclopeoM3 || expediente.concretoVolumes.volumenCiclopeoM3)) || 0);
 
-    const geomLongM = (f1A.longitudIntervencionM !== undefined)
-      ? f1A.longitudIntervencionM
-      : (expediente.datos ? (expediente.datos.longitudM || 0) : 0);
+    const rawLongDespiece = (f1A.longitudTramo !== undefined && f1A.longitudTramo > 0)
+      ? f1A.longitudTramo
+      : ((f1A.longitudIntervencionM !== undefined && f1A.longitudIntervencionM > 0)
+          ? f1A.longitudIntervencionM
+          : ((expediente.datos && expediente.datos.longitudM) || expediente.longitudM || 0));
+
+    // Si no hay despiece entregado ni subsanado, cantidades en ceros estrictos
+    const longDespiece = tieneDespiece ? rawLongDespiece : 0;
+    const finalAcero1A = tieneDespiece ? rawAcero1A : 0;
+    const finalConc21_1A = tieneDespiece ? rawConc21_1A : 0;
+    const finalConcCic_1A = tieneDespiece ? rawConcCic_1A : 0;
 
     const cuantia1A = (f1A.cuantiaRealKgM !== undefined)
       ? f1A.cuantiaRealKgM
-      : (geomLongM > 0 ? +(acero1A / geomLongM).toFixed(2) : "26.25");
+      : (longDespiece > 0 ? +(finalAcero1A / longDespiece).toFixed(2) : "0.00");
 
     const elem1A = (f1A.concreto && f1A.concreto.elementos) || (f1A.concretoVolumes && f1A.concretoVolumes.elementos) || {};
 
-    // Valores reales del Presupuesto
-    pData.aceroKg = Number(pData.aceroKg) || 0;
-    pData.concretoSimpleM3 = Number(pData.concretoSimpleM3) || 0;
-    pData.concretoCiclopeoM3 = Number(pData.concretoCiclopeoM3) || 0;
-    pData.longitudM = Number(pData.longitudM) || 0;
+    // Valores reales del Presupuesto (en ceros si no hay presupuesto detectado)
+    const longPresupuesto = tienePresupuesto ? (Number(pData.longitudM) || 0) : 0;
+    const finalAceroPto = tienePresupuesto ? (Number(pData.aceroKg) || 0) : 0;
+    const finalConcSimplePto = tienePresupuesto ? (Number(pData.concretoSimpleM3) || 0) : 0;
+    const finalConcCicPto = tienePresupuesto ? (Number(pData.concretoCiclopeoM3) || 0) : 0;
+
+    pData.aceroKg = finalAceroPto;
+    pData.concretoSimpleM3 = finalConcSimplePto;
+    pData.concretoCiclopeoM3 = finalConcCicPto;
+    pData.longitudM = longPresupuesto;
 
     // =========================================================================
     // COMPARACIÓN DE TOTALES PRINCIPALES (Fase 1A vs. Presupuesto)
     // Incluye Longitud Total de Placa Huella (m), Acero de Refuerzo y Concretos
     // =========================================================================
-    const longDespiece = (f1A.longitudTramo !== undefined && f1A.longitudTramo > 0)
-      ? f1A.longitudTramo
-      : ((f1A.longitudIntervencionM !== undefined && f1A.longitudIntervencionM > 0)
-          ? f1A.longitudIntervencionM
-          : ((expediente.datos && expediente.datos.longitudM) || 0));
-
-    const longPresupuesto = Number(pData.longitudM) || 0;
-
     const comparacion = [
       {
         id: "longitud_placa_huella",
@@ -898,33 +1005,41 @@ const PresupuestoEngine = {
         cantDespiece: longDespiece,
         especificaciones: `Longitud proyectada según Despiece y Especificaciones Técnicas`,
         cantPresupuesto: longPresupuesto,
-        destacado: true
+        destacado: true,
+        tieneDespiece: tieneDespiece,
+        tienePresupuesto: tienePresupuesto
       },
       {
         id: "acero_refuerzo",
         item: "Acero de Refuerzo Total (kg)",
         unidad: "kg",
-        cantDespiece: acero1A,
+        cantDespiece: finalAcero1A,
         especificaciones: `Cuantía: ${cuantia1A} kg/m (mín. 26.25 kg/m) | fy=420 MPa (60.000 PSI)`,
-        cantPresupuesto: pData.aceroKg
+        cantPresupuesto: finalAceroPto,
+        tieneDespiece: tieneDespiece,
+        tienePresupuesto: tienePresupuesto
       },
       {
         id: "concreto_simple",
         item: "Concreto Simple 21 MPa Total (m³)",
         unidad: "m³",
-        cantDespiece: conc21_1A,
+        cantDespiece: finalConc21_1A,
         especificaciones: `f'c=21 MPa (3000 PSI) | Rieles, Riostras, Cunetas, Sobreancho y Transición`,
-        cantPresupuesto: pData.concretoSimpleM3,
-        detallePresupuesto: pData.detalleSumaConcretoSimple || ""
+        cantPresupuesto: finalConcSimplePto,
+        detallePresupuesto: tienePresupuesto ? (pData.detalleSumaConcretoSimple || "") : "",
+        tieneDespiece: tieneDespiece,
+        tienePresupuesto: tienePresupuesto
       },
       {
         id: "concreto_ciclopeo",
         item: "Concreto Ciclópeo Total (m³)",
         unidad: "m³",
-        cantDespiece: concCic_1A,
+        cantDespiece: finalConcCic_1A,
         especificaciones: `f'c=21 MPa con piedra pegada | Franja Central Entrerriel`,
-        cantPresupuesto: pData.concretoCiclopeoM3,
-        detallePresupuesto: pData.detalleSumaConcretoCiclopeo || ""
+        cantPresupuesto: finalConcCicPto,
+        detallePresupuesto: tienePresupuesto ? (pData.detalleSumaConcretoCiclopeo || "") : "",
+        tieneDespiece: tieneDespiece,
+        tienePresupuesto: tienePresupuesto
       }
     ];
 
@@ -965,7 +1080,27 @@ const PresupuestoEngine = {
       const vPres = Number(c.cantPresupuesto) || 0;
       const delta = vPres - vDesp;
       const pct = vDesp > 0 ? (Math.abs(delta) / vDesp) * 100 : (vPres > 0 ? 100 : 0);
-      const esCoherente = pct <= tol;
+
+      let esCoherente = false;
+      let msg = "";
+
+      if (!c.tieneDespiece && !c.tienePresupuesto) {
+        esCoherente = false;
+        msg = `Sin documentos de Despiece ni Presupuesto (Ítem ${budgetItemId}) aportados para cotejo. Cantidades en 0.`;
+      } else if (!c.tieneDespiece) {
+        esCoherente = false;
+        msg = is2026_2 ? `Documento de Despiece de Acero no aportado o faltante. Cantidad en Despiece es 0.` : `Documento de Despiece de Acero (Ítem 3) no aportado o faltante. Cantidad en Despiece es 0.`;
+      } else if (!c.tienePresupuesto) {
+        esCoherente = false;
+        msg = `Documento u hoja oficial de Presupuesto (Ítem ${budgetItemId}) no aportado o no detectado. Cantidad en Presupuesto es 0.`;
+      } else {
+        esCoherente = pct <= tol;
+        if (!esCoherente) {
+          msg = c.id === "longitud_placa_huella"
+            ? `Discrepancia de Longitud de Placa Huella: Presupuesto registra ${vPres.toLocaleString('es-CO')} m vs. ${vDesp.toLocaleString('es-CO')} m en Despiece (Diferencia: ${delta > 0 ? '+' : ''}${delta.toFixed(2)} m, ${pct.toFixed(2)}% > tolerancia ±${tol}%).`
+            : `Discrepancia en ${c.item}: Presupuesto registra ${vPres.toLocaleString('es-CO')} ${c.unidad} vs. ${vDesp.toLocaleString('es-CO')} ${c.unidad} en Despiece/Memoria (Diferencia: ${delta > 0 ? '+' : ''}${delta.toFixed(2)} ${c.unidad}, ${pct.toFixed(2)}% > tolerancia ±${tol}%).`;
+        }
+      }
 
       c.delta = +delta.toFixed(2);
       c.pct = +pct.toFixed(2);
@@ -973,9 +1108,6 @@ const PresupuestoEngine = {
 
       if (!esCoherente) {
         todosCoherentes = false;
-        const msg = c.id === "longitud_placa_huella"
-          ? `Discrepancia de Longitud de Placa Huella: Presupuesto registra ${vPres.toLocaleString('es-CO')} m vs. ${vDesp.toLocaleString('es-CO')} m en Despiece (Diferencia: ${delta > 0 ? '+' : ''}${c.delta.toLocaleString('es-CO')} m, ${c.pct}% > tolerancia ±${tol}%).`
-          : `Discrepancia en ${c.item}: Presupuesto registra ${vPres.toLocaleString('es-CO')} ${c.unidad} vs. ${vDesp.toLocaleString('es-CO')} ${c.unidad} en Despiece/Memoria (Diferencia: ${delta > 0 ? '+' : ''}${c.delta.toLocaleString('es-CO')} ${c.unidad}, ${c.pct}% > tolerancia ±${tol}%).`;
         hallazgos.push({
           id: `hallazgo_presupuesto_${c.id}`,
           item: c.item,
@@ -1058,9 +1190,9 @@ const PresupuestoEngine = {
         cleanMsg(expediente.fase3.matrizObservaciones);
       }
 
-      // Si se aportó documento físico de presupuesto, limpiar cualquier alerta de "Presupuesto faltante" en Ítem 28
+      // Si se aportó documento físico de presupuesto, limpiar cualquier alerta de "Presupuesto faltante"
       if (pData.archivoOrigen) {
-        ["doc_item_28", "FASE_2_ITEM_28", "item_28"].forEach(k => {
+        ["doc_item_28", "FASE_2_ITEM_28", "item_28", "doc_item_14", "FASE_2_ITEM_14", "item_14"].forEach(k => {
           if (expediente.fase3.observacionesEditadas) delete expediente.fase3.observacionesEditadas[k];
           if (expediente.fase3.matrizObservaciones) delete expediente.fase3.matrizObservaciones[k];
         });
@@ -1081,8 +1213,11 @@ const PresupuestoEngine = {
     }
     if (!exp) return null;
 
-    // 1. Asegurar referencias del archivo físico al Ítem 28
-    const numId = 28;
+    const processMode = exp.procesoEspecial || (exp.datos && exp.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    const numId = is2026_2 ? 14 : 28;
+
+    // 1. Asegurar referencias del archivo físico al Ítem correspondiente (14 o 28)
     exp.archivosFileMap = exp.archivosFileMap || {};
     exp.archivosFileMap[numId] = file;
     exp.archivosFileMap[String(numId)] = file;
@@ -1194,7 +1329,18 @@ const PresupuestoEngine = {
       return;
     }
 
-    if (expediente.modalidad !== "RECURSOS") {
+    const processMode = (expediente && expediente.procesoEspecial) || (expediente && expediente.datos && expediente.datos.procesoEspecial) || (window.App && window.App.currentProcessMode) || window.SIPRO_PROCESS_MODE || "ORDINARIO";
+    const is2026_2 = processMode === "2026_2" || processMode === "CONVENIOS_2026_2";
+    const budgetItemId = is2026_2 ? 14 : 28;
+
+    // Si es proceso 2026 - II y tiene archivo de presupuesto, o el usuario está en el tab, asegurar modalidad RECURSOS
+    const budgetFile = this.getBudgetFile(expediente);
+    if (is2026_2 && expediente.modalidad !== "RECURSOS" && budgetFile) {
+      expediente.modalidad = "RECURSOS";
+      if (expediente.datos) expediente.datos.modalidad = "RECURSOS";
+    }
+
+    if (expediente.modalidad !== "RECURSOS" && !is2026_2) {
       container.innerHTML = `
         <div style="background:var(--color-bg-card);border:1px solid var(--border-subtle);border-radius:16px;padding:32px;text-align:center;max-width:700px;margin:24px auto;">
           <div style="font-size:36px;margin-bottom:12px;">🧱</div>
@@ -1211,13 +1357,37 @@ const PresupuestoEngine = {
     }
 
     const state = this.getPresupuestoState(expediente);
+    const pData = state.presupuestoData || {};
+
+    // Si hay un archivo de presupuesto físico pero aún no se han extraído sus cantidades en pData, extraerlas en vivo
+    if (!pData.archivoOrigen && budgetFile && /\.(xlsx|xlsm|xls|xlsb|ods)$/i.test(budgetFile.name)) {
+      if (!this._parsingBudget) {
+        this._parsingBudget = true;
+        this.parseExcelBudget(budgetFile, expediente.fase1A).then(parsedData => {
+          this._parsingBudget = false;
+          this.auditarCoherencia(expediente, parsedData);
+          this.renderPresupuestoTab(expediente, container);
+        }).catch(e => {
+          this._parsingBudget = false;
+          console.warn("Error parseando presupuesto en renderPresupuestoTab:", e);
+        });
+        container.innerHTML = `
+          <div style="text-align:center;padding:48px;color:var(--text-muted)">
+            <div style="font-size:32px;margin-bottom:12px;">⏳</div>
+            <div style="font-size:15px;font-weight:700;color:var(--text-main);margin-bottom:6px;">Extrayendo cantidades de obra del Presupuesto...</div>
+            <div style="font-size:12px;">Analizando hoja <b>PRESUPUESTO</b> del archivo 📄 <b>${budgetFile.name}</b></div>
+          </div>
+        `;
+        return;
+      }
+    }
+
     if (!state.evaluado) {
       this.auditarCoherencia(expediente);
     }
 
     const tol = state.toleranciaPct || 5;
     const isOk = state.aprobado;
-    const pData = state.presupuestoData || {};
     const comp = state.comparacion || [];
 
     const html = `
@@ -1348,9 +1518,20 @@ const PresupuestoEngine = {
                   const rowBg = isLong
                     ? (row.coherente ? 'background:rgba(0,65,46,0.05);border-left:4px solid var(--color-primary);' : 'background:rgba(239,68,68,0.08);border-left:4px solid #EF4444;')
                     : (row.coherente ? '' : 'background:rgba(239,68,68,0.04);');
-                  const statusLabel = isLong
-                    ? (row.coherente ? '✓ Coherente' : '⚠️ Discrepancia de Longitud')
-                    : (row.coherente ? '✓ Coherente' : '⚠️ Discrepancia');
+                  let statusLabel = row.coherente ? '✓ Coherente' : '⚠️ Discrepancia';
+                  if (isLong && !row.coherente) statusLabel = '⚠️ Discrepancia de Longitud';
+                  if (!row.tieneDespiece && !row.tienePresupuesto) {
+                    statusLabel = '⚠️ Sin Despiece ni Presupuesto';
+                  } else if (!row.tieneDespiece) {
+                    statusLabel = is2026_2 ? '⚠️ Sin Despiece' : '⚠️ Sin Despiece (Ítem 3)';
+                  } else if (!row.tienePresupuesto) {
+                    statusLabel = `⚠️ Sin Presupuesto (Ítem ${budgetItemId})`;
+                  }
+
+                  const deltaHtml = (!row.tieneDespiece || !row.tienePresupuesto)
+                    ? `<span style="font-size:11px;color:var(--text-muted);font-weight:600;">Sin cotejo</span>`
+                    : `${row.delta > 0 ? '+' : ''}${Number(row.delta).toLocaleString('es-CO', { minimumFractionDigits: row.unidad === 'm' ? 0 : 2, maximumFractionDigits: 2 })}<div style="font-size:10px;opacity:0.8;">(${row.pct}%)</div>`;
+
                   return `
                     <tr style="${rowBg}">
                       <td>
@@ -1371,8 +1552,7 @@ const PresupuestoEngine = {
                         ${row.detallePresupuesto ? `<div style="font-size:10px;color:var(--color-primary);font-weight:600;margin-top:3px;line-height:1.25;text-align:right;" title="${row.detallePresupuesto}">${row.detallePresupuesto}</div>` : ''}
                       </td>
                       <td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:${row.coherente ? 'var(--status-success)' : 'var(--status-danger)'};">
-                        ${row.delta > 0 ? '+' : ''}${Number(row.delta).toLocaleString('es-CO', { minimumFractionDigits: row.unidad === 'm' ? 0 : 2, maximumFractionDigits: 2 })}
-                        <div style="font-size:10px;opacity:0.8;">(${row.pct}%)</div>
+                        ${deltaHtml}
                       </td>
                       <td style="text-align:center;">
                         <span class="status-pill ${row.coherente ? 'cumple' : 'no-cumple'}" style="font-size:10.5px;padding:3px 8px;white-space:nowrap;">
