@@ -2057,46 +2057,36 @@ const FolderReader = {
       );
 
       if (hasValidGeom) {
-        const primaryFile = detectedMap[24] || detectedMap["24"] || georefCandidates.find(f => {
+        const geoItemId = is2026_2 ? 2 : 24;
+        const primaryFile = detectedMap[geoItemId] || detectedMap[String(geoItemId)] || georefCandidates.find(f => {
           const ext = this.getFileExtension(f);
           return ext === "kml" || ext === "kmz";
         }) || georefCandidates[0];
-        detectedMap[24] = primaryFile;
-        detectedMap["24"] = primaryFile;
-        archivosDetectadosMap[24] = primaryFile.name;
-        archivosDetectadosMap["24"] = primaryFile.name;
-        archivosMetadata[24] = {
+        detectedMap[geoItemId] = primaryFile;
+        detectedMap[String(geoItemId)] = primaryFile;
+        archivosDetectadosMap[geoItemId] = primaryFile.name;
+        archivosDetectadosMap[String(geoItemId)] = primaryFile.name;
+        archivosMetadata[geoItemId] = {
           fileName: primaryFile.name,
           sizeBytes: primaryFile.size,
           lastModified: primaryFile.lastModified,
-          textSnippet: `Georreferenciación verificada en contenedor digital. ${geoConfig.tramos.length} tramos independientes procesados.`
+          textSnippet: is2026_2
+            ? `Plano de localización e implantación espacial en coordenadas MAGNA SIRGAS verificado. ${geoConfig.tramos.length} tramos independientes procesados.`
+            : `Georreferenciación verificada en contenedor digital. ${geoConfig.tramos.length} tramos independientes procesados.`
         };
-        archivosMetadata["24"] = archivosMetadata[24];
-
-        if (is2026_2) {
-          detectedMap[2] = primaryFile;
-          detectedMap["2"] = primaryFile;
-          archivosDetectadosMap[2] = primaryFile.name;
-          archivosDetectadosMap["2"] = primaryFile.name;
-          archivosMetadata[2] = {
-            fileName: primaryFile.name,
-            sizeBytes: primaryFile.size,
-            lastModified: primaryFile.lastModified,
-            textSnippet: `Plano de localización e implantación espacial en coordenadas MAGNA SIRGAS verificado. ${geoConfig.tramos.length} tramos independientes procesados.`
-          };
-          archivosMetadata["2"] = archivosMetadata[2];
-        }
+        archivosMetadata[String(geoItemId)] = archivosMetadata[geoItemId];
       } else {
         // Garantizar que no quede registrado como detectado si no hay geometrías válidas
-        delete detectedMap[24];
-        delete detectedMap["24"];
-        delete archivosDetectadosMap[24];
-        delete archivosDetectadosMap["24"];
-        delete archivosMetadata[24];
-        delete archivosMetadata["24"];
-        if (detectedFilesMap && detectedFilesMap[24]) {
-          delete detectedFilesMap[24];
-          delete detectedFilesMap["24"];
+        const geoItemId = is2026_2 ? 2 : 24;
+        delete detectedMap[geoItemId];
+        delete detectedMap[String(geoItemId)];
+        delete archivosDetectadosMap[geoItemId];
+        delete archivosDetectadosMap[String(geoItemId)];
+        delete archivosMetadata[geoItemId];
+        delete archivosMetadata[String(geoItemId)];
+        if (detectedFilesMap && detectedFilesMap[geoItemId]) {
+          delete detectedFilesMap[geoItemId];
+          delete detectedFilesMap[String(geoItemId)];
         }
       }
     }

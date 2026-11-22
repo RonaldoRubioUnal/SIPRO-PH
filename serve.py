@@ -10,6 +10,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer, _get_best
 PORT = 8085                         
 HOST = "localhost"
 URL = f"http://{HOST}:{PORT}/index.html"
+URL_2026 = f"http://{HOST}:{PORT}/convenios_2026_2.html"
 FALLBACK_URL = f"http://127.0.0.1:{PORT}/index.html"
 
 def is_server_healthy(port):
@@ -17,7 +18,7 @@ def is_server_healthy(port):
     for test_url in [f"http://127.0.0.1:{port}/index.html", f"http://localhost:{port}/index.html"]:
         try:
             req = urllib.request.Request(test_url, method="HEAD")
-            with urllib.request.urlopen(req, timeout=0.35) as r:
+            with urllib.request.urlopen(req, timeout=0.6) as r:
                 if r.status in (200, 304):
                     return True
         except Exception:
@@ -94,8 +95,20 @@ class AntiCacheHandler(SimpleHTTPRequestHandler):
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     args = sys.argv[1:]
+
+    # Comando de sólo comprobación de salud
+    if "--check" in args:
+        healthy = is_server_healthy(PORT)
+        sys.exit(0 if healthy else 1)
+
+    # Comando de detención de instancias
+    if "--stop" in args or "--kill" in args:
+        print(f"[+] Deteniendo cualquier servidor activo en el puerto {PORT}...")
+        kill_process_on_port(PORT)
+        print("[OK] Servidor detenido.")
+        return
+
     no_browser = "--no-browser" in args or "--daemon" in args
-    force_restart = "--restart" in args or "--force" in args
 
     print("=" * 75)
     print("  SIPRO-PH - SISTEMA DE REVISION Y PRIORIZACION TECNICO-DOCUMENTAL")
@@ -103,16 +116,7 @@ def main():
     print("=" * 75)
     print()
 
-    # Si ya hay un servidor activo y saludable, abrir navegador si corresponde
-    if is_server_healthy(PORT) and not force_restart:
-        print(f"[✓] El servidor ya se encuentra activo y respondiendo en el puerto {PORT}.")
-        print(f"[✓] URL disponible: {URL}")
-        if not no_browser:
-            print("[+] Abriendo aplicacion en el navegador...")
-            webbrowser.open(URL)
-        return
-
-    # 1. Liberar procesos previos o zombies en el puerto
+    # 1. Liberar procesos previos o zombies en el puerto para garantizar un arranque limpio
     kill_process_on_port(PORT)
 
     # 2. Configurar enlace Dual-Stack (IPv6 [::1] + IPv4 127.0.0.1)
@@ -137,12 +141,14 @@ def main():
 
     print(f"[+] Servidor multihilo activo en http://{HOST}:{PORT}/ (Dual-Stack IPv4/IPv6)")
     print(f"[+] Modo sin cache activado (los cambios en CSS/JS se reflejan inmediatamente)")
-    print(f"[+] Direccion alternativa directa: {FALLBACK_URL}")
+    print(f"[+] 📋 Convenios Ordinarios (27 Requisitos + Ficha): {URL}")
+    print(f"[+] ⚡ Convenios 2026 - II (41 Requisitos): {URL_2026}")
+    print(f"[+] Direccion IP directa alternativa: {FALLBACK_URL}")
     print()
 
-    # 3. Abrir navegador si no se especifico lo contrario
+    # 3. Abrir navegador si no se especifico --no-browser
     if not no_browser:
-        print(f"[+] Abriendo la aplicacion: {URL}")
+        print(f"[+] Abriendo la aplicacion en el navegador...")
         webbrowser.open(URL)
 
     print(">>> Servidor ejecutandose continuamente. Puede recargar libremente con F5 <<<")

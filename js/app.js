@@ -2950,6 +2950,13 @@ App.extraerDimensionesItem = function (desc, f1A) {
     ? PresupuestoEngine.extraerDimensionesItem(desc, f1A)
     : { converted: false, motivo: "Motor no disponible" };
 };
+App.setModalidad = function (mod, projectId) {
+  return App.setProjectModalidad(mod, projectId);
+};
+window.setProjectModalidad = function (mod, projectId) {
+  return App.setProjectModalidad(mod, projectId);
+};
+window.setModalidad = window.setProjectModalidad;
 window.App = App;
 
 window.addEventListener("DOMContentLoaded", () => {
