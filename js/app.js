@@ -1766,6 +1766,16 @@ const App = {
     }
 
     if (tabId === "tab-3") {
+      // Re-renderizar dinámicamente el informe de Fase 3 para reflejar de inmediato cualquier cambio de Fase 2
+      const reportContainer = document.getElementById("officialReportContainer");
+      if (reportContainer && typeof ReportsEngine !== "undefined" && typeof ReportsEngine.renderOfficialReport === "function") {
+        const proj = this.currentProject || (this.currentAuditRecord && this.currentAuditRecord.datos);
+        const audit = this.auditGlobal || (this.currentAuditRecord && this.currentAuditRecord.auditGlobal);
+        if (proj) {
+          ReportsEngine.renderOfficialReport(proj, audit, reportContainer);
+        }
+      }
+
       setTimeout(() => {
         document.querySelectorAll(".report-textarea, .fase3-obs-textarea").forEach(el => {
           if (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.autoResizeTextarea === "function") {
@@ -2132,8 +2142,14 @@ const App = {
     projectId = projectId || this.currentProjectId;
     const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
     let exp = expedientesMap[projectId];
+    if (!exp && window.proyectosAuditados && window.proyectosAuditados[projectId]) {
+      exp = window.proyectosAuditados[projectId];
+    }
     if (!exp) {
       exp = Object.values(expedientesMap).find(r => r.id === projectId || r.slug === projectId || (r.datos && r.datos.id === projectId));
+    }
+    if (!exp && window.proyectosAuditados) {
+      exp = Object.values(window.proyectosAuditados).find(r => r.id === projectId || r.slug === projectId || (r.datos && r.datos.id === projectId));
     }
     if (!exp && this.currentAuditRecord) {
       exp = this.currentAuditRecord;
@@ -2189,6 +2205,16 @@ const App = {
           exp.datos.documentosStatus = exp.datos.documentosStatus || { archivosDetectados: {} };
           exp.datos.documentosStatus.archivosDetectados[numItemId] = file.name;
           exp.datos.documentosStatus.archivosDetectados[String(numItemId)] = file.name;
+          if (exp.datos.documentosStatus.itemsSubsanar) {
+            exp.datos.documentosStatus.itemsSubsanar = exp.datos.documentosStatus.itemsSubsanar.filter(id => Number(id) !== numItemId);
+          }
+          if (exp.datos.documentosStatus.itemsCumplidos) {
+            if (!exp.datos.documentosStatus.itemsCumplidos.includes(numItemId)) exp.datos.documentosStatus.itemsCumplidos.push(numItemId);
+          }
+          if (exp.datos.revisionSupervisor) {
+            delete exp.datos.revisionSupervisor[numItemId];
+            delete exp.datos.revisionSupervisor[String(numItemId)];
+          }
           exp.datos.archivosMetadata = exp.datos.archivosMetadata || {};
           exp.datos.archivosMetadata[numItemId] = {
             fileName: file.name,
@@ -2197,6 +2223,10 @@ const App = {
             textSnippet: `Documento de subsanación aportado: ${file.name}`
           };
           exp.datos.archivosMetadata[String(numItemId)] = exp.datos.archivosMetadata[numItemId];
+        }
+        if (exp.revisionSupervisor) {
+          delete exp.revisionSupervisor[numItemId];
+          delete exp.revisionSupervisor[String(numItemId)];
         }
 
         // 3. Extracción de fecha y verificación de vigencia mensual en subsanación
@@ -2550,15 +2580,57 @@ const App = {
           exp.fase3.matrizObservaciones = exp.fase3.matrizObservaciones || {};
 
           if (subEsVigente !== false) {
-            const cleanKeys = [`doc_item_${numItemId}`, `FASE_2_ITEM_${numItemId}`, `item_${numItemId}`];
+            if (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
+              ReportsEngine.cleanFinding(projectId, numItemId);
+            }
+            const numPad = String(numItemId).padStart(2, "0");
+            const numRaw = String(numItemId);
+            const cleanKeys = [
+              `FASE_2_ITEM_${numPad}`, `FASE_2_ITEM_${numRaw}`,
+              `item_${numPad}`, `item_${numRaw}`,
+              `doc_item_${numPad}`, `doc_item_${numRaw}`,
+              `ITEM_${numPad}`, `ITEM_${numRaw}`,
+              numPad, numRaw
+            ];
             if (isItem28) {
-              cleanKeys.push(`doc_item_${budgetSlotId}`, `FASE_2_ITEM_${budgetSlotId}`, `item_${budgetSlotId}`, "doc_item_28", "FASE_2_ITEM_28", "item_28", "doc_item_14", "FASE_2_ITEM_14", "item_14", "FASE_1C_PTO", "fase_1c_presupuesto");
+              const bPad = String(budgetSlotId).padStart(2, "0");
+              const bRaw = String(budgetSlotId);
+              cleanKeys.push(
+                `FASE_2_ITEM_${bPad}`, `FASE_2_ITEM_${bRaw}`,
+                `item_${bPad}`, `item_${bRaw}`,
+                `doc_item_${bPad}`, `doc_item_${bRaw}`,
+                "FASE_2_ITEM_28", "FASE_2_ITEM_14", "item_28", "item_14",
+                "FASE_1C_PTO", "fase_1c_presupuesto", "FASE_1C_PRESUPUESTO", "fase_1c_pto"
+              );
+              if (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
+                ReportsEngine.cleanFinding(projectId, "FASE_1C_PTO");
+              }
             }
             if (isItem3) {
-              cleanKeys.push("doc_item_3", "FASE_2_ITEM_3", "item_3", "FASE_1A_DISENO", "FASE_1A_ACERO", "fase_1a_acero");
+              cleanKeys.push(
+                "FASE_2_ITEM_03", "FASE_2_ITEM_3",
+                "item_03", "item_3",
+                "doc_item_03", "doc_item_3",
+                "FASE_1A_DISENO", "FASE_1A_ACERO", "fase_1a_acero", "fase_1a_diseno"
+              );
+              if (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
+                ReportsEngine.cleanFinding(projectId, "FASE_1A_ACERO");
+              }
             }
             if (isItem24) {
-              cleanKeys.push("doc_item_24", "FASE_2_ITEM_24", "item_24", "FASE_1B_GEO", "fase_1b_espacial");
+              const geoSlotId = is2026_2 ? 2 : 24;
+              const gPad = String(geoSlotId).padStart(2, "0");
+              const gRaw = String(geoSlotId);
+              cleanKeys.push(
+                `FASE_2_ITEM_${gPad}`, `FASE_2_ITEM_${gRaw}`,
+                `item_${gPad}`, `item_${gRaw}`,
+                `doc_item_${gPad}`, `doc_item_${gRaw}`,
+                "FASE_2_ITEM_24", "FASE_2_ITEM_02", "item_24", "item_02",
+                "FASE_1B_GEO", "fase_1b_espacial", "FASE_1B_ESPACIAL", "fase_1b_geo"
+              );
+              if (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
+                ReportsEngine.cleanFinding(projectId, "FASE_1B_GEO");
+              }
             }
             cleanKeys.forEach(k => {
               delete exp.fase3.observacionesEditadas[k];

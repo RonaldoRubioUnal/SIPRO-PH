@@ -13,23 +13,31 @@ const ReportsEngine = {
    */
   /**
    * Genera o normaliza la clave única estable por requisito (itemKey)
+   * Garantiza que cualquier variante (item_1, item_01, FASE_2_ITEM_1, doc_item_1, 1) resuelva a la misma clave canónica
    */
   toItemKey(id) {
     if (!id) return "";
     const s = String(id).trim();
     const lower = s.toLowerCase();
-    if (lower === "fase_1a_acero" || s === "FASE_1A_ACERO") return "FASE_1A_ACERO";
-    if (lower === "fase_1b_espacial" || s === "FASE_1B_GEO") return "FASE_1B_GEO";
-    if (lower === "fase_1c_presupuesto" || s === "FASE_1C_PTO") return "FASE_1C_PTO";
-    const m1 = lower.match(/^item_(\d+)$/);
-    if (m1) return `FASE_2_ITEM_${m1[1]}`;
-    const m2 = s.match(/^FASE_2_ITEM_(\d+)$/i);
-    if (m2) return `FASE_2_ITEM_${m2[1]}`;
+    if (lower === "fase_1a_acero" || lower === "fase_1a_diseno" || s === "FASE_1A_ACERO") return "FASE_1A_ACERO";
+    if (lower === "fase_1b_espacial" || lower === "fase_1b_geo" || s === "FASE_1B_GEO") return "FASE_1B_GEO";
+    if (lower === "fase_1c_presupuesto" || lower === "fase_1c_pto" || s === "FASE_1C_PTO") return "FASE_1C_PTO";
+    if (lower === "ficha_priorizacion" || lower === "fase_2_ficha_priorizacion" || s === "FICHA_PRIORIZACION") return "FICHA_PRIORIZACION";
+    const m = lower.match(/^(?:fase_2_item_|item_|doc_item_)(\d+)$/i);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      return `FASE_2_ITEM_${String(n).padStart(2, "0")}`;
+    }
+    const mNum = lower.match(/^(\d+)$/);
+    if (mNum) {
+      const n = parseInt(mNum[1], 10);
+      return `FASE_2_ITEM_${String(n).padStart(2, "0")}`;
+    }
     return s;
   },
 
   /**
-   * Obtiene la edición realizada por el usuario para un requisito buscando bajo clave canónica o legacy
+   * Obtiene la edición realizada por el usuario para un requisito buscando bajo clave canónica, legacy o variantes de padding
    */
   getUserEdit(fase3State, id) {
     if (!fase3State) return null;
@@ -38,8 +46,102 @@ const ReportsEngine = {
     const oEdit = fase3State.observacionesEditadas;
     if (mObs && mObs[itemKey]) return mObs[itemKey];
     if (oEdit && oEdit[itemKey]) return oEdit[itemKey];
-    if (oEdit && oEdit[id]) return oEdit[id];
+    if (id && mObs && mObs[id]) return mObs[id];
+    if (id && oEdit && oEdit[id]) return oEdit[id];
+
+    // Chequear variantes numéricas con y sin cero inicial
+    const m = String(itemKey).match(/^FASE_2_ITEM_(\d+)$/);
+    if (m) {
+      const pad = m[1];
+      const raw = String(parseInt(pad, 10));
+      const variations = [
+        `FASE_2_ITEM_${raw}`,
+        `item_${pad}`,
+        `item_${raw}`,
+        `doc_item_${pad}`,
+        `doc_item_${raw}`,
+        `ITEM_${pad}`,
+        `ITEM_${raw}`,
+        pad,
+        raw
+      ];
+      for (const k of variations) {
+        if (mObs && mObs[k]) return mObs[k];
+        if (oEdit && oEdit[k]) return oEdit[k];
+      }
+    }
     return null;
+  },
+
+  /**
+   * Elimina completamente cualquier observación previa o residuo de no conformidad para un ítem en Fase 3
+   */
+  cleanFinding(projectId, id) {
+    if (!id) return;
+    projectId = projectId || (window.App && App.currentProjectId);
+    const state = this.getFase3State(projectId);
+    if (!state) return;
+
+    state.matrizObservaciones = state.matrizObservaciones || {};
+    state.observacionesEditadas = state.observacionesEditadas || {};
+
+    const itemKey = this.toItemKey(id);
+    const keysToDelete = new Set([id, itemKey]);
+
+    const numMatch = String(id).match(/^(?:FASE_2_ITEM_|item_|doc_item_)?(\d+)$/i);
+    if (numMatch) {
+      const n = parseInt(numMatch[1], 10);
+      const pad = String(n).padStart(2, "0");
+      const raw = String(n);
+      keysToDelete.add(`FASE_2_ITEM_${pad}`);
+      keysToDelete.add(`FASE_2_ITEM_${raw}`);
+      keysToDelete.add(`item_${pad}`);
+      keysToDelete.add(`item_${raw}`);
+      keysToDelete.add(`doc_item_${pad}`);
+      keysToDelete.add(`doc_item_${raw}`);
+      keysToDelete.add(`ITEM_${pad}`);
+      keysToDelete.add(`ITEM_${raw}`);
+      keysToDelete.add(pad);
+      keysToDelete.add(raw);
+
+      if (n === 3) {
+        keysToDelete.add("FASE_1A_ACERO");
+        keysToDelete.add("fase_1a_acero");
+        keysToDelete.add("FASE_1A_DISENO");
+        keysToDelete.add("fase_1a_diseno");
+      }
+      if (n === 24 || n === 2) {
+        keysToDelete.add("FASE_1B_GEO");
+        keysToDelete.add("fase_1b_espacial");
+        keysToDelete.add("FASE_1B_ESPACIAL");
+        keysToDelete.add("fase_1b_geo");
+      }
+      if (n === 28 || n === 14) {
+        keysToDelete.add("FASE_1C_PTO");
+        keysToDelete.add("fase_1c_presupuesto");
+        keysToDelete.add("FASE_1C_PRESUPUESTO");
+        keysToDelete.add("fase_1c_pto");
+      }
+    }
+
+    if (String(id).toUpperCase().includes("FICHA")) {
+      keysToDelete.add("FICHA_PRIORIZACION");
+      keysToDelete.add("ficha_priorizacion");
+      keysToDelete.add("FASE_2_FICHA_PRIORIZACION");
+    }
+
+    keysToDelete.forEach(k => {
+      delete state.matrizObservaciones[k];
+      delete state.observacionesEditadas[k];
+    });
+
+    const expedientesMap = (window.SIPRO_DATA && SIPRO_DATA.expedientesMap) || window.proyectosAuditados || {};
+    if (expedientesMap[projectId] && expedientesMap[projectId].fase3) {
+      keysToDelete.forEach(k => {
+        if (expedientesMap[projectId].fase3.matrizObservaciones) delete expedientesMap[projectId].fase3.matrizObservaciones[k];
+        if (expedientesMap[projectId].fase3.observacionesEditadas) delete expedientesMap[projectId].fase3.observacionesEditadas[k];
+      });
+    }
   },
 
   getFase3State(projectId) {
@@ -104,6 +206,8 @@ const ReportsEngine = {
         const objFicha = {
           id: fidFicha,
           itemKey: fidFicha,
+          itemNum: "Ficha",
+          itemBadge: "Ficha Priorización",
           fase: "Documento Base",
           titulo: "Ficha de Priorización Municipal y Cierre",
           norma: "Documento Maestro de Priorización",
@@ -127,6 +231,8 @@ const ReportsEngine = {
         const objFicha = {
           id: fidFicha,
           itemKey: fidFicha,
+          itemNum: "Ficha",
+          itemBadge: "Ficha Priorización",
           fase: "Documento Base",
           titulo: "Ficha de Priorización Municipal y Cierre",
           norma: "Documento Maestro de Priorización",
@@ -191,8 +297,20 @@ const ReportsEngine = {
       }
 
       const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, "fase_1a_acero");
-      const status = userEdit?.estado || defaultStatus;
-      let motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      let status = defaultStatus;
+      let motivo = defaultMotivo;
+
+      if (isApproved) {
+        if (userEdit && (userEdit.estado === "Faltante" || userEdit.estado === "No Aceptado / Por Subsanar")) {
+          userEdit.estado = "Conforme";
+          userEdit.motivo = defaultMotivo;
+        }
+        status = userEdit?.estado || "Conforme";
+        motivo = (userEdit?.motivo !== undefined && !userEdit.motivo.includes("DÉFICIT")) ? userEdit.motivo : defaultMotivo;
+      } else {
+        status = userEdit?.estado || defaultStatus;
+        motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      }
 
       // Si el motivo almacenado previamente contiene el texto antiguo o líneas duplicadas, migrar
       if (typeof motivo === "string") {
@@ -213,12 +331,16 @@ const ReportsEngine = {
         }
       }
 
+      const num1A = "03";
       const obj = {
         id: fid,
         itemKey: fid,
-        fase: "Fase 1A",
+        itemNum: num1A,
+        itemBadge: `Ítem ${num1A} (1A - Acero)`,
+        fase: "Fase 1A - Control Estructural",
         titulo: "Control Estructural de Acero Mínimo",
         norma: "Criterio Técnico Departamental (26.25 kg/m)",
+        archivo: audit1A.archivoNombre || (rec && rec.archivosFileMap && (rec.archivosFileMap[3] || rec.archivosFileMap["3"]) && (rec.archivosFileMap[3] || rec.archivosFileMap["3"]).name) || null,
         estado: status,
         motivo: motivo,
         isManual: false
@@ -241,7 +363,7 @@ const ReportsEngine = {
       if (isApproved) {
         defaultMotivo = `Trazados georreferenciados conformes con 100% de coincidencia y alineación con la red vial departamental (tolerancia de 10 m).`;
       } else if (audit1B.tieneKMZ === false || audit1B.tieneGeorreferenciacionValida === false) {
-        defaultMotivo = "Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem 24): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.";
+        defaultMotivo = `Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem ${is2026_2 ? '02' : '24'}): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.`;
       } else if (audit1B.alertaComprimido) {
         defaultMotivo = audit1B.alertaComprimido;
       } else {
@@ -313,8 +435,20 @@ const ReportsEngine = {
       }
 
       const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, "fase_1b_espacial");
-      const status = userEdit?.estado || defaultStatus;
-      let motivo = userEdit?.motivo !== undefined ? userEdit.motivo : (typeof userEdit === "string" ? userEdit : defaultMotivo);
+      let status = defaultStatus;
+      let motivo = defaultMotivo;
+
+      if (isApproved) {
+        if (userEdit && (userEdit.estado === "Faltante" || userEdit.estado === "No Aceptado / Por Subsanar")) {
+          userEdit.estado = "Conforme";
+          userEdit.motivo = defaultMotivo;
+        }
+        status = userEdit?.estado || "Conforme";
+        motivo = (userEdit?.motivo !== undefined && !userEdit.motivo.includes("FUERA DE VÍA")) ? userEdit.motivo : defaultMotivo;
+      } else {
+        status = userEdit?.estado || defaultStatus;
+        motivo = userEdit?.motivo !== undefined ? userEdit.motivo : (typeof userEdit === "string" ? userEdit : defaultMotivo);
+      }
 
       // Si el motivo almacenado previamente contiene el texto antiguo o líneas duplicadas, deduplicar
       if (typeof motivo === "string") {
@@ -335,12 +469,16 @@ const ReportsEngine = {
         }
       }
 
+      const num1B = is2026_2 ? "02" : "24";
       const obj = {
         id: fid,
         itemKey: fid,
-        fase: "Fase 1B",
+        itemNum: num1B,
+        itemBadge: `Ítem ${num1B} (1B - Geo)`,
+        fase: "Fase 1B - Alineación Vial",
         titulo: "Georreferenciación y Contraste Espacial de Trazados (Alineación con la Red Vial)",
         norma: "Red Terciaria Departamental (Tolerancia 10 m)",
+        archivo: (audit1B && (audit1B.archivoKMZ || audit1B.archivoNombre)) || null,
         estado: status,
         motivo: motivo,
         isManual: false
@@ -424,8 +562,20 @@ const ReportsEngine = {
       }
 
       const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, "fase_1c_presupuesto");
-      const status = userEdit?.estado || defaultStatus;
-      let motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      let status = defaultStatus;
+      let motivo = defaultMotivo;
+
+      if (isApproved) {
+        if (userEdit && (userEdit.estado === "Faltante" || userEdit.estado === "No Aceptado / Por Subsanar")) {
+          userEdit.estado = "Conforme";
+          userEdit.motivo = defaultMotivo;
+        }
+        status = userEdit?.estado || "Conforme";
+        motivo = (userEdit?.motivo !== undefined && !userEdit.motivo.includes("DISCREPANCIA")) ? userEdit.motivo : defaultMotivo;
+      } else {
+        status = userEdit?.estado || defaultStatus;
+        motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      }
 
       // Si el motivo guardado previamente contiene el texto antiguo sin viñetas, migrar al nuevo formato estructurado
       if (typeof motivo === "string") {
@@ -446,12 +596,16 @@ const ReportsEngine = {
         }
       }
 
+      const num1C = is2026_2 ? "14" : "28";
       const obj = {
         id: fid,
         itemKey: fid,
-        fase: "Fase 1C",
+        itemNum: num1C,
+        itemBadge: `Ítem ${num1C} (1C - Presupuesto)`,
+        fase: "Fase 1C - Coherencia Presupuestal",
         titulo: "Coherencia de Cantidades en Presupuesto Oficial",
         norma: `Cruce Presupuesto vs. Despiece (Tolerancia ±${(f1c && f1c.toleranciaPct) || 5}%)`,
+        archivo: (f1c && f1c.presupuestoData && f1c.presupuestoData.nombreArchivo) || null,
         estado: status,
         motivo: motivo,
         isManual: false
@@ -467,17 +621,26 @@ const ReportsEngine = {
     // 3. COMPUERTA 2: LISTA DE REQUISITOS DOCUMENTALES
     const items27 = (audit2 && audit2.items) || (rec && rec.fase2 && rec.fase2.items) || (is2026_2 ? SIPRO_DATA.items41_2026_2 : SIPRO_DATA.items27) || [];
     items27.forEach((it) => {
-      const num = it.num || it.id;
-      const fid = `FASE_2_ITEM_${num}`;
-      const legacyFid = `item_${num}`;
+      const rawNum = it.num || it.id;
+      const numPadded = String(rawNum).padStart(2, "0");
+      const fid = `FASE_2_ITEM_${numPadded}`;
+      const legacyFid = `item_${numPadded}`;
       const defaultStatus = it.conforme ? "Conforme" : (it.vencido ? "Vencido" : (it.faltante ? "Faltante" : "No Aceptado / Por Subsanar"));
       let defaultMotivo = "";
       if (it.conforme) {
-        defaultMotivo = `Documento aportado (${it.archivoDetectado || "vigente"}) y conforme con la regla normativa.`;
+        if (it.subsanado && it.archivoDetectado) {
+          defaultMotivo = `✓ Subsanado con archivo ${it.archivoDetectado}${it.fechaSubsanacion ? ` el ${it.fechaSubsanacion}` : ''}. Cumple con la regla normativa.`;
+        } else if (it.archivoDetectado) {
+          defaultMotivo = `✓ Documento aportado (${it.archivoDetectado}) y conforme con la regla normativa.`;
+        } else {
+          defaultMotivo = "✓ Documento aportado y conforme con la regla normativa.";
+        }
       } else if (it.faltante || !it.archivoDetectado) {
-        if (num === 24 || it.id === 24 || it.num === 24) {
+        if (numPadded === "24" || it.id === 24 || (!is2026_2 && Number(it.id) === 24)) {
           defaultMotivo = "Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem 24): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.";
-        } else if (num === 3 || it.id === 3 || it.num === 3) {
+        } else if (is2026_2 && (numPadded === "02" || Number(it.id) === 2)) {
+          defaultMotivo = "Georreferenciación / Archivo KMZ-KML (Fase 1B - Ítem 02): Documento faltante. No se aportó archivo de georreferenciación del proyecto para verificar su alineación con la red vial.";
+        } else if (numPadded === "03" || Number(it.id) === 3) {
           defaultMotivo = "• Documento faltante: No se aportó archivo de despiece de acero y memoria de concreto.";
         } else {
           defaultMotivo = "Documento no aportado en la carpeta del expediente municipal.";
@@ -485,25 +648,41 @@ const ReportsEngine = {
       } else if (it.vencido) {
         const shortTitle = (typeof DocumentalEngine !== "undefined" && DocumentalEngine.SHORT_TITLES_VIGENCIA && DocumentalEngine.SHORT_TITLES_VIGENCIA[Number(it.id)])
           || it.shortTitle
-          || (it.title ? it.title.split("(")[0].trim() : `Ítem ${num}`);
+          || (it.title ? it.title.split("(")[0].trim() : `Ítem ${numPadded}`);
         const fechaStr = it.fechaDocStr || (it.meta && it.meta.fechaDocStr) || (it.fechaDoc ? `${String(it.fechaDoc.getDate()).padStart(2, '0')}/${String(it.fechaDoc.getMonth() + 1).padStart(2, '0')}/${it.fechaDoc.getFullYear()}` : "Fecha no detectada");
         const ahora = new Date();
         const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
         const mesActualNombre = meses[ahora.getMonth()];
         const anioActual = ahora.getFullYear();
-        defaultMotivo = `• Ítem ${num} (${shortTitle}): ⚠️ VIGENCIA VENCIDA — Expedido el ${fechaStr}. Debe corresponder al mes de revisión en curso (${mesActualNombre} de ${anioActual}).`;
+        defaultMotivo = `• Ítem ${numPadded} (${shortTitle}): ⚠️ VIGENCIA VENCIDA — Expedido el ${fechaStr}. Debe corresponder al mes de revisión en curso (${mesActualNombre} de ${anioActual}).`;
       } else {
         defaultMotivo = it.observacion || "Documento no aceptado conforme a las especificaciones.";
       }
 
       const userEdit = this.getUserEdit(fase3State, fid) || this.getUserEdit(fase3State, legacyFid);
-      const status = userEdit?.estado || defaultStatus;
-      const motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      let status = defaultStatus;
+      let motivo = defaultMotivo;
 
+      if (it.conforme) {
+        // Si el ítem es conforme en Fase 2 (o subsanado), limpiar cualquier edición previa que lo marcaba como faltante o no conforme
+        if (userEdit && (userEdit.estado === "Faltante" || userEdit.estado === "No Aceptado / Por Subsanar" || userEdit.estado === "Vencido" || (typeof userEdit.motivo === "string" && (userEdit.motivo.includes("no aportado") || userEdit.motivo.includes("faltante"))))) {
+          userEdit.estado = "Conforme";
+          userEdit.motivo = defaultMotivo;
+        }
+        status = userEdit?.estado || "Conforme";
+        motivo = (userEdit?.motivo !== undefined && !userEdit.motivo.includes("no aportado") && !userEdit.motivo.includes("Documento Faltante")) ? userEdit.motivo : defaultMotivo;
+      } else {
+        status = userEdit?.estado || defaultStatus;
+        motivo = userEdit?.motivo !== undefined ? userEdit.motivo : defaultMotivo;
+      }
+
+      const itemBadge = `Ítem ${numPadded}`;
       const obj = {
         id: fid,
         itemKey: fid,
-        fase: `Fase 2 - Ítem ${num}`,
+        itemNum: numPadded,
+        itemBadge: itemBadge,
+        fase: `Fase 2 - Ítem ${numPadded}`,
         titulo: `${it.title}`,
         norma: it.rule || "Requisito Documental",
         entidad: it.entity,
@@ -522,9 +701,12 @@ const ReportsEngine = {
 
     // 4. HALLAZGOS MANUALES ADICIONALES INGRESADOS POR EL REVISOR
     (fase3State.hallazgosManuales || []).forEach((m) => {
+      const itemBadge = "Obs. Manual";
       const obj = {
         id: m.id,
         itemKey: m.id,
+        itemNum: "Manual",
+        itemBadge: itemBadge,
         fase: "Revisión Manual",
         titulo: m.titulo || "Observación / Requisito Adicional",
         norma: "Criterio Técnico del Revisor",
@@ -1167,11 +1349,21 @@ const ReportsEngine = {
                   ${findings.map((f) => `
                     <tr class="${f.omitido ? 'row-omitted-finding' : ''}" style="${f.omitido ? 'background:rgba(241, 245, 249, 0.75);opacity:0.8;' : ''}">
                       <td>
-                        <div style="font-weight:800;color:var(--text-main);font-size:12.5px;${f.omitido ? 'text-decoration:line-through;color:var(--text-muted);' : ''}">${f.titulo}</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                          <span style="background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;font-family:var(--font-mono);font-size:10px;">${f.fase}</span>
-                          ${f.norma ? `<span style="margin-left:4px;">• ${f.norma}</span>` : ''}
+                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+                          <span class="badge-item-checklist" style="display:inline-flex;align-items:center;background:#0284c7;color:#ffffff;font-weight:900;font-size:11.5px;padding:3px 9px;border-radius:5px;font-family:var(--font-mono);letter-spacing:0.4px;box-shadow:0 1px 3px rgba(2,132,199,0.3);">
+                            ${f.itemBadge || (f.itemNum ? `Ítem ${f.itemNum}` : f.fase)}
+                          </span>
+                          <span style="background:rgba(15,23,42,0.06);color:var(--text-muted);font-weight:700;font-size:10px;padding:2px 7px;border-radius:4px;font-family:var(--font-mono);">
+                            ${f.fase}
+                          </span>
                         </div>
+                        <div style="font-weight:800;color:var(--text-main);font-size:12.5px;line-height:1.4;${f.omitido ? 'text-decoration:line-through;color:var(--text-muted);' : ''}">${f.titulo}</div>
+                        ${f.norma ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">• ${f.norma}</div>` : ''}
+                        ${f.archivo ? `
+                          <div style="font-size:11px;color:#0284c7;font-weight:600;margin-top:4px;display:flex;align-items:center;gap:4px;font-family:var(--font-mono);">
+                            <span>📄</span> <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;" title="${this.escapeHtml(f.archivo)}">${this.escapeHtml(f.archivo)}</span>
+                          </div>
+                        ` : ''}
                         ${f.omitido ? `
                           <div style="display:inline-flex;align-items:center;gap:4px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;margin-top:5px;">
                             🚫 Omitida de impresión
@@ -1239,10 +1431,15 @@ const ReportsEngine = {
             </div>
             <div id="reportCompliantGrid" class="report-compliant-grid" style="display:${this.compliantCollapsed ? 'none' : 'grid'};">
               ${compliantItems.map((c) => `
-                <div class="report-compliant-pill">
-                  <span style="color:#10B981;font-weight:800;flex-shrink:0;">&#10003;</span>
-                  <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;" title="${c.titulo}">${c.titulo}</span>
-                  <span style="margin-left:auto;font-size:10px;opacity:0.65;font-family:var(--font-mono);flex-shrink:0;padding-left:6px;">${c.fase}</span>
+                <div class="report-compliant-pill" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--color-bg-card);border:1px solid var(--border-subtle);border-radius:6px;">
+                  <span style="color:#10B981;font-weight:900;font-size:14px;flex-shrink:0;">&#10003;</span>
+                  <span style="display:inline-block;background:rgba(16,185,129,0.12);color:#065f46;border:1px solid rgba(16,185,129,0.3);font-weight:900;font-size:10.5px;padding:1px 6px;border-radius:4px;font-family:var(--font-mono);flex-shrink:0;">
+                    ${c.itemBadge || (c.itemNum ? `Ítem ${c.itemNum}` : c.fase)}
+                  </span>
+                  <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;font-size:12px;font-weight:600;color:var(--text-main);" title="${c.titulo}">${c.titulo}</span>
+                  ${c.archivo ? `
+                    <span style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;" title="${c.archivo}">📄 ${this.escapeHtml(c.archivo)}</span>
+                  ` : ''}
                 </div>
               `).join("")}
             </div>
@@ -1386,11 +1583,15 @@ const ReportsEngine = {
     ` : nonOmittedFindings.map(f => `
       <tr>
         <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
-          <div style="font-weight:800;color:#0f172a;font-size:11.5px;">${this.escapeHtml(f.titulo)}</div>
-          <div style="font-size:10px;color:#64748b;margin-top:2px;">
-            <span style="background:rgba(0,0,0,0.05);padding:1px 5px;border-radius:3px;font-family:monospace;font-size:9.5px;">${this.escapeHtml(f.fase)}</span>
-            ${f.norma ? `<span style="margin-left:4px;">• ${this.escapeHtml(f.norma)}</span>` : ''}
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
+            <span style="display:inline-block;background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;font-weight:800;font-size:10.5px;padding:1px 6px;border-radius:3px;font-family:monospace;">
+              ${f.itemBadge || (f.itemNum ? `Ítem ${f.itemNum}` : f.fase)}
+            </span>
+            <span style="background:rgba(0,0,0,0.05);padding:1px 5px;border-radius:3px;font-family:monospace;font-size:9.5px;color:#64748b;">${this.escapeHtml(f.fase)}</span>
           </div>
+          <div style="font-weight:800;color:#0f172a;font-size:11.5px;">${this.escapeHtml(f.titulo)}</div>
+          ${f.norma ? `<div style="font-size:9.5px;color:#64748b;margin-top:1px;">• ${this.escapeHtml(f.norma)}</div>` : ''}
+          ${f.archivo ? `<div style="font-size:9.5px;color:#0284c7;font-family:monospace;margin-top:2px;">📄 Archivo: ${this.escapeHtml(f.archivo)}</div>` : ''}
         </td>
         <td style="padding:8px 10px;border:1px solid #cbd5e1;vertical-align:top;">
           <span class="${f.estado === 'Conforme' ? 'badge-conforme' : (f.estado === 'Vencido' ? 'badge-vencido' : 'badge-subsanar')}">${this.escapeHtml(f.estado)}</span>
@@ -1960,7 +2161,21 @@ const ReportsEngine = {
               new TableCell({
                 width: { size: 28, type: WidthType.PERCENTAGE },
                 borders: cellBorders,
-                children: [new Paragraph({ children: [new TextRun({ text: f.titulo || "", bold: true, size: 17, color: "0F172A" })] })]
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({ text: `[${f.itemBadge || (f.itemNum ? `Ítem ${f.itemNum}` : f.fase)}] `, bold: true, size: 17, color: "0284C7" }),
+                      new TextRun({ text: f.titulo || "", bold: true, size: 17, color: "0F172A" })
+                    ]
+                  }),
+                  ...(f.archivo ? [
+                    new Paragraph({
+                      children: [
+                        new TextRun({ text: `Archivo: ${f.archivo}`, size: 14, color: "64748B", italics: true })
+                      ]
+                    })
+                  ] : [])
+                ]
               }),
               new TableCell({
                 width: { size: 17, type: WidthType.PERCENTAGE },

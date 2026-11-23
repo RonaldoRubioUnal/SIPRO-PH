@@ -1578,7 +1578,6 @@ const DocumentalEngine = {
     }
 
     // Sincronizar hacia fase3State.matrizObservaciones
-    const obsKey = isFicha ? "FASE_2_FICHA_PRIORIZACION" : `FASE_2_ITEM_${rawKey}`;
     const f3State = (typeof ReportsEngine !== "undefined" && typeof ReportsEngine.getFase3State === "function")
       ? ReportsEngine.getFase3State(pId)
       : (p.fase3State || (p.fase3State = {}));
@@ -1592,11 +1591,30 @@ const DocumentalEngine = {
         motivo: observacion || (nuevoEstado === "CONFORME" ? "Documento verificado y conforme por supervisor." : "Documento no conforme según revisión del supervisor.")
       };
 
-      f3State.matrizObservaciones[obsKey] = findingObj;
-      f3State.observacionesEditadas[obsKey] = findingObj;
       if (isFicha) {
-        f3State.matrizObservaciones["FICHA_PRIORIZACION"] = findingObj;
-        f3State.observacionesEditadas["FICHA_PRIORIZACION"] = findingObj;
+        ["FICHA_PRIORIZACION", "ficha_priorizacion", "FASE_2_FICHA_PRIORIZACION"].forEach(k => {
+          f3State.matrizObservaciones[k] = findingObj;
+          f3State.observacionesEditadas[k] = findingObj;
+        });
+      } else {
+        const numId = Number(rawKey);
+        const numPad = (!isNaN(numId)) ? String(numId).padStart(2, "0") : String(rawKey);
+        const keysToSet = [
+          `FASE_2_ITEM_${numPad}`,
+          `FASE_2_ITEM_${rawKey}`,
+          `item_${numPad}`,
+          `item_${rawKey}`,
+          `doc_item_${numPad}`,
+          `doc_item_${rawKey}`
+        ];
+        keysToSet.forEach(k => {
+          f3State.matrizObservaciones[k] = findingObj;
+          f3State.observacionesEditadas[k] = findingObj;
+        });
+      }
+
+      if (nuevoEstado === "CONFORME" && typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
+        ReportsEngine.cleanFinding(pId, rawKey);
       }
     }
 
@@ -1607,6 +1625,10 @@ const DocumentalEngine = {
       if (exp) {
         exp.fase2 = auditResult;
         exp.datos = p;
+        if (exp.auditGlobal) exp.auditGlobal.audit2 = auditResult;
+      }
+      if (window.App && window.App.auditGlobal) {
+        window.App.auditGlobal.audit2 = auditResult;
       }
     }
 
