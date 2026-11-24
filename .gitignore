@@ -12,15 +12,34 @@ ENV/
 ~$*.doc
 ~$*.xls
 
+# Archivos de depuración, logs y volcados de consola
+*.log
+out*.txt
+out.txt
+output*.txt
+*.out
+*.tmp
+*.bak
+
+# Archivos temporales de pruebas y suites de prueba automáticas
+test_*.html
+test_*.js
+test_*.py
+test-runner*
+scratch/
+
+# Archivos de estado local y auditorías de prueba
+sipro_auditoria.json
+
+# Editores y entornos de desarrollo
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
 # Archivos del sistema operativo
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
-
-# Archivos de depuración y logs
-*.log
-
-# Scripts temporales de pruebas (descomentar si no se desean en el repositorio)
-# scratch/
