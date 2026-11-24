@@ -1089,15 +1089,20 @@ const FolderReader = {
       try {
         let dirHandle = null;
         try {
-          dirHandle = await window.showDirectoryPicker({ mode: "read" });
+          dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
         } catch (eDir) {
           if (eDir.name === "AbortError") return;
-          console.warn("showDirectoryPicker con read falló, reintentando básico:", eDir);
+          console.warn("showDirectoryPicker con readwrite no concedido, reintentando read:", eDir);
           try {
-            dirHandle = await window.showDirectoryPicker();
-          } catch (eBasic) {
-            if (eBasic.name === "AbortError") return;
-            throw eBasic;
+            dirHandle = await window.showDirectoryPicker({ mode: "read" });
+          } catch (eRead) {
+            if (eRead.name === "AbortError") return;
+            try {
+              dirHandle = await window.showDirectoryPicker();
+            } catch (eBasic) {
+              if (eBasic.name === "AbortError") return;
+              throw eBasic;
+            }
           }
         }
         if (dirHandle) {
@@ -2158,17 +2163,72 @@ const FolderReader = {
       } catch (err) {
         console.warn("Error leyendo sipro_auditoria.json:", err);
       }
-    } else {
-      // Si NO existe sipro_auditoria.json en la carpeta física:
-      // Limpiar e ignorar cualquier dato viejo en localStorage para garantizar lectura fresca
-      try {
-        localStorage.removeItem(`sipro_auditoria_${proyectoId}`);
-        localStorage.removeItem(`sipro_auditoria_${slug}`);
-        localStorage.removeItem(`sipro_auditoria_${newExpedienteId}`);
-        localStorage.removeItem(`sipro_auditoria_${rawFolderName}`);
-      } catch (e) { }
-      savedAuditData = null;
     }
+
+    // Si NO se encontró en archivo físico o falló la lectura, consultar en localStorage
+    if (!savedAuditData) {
+      try {
+        const candidateKeys = [
+          `sipro_auditoria_${proyectoId}`,
+          `sipro_auditoria_${slug}`,
+          `sipro_auditoria_${newExpedienteId}`,
+          `sipro_auditoria_${rawFolderName}`,
+          `sipro_auditoria_${cleanMpioSlug}`
+        ];
+        for (const k of candidateKeys) {
+          const rawLocal = localStorage.getItem(k);
+          if (rawLocal) {
+            try {
+              savedAuditData = JSON.parse(rawLocal);
+              console.log("sipro_auditoria restaurado exitosamente desde localStorage:", k);
+              break;
+            } catch (eParse) { }
+          }
+        }
+      } catch (eLocal) {
+        console.warn("Aviso al consultar localStorage:", eLocal);
+      }
+    }
+
+    // =========================================================================
+    // RESTAURACIÓN DE ASIGNACIONES MANUALES Y CALIFICACIONES DE FASE 2
+    // =========================================================================
+    const savedArchivosDetectados = (savedAuditData && (
+      (savedAuditData.documentosStatus && savedAuditData.documentosStatus.archivosDetectados) ||
+      (savedAuditData.fase2 && savedAuditData.fase2.archivosDetectados)
+    )) || {};
+
+    for (const [rawItemId, fileName] of Object.entries(savedArchivosDetectados)) {
+      if (!fileName || typeof fileName !== "string") continue;
+      const itId = Number(rawItemId);
+      if (isNaN(itId)) continue;
+      const matchedFile = files.find(f => f && f.name && f.name.toLowerCase() === fileName.toLowerCase());
+      if (matchedFile) {
+        detectedMap[itId] = matchedFile;
+        detectedMap[String(itId)] = matchedFile;
+        archivosDetectadosMap[itId] = matchedFile.name;
+        archivosDetectadosMap[String(itId)] = matchedFile.name;
+        if (!detectedFilesMap[itId]) detectedFilesMap[itId] = [];
+        if (!detectedFilesMap[itId].includes(matchedFile)) detectedFilesMap[itId].unshift(matchedFile);
+
+        if (!archivosMetadata[itId]) {
+          const savedMeta = (savedAuditData.archivosMetadata && (savedAuditData.archivosMetadata[itId] || savedAuditData.archivosMetadata[String(itId)]))
+                         || (savedAuditData.fase2 && savedAuditData.fase2.archivosMetadata && (savedAuditData.fase2.archivosMetadata[itId] || savedAuditData.fase2.archivosMetadata[String(itId)]));
+          archivosMetadata[itId] = savedMeta || {
+            fileName: matchedFile.name,
+            sizeBytes: matchedFile.size,
+            lastModified: matchedFile.lastModified,
+            textSnippet: `Documento asignado: ${matchedFile.name}`
+          };
+          archivosMetadata[String(itId)] = archivosMetadata[itId];
+        }
+      }
+    }
+
+    const savedRevSup = (savedAuditData && (
+      savedAuditData.revisionSupervisor ||
+      (savedAuditData.fase2 && savedAuditData.fase2.revisionSupervisor)
+    )) || null;
 
     // =========================================================================
     // DETECCIÓN DE MODALIDAD (MATERIALES vs RECURSOS)
@@ -2262,16 +2322,30 @@ const FolderReader = {
         ...geoConfig,
         puntos: (geoConfig && (geoConfig.puntos || geoConfig.puntosInspeccion)) || []
       },
+      revisionSupervisor: savedRevSup || {},
       documentosStatus: {
         itemsCumplidos: Object.keys(archivosDetectadosMap).map(Number),
         itemsSubsanar: itemsNormativos.filter(i => !archivosDetectadosMap[i.id]).map(i => i.id),
         archivosDetectados: archivosDetectadosMap,
+        revisionSupervisor: savedRevSup || {},
         fechasDocumentos: Object.fromEntries(
           itemsVigencia.filter(i => archivosMetadata[i] && archivosMetadata[i].fechaDoc)
             .map(i => [i, archivosMetadata[i].fechaDoc])
         )
       }
     };
+
+    if (savedRevSup) {
+      Object.entries(savedRevSup).forEach(([k, sup]) => {
+        const num = Number(k);
+        if (!isNaN(num) && sup && (sup.estado === "CONFORME" || sup.estado === "NO_APLICA")) {
+          proyectoData.documentosStatus.itemsSubsanar = proyectoData.documentosStatus.itemsSubsanar.filter(id => Number(id) !== num);
+          if (!proyectoData.documentosStatus.itemsCumplidos.includes(num)) {
+            proyectoData.documentosStatus.itemsCumplidos.push(num);
+          }
+        }
+      });
+    }
 
     // =========================================================================
     // PASO 7: EJECUTAR AUDITORÍA AISLADA COMPLETA Y ENCAPSULAR EN EL ALMACÉN GLOBAL
@@ -2370,6 +2444,7 @@ const FolderReader = {
       fichaPriorizacion: fichaData,
       historialSubsanaciones: (savedAuditData && savedAuditData.historialSubsanaciones) || [],
       datos: proyectoData,
+      revisionSupervisor: (proyectoData && proyectoData.revisionSupervisor) || savedRevSup || {},
       alcalde: proyectoData.alcalde,
       secretarioPlaneacion: proyectoData.secretarioPlaneacion,
       archivos: files,

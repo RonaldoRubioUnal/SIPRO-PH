@@ -295,7 +295,69 @@ const DocumentalEngine = {
       const detectedFile = archivosDetectados[item.id] || null;
       const meta = archivosMeta[item.id] || null;
 
-      // 1. REGLA PRIMARIA: Si no se encontró archivo en la carpeta, es FALTANTE OBLIGATORIO
+      // 0. CALIFICACIÓN MANUAL VINCULANTE DE LA SUPERVISIÓN (Tiene máxima prelación)
+      const revSup = (project.revisionSupervisor && (project.revisionSupervisor[item.id] || project.revisionSupervisor[String(item.id)]))
+                  || (docStatus.revisionSupervisor && (docStatus.revisionSupervisor[item.id] || docStatus.revisionSupervisor[String(item.id)]))
+                  || null;
+
+      let marcadoSupervisor = Boolean(revSup);
+      let estadoSupervisor = revSup ? revSup.estado : null;
+      let observacionSupervisor = revSup ? (revSup.observacion || "") : null;
+      let fechaRevisionSupervisor = revSup ? (revSup.fecha || "") : null;
+
+      // Si el supervisor ya calificó manualmente este ítem (CONFORME, NO_APLICA o NO_CONFORME):
+      if (marcadoSupervisor) {
+        if (estadoSupervisor === "NO_CONFORME" || estadoSupervisor === "INCONFORME") {
+          isCompliant = false;
+          isMissing = !detectedFile;
+          observation = observacionSupervisor
+            ? `⚠️ NO CONFORME (Supervisor): ${observacionSupervisor}`
+            : `⚠️ Documento marcado como No Conforme tras la inspección técnica del supervisor.`;
+          
+          criticalIssues.push({
+            criterio: `Ítem ${item.num}: ${item.title}`,
+            observacion: `• Ítem ${item.num}: ⚠️ NO CONFORME (Supervisor) — ${observacionSupervisor || 'No cumple requisitos técnicos tras inspección'}`,
+            accion_requerida: `Subsanar las no conformidades técnicas señaladas por el supervisor: ${observacionSupervisor || 'Ajustar documento según especificaciones'}`
+          });
+        } else if (estadoSupervisor === "NO_APLICA") {
+          isCompliant = true;
+          isMissing = false;
+          isExpired = false;
+          observation = observacionSupervisor
+            ? `⊘ No Aplica (Supervisor): ${observacionSupervisor}`
+            : "No aplica al proyecto (Omitido de revisión documental según criterio de supervisión).";
+          totalCompliant++;
+        } else if (estadoSupervisor === "CONFORME") {
+          isCompliant = true;
+          isMissing = false;
+          isExpired = false;
+          observation = observacionSupervisor
+            ? `✓ Aprobado por el Supervisor: ${observacionSupervisor}`
+            : (detectedFile ? `Documento verificado y aprobado de conformidad por el supervisor (${detectedFile}).` : `Requisito verificado y convalidado de conformidad por el supervisor (Sin documento requerido / Conforme).`);
+          totalCompliant++;
+        }
+
+        return {
+          ...item,
+          conforme: isCompliant,
+          faltante: isMissing,
+          vencido: isExpired,
+          esVigente: isExpired ? false : true,
+          noAplica: estadoSupervisor === "NO_APLICA",
+          fechaDoc: null,
+          fechaDocStr: null,
+          observacion: observation,
+          diasRestantes: null,
+          archivoDetectado: detectedFile,
+          meta: meta,
+          marcadoSupervisor: marcadoSupervisor,
+          estadoSupervisor: estadoSupervisor,
+          observacionSupervisor: observacionSupervisor,
+          fechaRevisionSupervisor: fechaRevisionSupervisor
+        };
+      }
+
+      // 1. REGLA PRIMARIA (Sin supervisor): Si no se encontró archivo en la carpeta, es FALTANTE OBLIGATORIO
       if (!detectedFile) {
         isCompliant = false;
         isMissing = true;
@@ -312,12 +374,17 @@ const DocumentalEngine = {
           faltante: true,
           vencido: false,
           esVigente: false,
+          noAplica: false,
           fechaDoc: null,
           fechaDocStr: null,
           observacion: observation,
           diasRestantes: null,
           archivoDetectado: null,
-          meta: null
+          meta: null,
+          marcadoSupervisor: false,
+          estadoSupervisor: null,
+          observacionSupervisor: null,
+          fechaRevisionSupervisor: null
         };
       }
 
@@ -392,51 +459,12 @@ const DocumentalEngine = {
         }
       }
 
-      // 3.5 CALIFICACIÓN MANUAL VINCULANTE DE LA SUPERVISIÓN
-      const revSup = (project.revisionSupervisor && (project.revisionSupervisor[item.id] || project.revisionSupervisor[String(item.id)]))
-                  || (docStatus.revisionSupervisor && (docStatus.revisionSupervisor[item.id] || docStatus.revisionSupervisor[String(item.id)]))
-                  || null;
-
-      let marcadoSupervisor = false;
-      let estadoSupervisor = null;
-      let observacionSupervisor = null;
-      let fechaRevisionSupervisor = null;
-
-      if (revSup) {
-        marcadoSupervisor = true;
-        estadoSupervisor = revSup.estado;
-        observacionSupervisor = revSup.observacion || "";
-        fechaRevisionSupervisor = revSup.fecha || "";
-
-        if (estadoSupervisor === "NO_CONFORME" || estadoSupervisor === "INCONFORME") {
-          isCompliant = false;
-          observation = observacionSupervisor
-            ? `⚠️ NO CONFORME (Supervisor): ${observacionSupervisor}`
-            : `⚠️ Documento marcado como No Conforme tras la inspección técnica del supervisor.`;
-          
-          criticalIssues.push({
-            criterio: `Ítem ${item.num}: ${item.title}`,
-            observacion: `• Ítem ${item.num}: ⚠️ NO CONFORME (Supervisor) — ${observacionSupervisor || 'No cumple requisitos técnicos tras inspección'}`,
-            accion_requerida: `Subsanar las no conformidades técnicas señaladas por el supervisor: ${observacionSupervisor || 'Ajustar documento según especificaciones'}`
-          });
-        } else if (estadoSupervisor === "CONFORME") {
-          isCompliant = true;
-          isExpired = false;
-          observation = observacionSupervisor
-            ? `✓ Aprobado por el Supervisor: ${observacionSupervisor}`
-            : `Documento verificado y aprobado de conformidad por el supervisor (${detectedFile || 'Conforme'}).`;
-          
-          // Remover de criticalIssues si se había agregado por vigencia o falta previa
-          criticalIssues = criticalIssues.filter(ci => !ci.criterio.startsWith(`Ítem ${item.num}:`));
-        }
-      }
-
       if (isCompliant) {
         totalCompliant++;
         if (observation === "-") {
           observation = `Documento verificado y vigente en la carpeta: ${detectedFile}`;
         }
-      } else if (!isExpired && !marcadoSupervisor) {
+      } else if (!isExpired) {
         criticalIssues.push({
           criterio: `Ítem ${item.num}: ${item.title}`,
           observacion: observation,
@@ -456,10 +484,10 @@ const DocumentalEngine = {
         diasRestantes: null,
         archivoDetectado: detectedFile,
         meta: meta,
-        marcadoSupervisor: marcadoSupervisor,
-        estadoSupervisor: estadoSupervisor,
-        observacionSupervisor: observacionSupervisor,
-        fechaRevisionSupervisor: fechaRevisionSupervisor
+        marcadoSupervisor: false,
+        estadoSupervisor: null,
+        observacionSupervisor: null,
+        fechaRevisionSupervisor: null
       };
     });
 
@@ -1001,6 +1029,10 @@ const DocumentalEngine = {
                     <span class="status-pill no-cumple" style="white-space: nowrap; background:#fee2e2; color:#991b1b; border:1px solid #ef4444; font-weight:700;" title="${item.observacionSupervisor || 'Documento no conforme por decisión del supervisor'}">
                       &#10007; Inconforme (Sup)
                     </span>
+                  ` : (item.estadoSupervisor === "NO_APLICA" ? `
+                    <span class="status-pill alerta" style="white-space: nowrap; background:#e0e7ff; color:#3730a3; border:1px solid #818cf8; font-weight:700;" title="${item.observacionSupervisor || 'No aplica al proyecto (Omitido de revisión)'}">
+                      ⊘ No Aplica (Sup)
+                    </span>
                   ` : (item.estadoSupervisor === "CONFORME" ? `
                     <span class="status-pill cumple" style="white-space: nowrap; background:#dcfce7; color:#166534; border:1px solid #22c55e; font-weight:700;" title="${item.observacionSupervisor || 'Verificado y aprobado por el supervisor'}">
                       &#10003; Conforme (Sup)
@@ -1009,7 +1041,7 @@ const DocumentalEngine = {
                     <span class="status-pill ${item.conforme ? 'cumple' : (item.vencido ? 'alerta' : 'no-cumple')}" style="white-space: nowrap; ${item.vencido ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;font-weight:700;' : ''}">
                       ${item.conforme ? '&#10003; Conforme' : (item.vencido ? '&#9888; Vigencia Vencida' : (item.faltante ? '&#10007; Faltante' : '&#10007; Subsanar'))}
                     </span>
-                  `)}
+                  `))}
                   ${item.fechaDocStr ? `
                     <div style="font-size:10.5px;color:${item.vencido ? '#b45309' : '#059669'};font-weight:700;margin-top:3px;" title="Fecha de expedición detectada">
                       Exp: ${item.fechaDocStr}
@@ -1053,12 +1085,25 @@ const DocumentalEngine = {
                         <span style="font-size:11px;">⚠️</span>
                         <span>Inconforme</span>
                       </button>
+                      ${item.marcadoSupervisor ? `
+                        <button type="button" class="btn-secondary" style="padding:4px 6px;font-size:11px;border-radius:4px;flex-shrink:0;"
+                                onclick="DocumentalEngine.revertirCalificacionSupervisor('${item.id}')"
+                                title="Revertir a cálculo automático">
+                          <span>↺</span>
+                        </button>
+                      ` : ''}
                     ` : `
                       <button type="button" class="btn-supervisor-action btn-supervisor-conforme"
                               onclick="DocumentalEngine.marcarConformeSupervisor('${item.id}')"
-                              title="Aprobar o revalidar este documento como Conforme">
+                              title="Aprobar o revalidar este ítem como Conforme (incluso si no tiene archivo)">
                         <span style="font-size:11px;">✓</span>
                         <span>Conforme</span>
+                      </button>
+                      <button type="button" class="btn-secondary"
+                              style="white-space:nowrap;flex-shrink:0;padding:4px 8px;font-size:11px;font-weight:700;background:rgba(99,102,241,0.08);color:#4f46e5;border:1px solid rgba(99,102,241,0.3);border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:3px;"
+                              onclick="DocumentalEngine.marcarNoAplicaSupervisor('${item.id}')"
+                              title="Marcar como NO APLICA para omitir la revisión de este documento">
+                        <span>⊘ No Aplica</span>
                       </button>
                       ${item.estadoSupervisor === "NO_CONFORME" ? `
                         <button type="button" class="btn-secondary"
@@ -1066,6 +1111,11 @@ const DocumentalEngine = {
                                 onclick="DocumentalEngine.solicitarInconformidad('${item.id}')"
                                 title="Editar observación técnica del supervisor">
                           <span>✏️</span>
+                        </button>
+                        <button type="button" class="btn-secondary" style="padding:4px 6px;font-size:11px;border-radius:4px;flex-shrink:0;"
+                                onclick="DocumentalEngine.revertirCalificacionSupervisor('${item.id}')"
+                                title="Revertir a cálculo automático">
+                          <span>↺</span>
                         </button>
                       ` : ''}
                     `}
@@ -1097,6 +1147,13 @@ const DocumentalEngine = {
                         </div>
                       ` : ''}
                     </div>
+                  ` : (item.estadoSupervisor === "NO_APLICA" ? `
+                    <div style="font-size: 11px; color: #4338ca; line-height: 1.35;">
+                      <span style="background: rgba(99, 102, 241, 0.12); border-left: 3px solid #6366f1; padding: 2px 6px; border-radius: 3px; font-weight: 600; display: inline-block;">
+                        ⊘ No Aplica (Omitido por Supervisor)
+                      </span>
+                      ${item.observacionSupervisor ? `<div style="font-size: 10.5px; margin-top: 2px;">${item.observacionSupervisor}</div>` : ''}
+                    </div>
                   ` : (item.estadoSupervisor === "CONFORME" ? `
                     <div style="font-size: 11px; color: #166534; line-height: 1.35;">
                       <span style="background: rgba(34, 197, 94, 0.12); border-left: 3px solid #16a34a; padding: 2px 6px; border-radius: 3px; font-weight: 600; display: inline-block;">
@@ -1108,7 +1165,7 @@ const DocumentalEngine = {
                     <span class="${item.conforme ? 'text-muted' : 'criterio-tag'}" style="font-size: 11px;">
                       ${item.observacion}
                     </span>
-                  `)}
+                  `))}
                 </td>
               </tr>
             `).join("")}
@@ -1171,7 +1228,17 @@ const DocumentalEngine = {
     if (downloadBtn) downloadBtn.style.display = "none";
     if (statusBadge) {
       statusBadge.style.display = "inline-flex";
-      if (!detectedFile) {
+      if (item.estadoSupervisor === "NO_APLICA") {
+        statusBadge.className = "status-pill alerta";
+        statusBadge.style.cssText = "display:inline-flex;background:#e0e7ff;color:#3730a3;border:1px solid #818cf8;font-weight:700;";
+        statusBadge.innerHTML = "⊘ No Aplica (Supervisor)";
+      } else if (item.estadoSupervisor === "CONFORME") {
+        statusBadge.className = "status-pill cumple";
+        statusBadge.innerHTML = "&#10003; Aprobado por Supervisor";
+      } else if (item.estadoSupervisor === "NO_CONFORME") {
+        statusBadge.className = "status-pill no-cumple";
+        statusBadge.innerHTML = "&#10007; Inconforme (Supervisor)";
+      } else if (!detectedFile) {
         statusBadge.className = "status-pill no-cumple";
         statusBadge.innerHTML = "&#10007; No Aportado";
       } else if (item.vencido) {
@@ -1216,13 +1283,19 @@ const DocumentalEngine = {
           </div>
 
           <div style="background:rgba(2,132,199,0.06);border:1px solid rgba(2,132,199,0.2);padding:14px;border-radius:var(--radius-sm);font-size:12px;color:var(--text-main);">
-            <b>Acción de Subsanación Requerida:</b> Debe solicitarse al municipio de <b>${p.municipio}</b> que anexe este documento a la carpeta del proyecto para superar la compuerta de Fase 2.
+            <b>Acción de Subsanación o Calificación:</b> Si este requisito aplica al proyecto, asigne o cargue el documento. Si no aplica o fue validado previamente, puede marcarlo de conformidad u omitir su revisión.
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
               <button type="button" class="btn-primary" style="padding:6px 14px;font-size:12px;background:#0284c7;border-color:#0284c7;display:inline-flex;align-items:center;gap:6px;" onclick="DocumentalEngine.closeModal(); DocumentalEngine.abrirModalAsignarArchivo(${itemId})">
-                📁 Asignar archivo existente de la carpeta
+                📁 Asignar archivo existente
               </button>
               <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:12px;" onclick="DocumentalEngine.closeModal(); App.subirSubsanacionItem(${itemId})">
                 📤 Cargar archivo nuevo
+              </button>
+              <button type="button" class="btn-supervisor-action btn-supervisor-conforme" style="padding:6px 14px;font-size:12px;" onclick="DocumentalEngine.closeModal(); DocumentalEngine.marcarConformeSupervisor(${itemId})" title="Aprobar y convalidar este ítem como Conforme sin archivo">
+                <span>✓</span> <span>Marcar Conforme</span>
+              </button>
+              <button type="button" class="btn-secondary" style="padding:6px 14px;font-size:12px;background:rgba(99,102,241,0.08);color:#4f46e5;border:1px solid rgba(99,102,241,0.3);font-weight:700;" onclick="DocumentalEngine.closeModal(); DocumentalEngine.marcarNoAplicaSupervisor(${itemId})" title="Marcar como No Aplica para omitir la revisión de este documento">
+                <span>⊘</span> <span>Marcar No Aplica</span>
               </button>
             </div>
           </div>
@@ -1542,6 +1615,27 @@ const DocumentalEngine = {
   },
 
   /**
+   * Marca como No Aplica un ítem directamente para omitir su revisión
+   */
+  marcarNoAplicaSupervisor(itemId, observacion = "") {
+    this.actualizarEstadoSupervisor(itemId, "NO_APLICA", observacion, false);
+  },
+
+  /**
+   * Marca como No Aplica desde el visor modal
+   */
+  marcarNoAplicaDesdeModal(itemId) {
+    this.actualizarEstadoSupervisor(itemId, "NO_APLICA", "", true);
+  },
+
+  /**
+   * Revierte la calificación manual de supervisión devolviendo el ítem a cálculo automático
+   */
+  revertirCalificacionSupervisor(itemId) {
+    this.actualizarEstadoSupervisor(itemId, "AUTO", "", false);
+  },
+
+  /**
    * Actualiza el estado de supervisión de un ítem, persistiendo y sincronizando bidireccionalmente
    */
   actualizarEstadoSupervisor(itemId, nuevoEstado, observacion = "", fromModal = false) {
@@ -1559,22 +1653,62 @@ const DocumentalEngine = {
     const isFicha = String(itemId) === "ficha_priorizacion" || String(itemId) === "0";
     const rawKey = isFicha ? "ficha_priorizacion" : (typeof itemId === "number" ? itemId : (isNaN(Number(itemId)) ? itemId : Number(itemId)));
 
-    p.revisionSupervisor = p.revisionSupervisor || {};
-    p.revisionSupervisor[rawKey] = {
-      estado: nuevoEstado,
-      observacion: observacion || "",
-      fecha: new Date().toISOString(),
-      supervisor: window.SUPERVISOR_NAME || "Supervisor Técnico"
-    };
+    if (nuevoEstado === "AUTO") {
+      if (p.revisionSupervisor) {
+        delete p.revisionSupervisor[rawKey];
+        delete p.revisionSupervisor[String(rawKey)];
+      }
+      if (exp && exp.revisionSupervisor) {
+        delete exp.revisionSupervisor[rawKey];
+        delete exp.revisionSupervisor[String(rawKey)];
+      }
+      if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId] && SIPRO_DATA.expedientesMap[pId].revisionSupervisor) {
+        delete SIPRO_DATA.expedientesMap[pId].revisionSupervisor[rawKey];
+        delete SIPRO_DATA.expedientesMap[pId].revisionSupervisor[String(rawKey)];
+      }
+      if (p.documentosStatus && p.documentosStatus.revisionSupervisor) {
+        delete p.documentosStatus.revisionSupervisor[rawKey];
+        delete p.documentosStatus.revisionSupervisor[String(rawKey)];
+      }
+    } else {
+      const supRecord = {
+        estado: nuevoEstado,
+        observacion: observacion || "",
+        fecha: new Date().toISOString(),
+        supervisor: window.SUPERVISOR_NAME || "Supervisor Técnico"
+      };
 
-    // Sincronizar en exp.revisionSupervisor y SIPRO_DATA si existen
-    if (exp) {
-      exp.revisionSupervisor = exp.revisionSupervisor || {};
-      exp.revisionSupervisor[rawKey] = p.revisionSupervisor[rawKey];
-    }
-    if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) {
-      SIPRO_DATA.expedientesMap[pId].revisionSupervisor = SIPRO_DATA.expedientesMap[pId].revisionSupervisor || {};
-      SIPRO_DATA.expedientesMap[pId].revisionSupervisor[rawKey] = p.revisionSupervisor[rawKey];
+      p.revisionSupervisor = p.revisionSupervisor || {};
+      p.revisionSupervisor[rawKey] = supRecord;
+      p.revisionSupervisor[String(rawKey)] = supRecord;
+
+      if (exp) {
+        exp.revisionSupervisor = exp.revisionSupervisor || {};
+        exp.revisionSupervisor[rawKey] = supRecord;
+        exp.revisionSupervisor[String(rawKey)] = supRecord;
+      }
+      if (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) {
+        SIPRO_DATA.expedientesMap[pId].revisionSupervisor = SIPRO_DATA.expedientesMap[pId].revisionSupervisor || {};
+        SIPRO_DATA.expedientesMap[pId].revisionSupervisor[rawKey] = supRecord;
+        SIPRO_DATA.expedientesMap[pId].revisionSupervisor[String(rawKey)] = supRecord;
+      }
+      if (p.documentosStatus) {
+        p.documentosStatus.revisionSupervisor = p.documentosStatus.revisionSupervisor || {};
+        p.documentosStatus.revisionSupervisor[rawKey] = supRecord;
+        p.documentosStatus.revisionSupervisor[String(rawKey)] = supRecord;
+
+        const numId = Number(rawKey);
+        if (!isNaN(numId)) {
+          if (nuevoEstado === "CONFORME" || nuevoEstado === "NO_APLICA") {
+            if (p.documentosStatus.itemsSubsanar) {
+              p.documentosStatus.itemsSubsanar = p.documentosStatus.itemsSubsanar.filter(i => Number(i) !== numId);
+            }
+            if (p.documentosStatus.itemsCumplidos && !p.documentosStatus.itemsCumplidos.includes(numId)) {
+              p.documentosStatus.itemsCumplidos.push(numId);
+            }
+          }
+        }
+      }
     }
 
     // Sincronizar hacia fase3State.matrizObservaciones
@@ -1586,15 +1720,21 @@ const DocumentalEngine = {
       f3State.matrizObservaciones = f3State.matrizObservaciones || {};
       f3State.observacionesEditadas = f3State.observacionesEditadas || {};
 
+      const isCompliantStatus = nuevoEstado === "CONFORME" || nuevoEstado === "NO_APLICA";
       const findingObj = {
-        estado: nuevoEstado === "CONFORME" ? "Conforme" : "No Aceptado / Por Subsanar",
-        motivo: observacion || (nuevoEstado === "CONFORME" ? "Documento verificado y conforme por supervisor." : "Documento no conforme según revisión del supervisor.")
+        estado: isCompliantStatus ? (nuevoEstado === "NO_APLICA" ? "No Aplica" : "Conforme") : "No Aceptado / Por Subsanar",
+        motivo: observacion || (nuevoEstado === "NO_APLICA" ? "No aplica al proyecto (Omitido de revisión documental)." : (nuevoEstado === "CONFORME" ? "Documento verificado y conforme por supervisor." : "Documento no conforme según revisión del supervisor."))
       };
 
       if (isFicha) {
         ["FICHA_PRIORIZACION", "ficha_priorizacion", "FASE_2_FICHA_PRIORIZACION"].forEach(k => {
-          f3State.matrizObservaciones[k] = findingObj;
-          f3State.observacionesEditadas[k] = findingObj;
+          if (nuevoEstado === "AUTO") {
+            delete f3State.matrizObservaciones[k];
+            delete f3State.observacionesEditadas[k];
+          } else {
+            f3State.matrizObservaciones[k] = findingObj;
+            f3State.observacionesEditadas[k] = findingObj;
+          }
         });
       } else {
         const numId = Number(rawKey);
@@ -1608,12 +1748,17 @@ const DocumentalEngine = {
           `doc_item_${rawKey}`
         ];
         keysToSet.forEach(k => {
-          f3State.matrizObservaciones[k] = findingObj;
-          f3State.observacionesEditadas[k] = findingObj;
+          if (nuevoEstado === "AUTO") {
+            delete f3State.matrizObservaciones[k];
+            delete f3State.observacionesEditadas[k];
+          } else {
+            f3State.matrizObservaciones[k] = findingObj;
+            f3State.observacionesEditadas[k] = findingObj;
+          }
         });
       }
 
-      if (nuevoEstado === "CONFORME" && typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
+      if (isCompliantStatus && typeof ReportsEngine !== "undefined" && typeof ReportsEngine.cleanFinding === "function") {
         ReportsEngine.cleanFinding(pId, rawKey);
       }
     }
@@ -1675,7 +1820,14 @@ const DocumentalEngine = {
     // Mensaje toast
     const mensaje = nuevoEstado === "CONFORME"
       ? `Ítem ${isFicha ? 'Ficha' : itemId}: marcado como CONFORME por supervisor.`
-      : `Ítem ${isFicha ? 'Ficha' : itemId}: marcado como NO CONFORME. Se incluyó en el informe de subsanación.`;
+      : (nuevoEstado === "NO_APLICA"
+        ? `Ítem ${isFicha ? 'Ficha' : itemId}: marcado como NO APLICA (Omitido de revisión).`
+        : (nuevoEstado === "AUTO"
+          ? `Ítem ${isFicha ? 'Ficha' : itemId}: calificación restablecida a cálculo automático.`
+          : `Ítem ${isFicha ? 'Ficha' : itemId}: marcado como NO CONFORME. Se incluyó en el informe de subsanación.`));
+    if (window.App && typeof window.App.showToast === "function") {
+      window.App.showToast(mensaje, (nuevoEstado === "CONFORME" || nuevoEstado === "NO_APLICA") ? "success" : "warning");
+    }
     if (window.App && typeof window.App.showToast === "function") {
       window.App.showToast(mensaje, nuevoEstado === "CONFORME" ? "success" : "warning");
     }

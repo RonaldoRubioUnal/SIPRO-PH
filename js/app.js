@@ -2002,6 +2002,10 @@ const App = {
       return false;
     }
 
+    const docStatus = (exp.datos && exp.datos.documentosStatus) || exp.documentosStatus || {};
+    const revSup = exp.revisionSupervisor || (exp.datos && exp.datos.revisionSupervisor) || (docStatus.revisionSupervisor) || {};
+    const metaMap = (exp.datos && exp.datos.archivosMetadata) || exp.archivosMetadata || {};
+
     const payload = {
       sistema: "SIPRO-PH",
       version: "2026.1",
@@ -2020,6 +2024,22 @@ const App = {
         alcalde: exp.datos ? exp.datos.alcalde : null,
         secretarioPlaneacion: exp.datos ? exp.datos.secretarioPlaneacion : null
       },
+      fase2: {
+        archivosDetectados: docStatus.archivosDetectados || {},
+        itemsCumplidos: docStatus.itemsCumplidos || [],
+        itemsSubsanar: docStatus.itemsSubsanar || [],
+        revisionSupervisor: revSup,
+        archivosMetadata: metaMap
+      },
+      documentosStatus: {
+        archivosDetectados: docStatus.archivosDetectados || {},
+        itemsCumplidos: docStatus.itemsCumplidos || [],
+        itemsSubsanar: docStatus.itemsSubsanar || [],
+        diasVigencias: docStatus.diasVigencias || {},
+        revisionSupervisor: revSup
+      },
+      revisionSupervisor: revSup,
+      archivosMetadata: metaMap,
       fase3: {
         matrizObservaciones: (exp.fase3 && (exp.fase3.matrizObservaciones || exp.fase3.observacionesEditadas)) || {},
         observaciones: (exp.fase3 && (exp.fase3.matrizObservaciones || exp.fase3.observacionesEditadas)) || {},
@@ -2036,10 +2056,15 @@ const App = {
 
     const jsonStr = JSON.stringify(payload, null, 2);
 
-    // 1. Guardar en localStorage
+    // 1. Guardar en localStorage con múltiples claves para redundancia
     try {
-      localStorage.setItem(`sipro_auditoria_${exp.slug}`, jsonStr);
-      localStorage.setItem(`sipro_auditoria_${exp.id}`, jsonStr);
+      if (exp.slug) localStorage.setItem(`sipro_auditoria_${exp.slug}`, jsonStr);
+      if (exp.id) localStorage.setItem(`sipro_auditoria_${exp.id}`, jsonStr);
+      if (exp.municipio) {
+        const cleanMpio = String(exp.municipio).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "_");
+        localStorage.setItem(`sipro_auditoria_${cleanMpio}`, jsonStr);
+      }
+      if (exp.rawFolderName) localStorage.setItem(`sipro_auditoria_${exp.rawFolderName}`, jsonStr);
     } catch (e) {
       console.warn("Error guardando en localStorage:", e);
     }
@@ -2047,13 +2072,19 @@ const App = {
     // 2. Si hay dirHandle de File System Access API, escribir físicamente en la carpeta
     if (exp.dirHandle && typeof exp.dirHandle.getFileHandle === "function") {
       try {
+        if (typeof exp.dirHandle.queryPermission === "function") {
+          let perm = await exp.dirHandle.queryPermission({ mode: "readwrite" });
+          if (perm !== "granted" && typeof exp.dirHandle.requestPermission === "function" && !silent) {
+            perm = await exp.dirHandle.requestPermission({ mode: "readwrite" });
+          }
+        }
         const fileHandle = await exp.dirHandle.getFileHandle("sipro_auditoria.json", { create: true });
         const writable = await fileHandle.createWritable();
         await writable.write(jsonStr);
         await writable.close();
         if (!silent) {
           if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
-            FolderReader.showToast("💾 Avance guardado físicamente en la carpeta del proyecto (sipro_auditoria.json)");
+            FolderReader.showToast("💾 Avance y asignaciones guardadas físicamente en la carpeta (sipro_auditoria.json)");
           } else {
             alert("✓ Avance guardado exitosamente en sipro_auditoria.json dentro de la carpeta.");
           }
@@ -2076,7 +2107,7 @@ const App = {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       if (typeof FolderReader !== "undefined" && FolderReader.showToast) {
-        FolderReader.showToast("💾 Archivo sipro_auditoria.json descargado. Cópialo en la carpeta del proyecto.");
+        FolderReader.showToast("💾 Avance guardado en navegador (localStorage) y archivo sipro_auditoria.json descargado.");
       }
     }
     return true;

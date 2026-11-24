@@ -628,10 +628,14 @@ const ReportsEngine = {
       const defaultStatus = it.conforme ? "Conforme" : (it.vencido ? "Vencido" : (it.faltante ? "Faltante" : "No Aceptado / Por Subsanar"));
       let defaultMotivo = "";
       if (it.conforme) {
-        if (it.subsanado && it.archivoDetectado) {
+        if (it.estadoSupervisor === "NO_APLICA") {
+          defaultMotivo = it.observacionSupervisor ? `No Aplica: ${it.observacionSupervisor}` : "No aplica al proyecto (Omitido de revisión documental según criterio de supervisión).";
+        } else if (it.subsanado && it.archivoDetectado) {
           defaultMotivo = `✓ Subsanado con archivo ${it.archivoDetectado}${it.fechaSubsanacion ? ` el ${it.fechaSubsanacion}` : ''}. Cumple con la regla normativa.`;
         } else if (it.archivoDetectado) {
           defaultMotivo = `✓ Documento aportado (${it.archivoDetectado}) y conforme con la regla normativa.`;
+        } else if (it.estadoSupervisor === "CONFORME") {
+          defaultMotivo = it.observacionSupervisor ? `✓ Aprobado por el Supervisor: ${it.observacionSupervisor}` : "Requisito verificado y convalidado de conformidad por el supervisor.";
         } else {
           defaultMotivo = "✓ Documento aportado y conforme con la regla normativa.";
         }
@@ -686,7 +690,7 @@ const ReportsEngine = {
         titulo: `${it.title}`,
         norma: it.rule || "Requisito Documental",
         entidad: it.entity,
-        archivo: it.archivoDetectado,
+        archivo: it.archivoDetectado || (it.estadoSupervisor === "NO_APLICA" ? "No Aplica" : (it.estadoSupervisor === "CONFORME" ? "Conforme (Supervisor)" : null)),
         estado: status,
         motivo: motivo,
         isManual: false
