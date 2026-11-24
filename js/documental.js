@@ -1846,7 +1846,7 @@ const DocumentalEngine = {
   /**
    * Abre el modal para asignar manualmente un archivo ya presente en la carpeta del proyecto
    */
-  abrirModalAsignarArchivo(itemId) {
+  abrirModalAsignarArchivo(itemId, options = {}) {
     const pId = (window.App && App.currentProjectId);
     const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
                 (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
@@ -1866,13 +1866,16 @@ const DocumentalEngine = {
 
     // Obtener todos los archivos disponibles en el expediente
     const filePool = [];
-    const seenNames = new Set();
+    const seenKeys = new Set();
 
     // 1. De exp.archivos (todos los archivos leídos recursivamente de la carpeta)
     if (Array.isArray(exp.archivos)) {
       exp.archivos.forEach(f => {
-        if (f && f.name && !seenNames.has(f.name + '|' + (f.size || 0))) {
-          seenNames.add(f.name + '|' + (f.size || 0));
+        if (!f || !f.name) return;
+        if (window.FolderReader && typeof FolderReader.isIgnoredWatchFile === "function" && FolderReader.isIgnoredWatchFile(f.name, f.webkitRelativePath || "")) return;
+        const key = (f.webkitRelativePath || f.name) + '|' + (f.size || 0);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
           filePool.push(f);
         }
       });
@@ -1881,8 +1884,10 @@ const DocumentalEngine = {
     // 2. De exp.archivosFileMap y exp.datos.archivosFiles
     const fMap = { ...(exp.archivosFileMap || {}), ...((exp.datos && exp.datos.archivosFiles) || {}) };
     Object.values(fMap).forEach(f => {
-      if (f && f.name && !seenNames.has(f.name + '|' + (f.size || 0))) {
-        seenNames.add(f.name + '|' + (f.size || 0));
+      if (!f || !f.name) return;
+      const key = (f.webkitRelativePath || f.name) + '|' + (f.size || 0);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
         filePool.push(f);
       }
     });
@@ -1909,9 +1914,10 @@ const DocumentalEngine = {
 
     if (titleEl) titleEl.textContent = `Asignar Documento de Carpeta — Ítem ${item.num || item.id}`;
     if (subEl) subEl.textContent = `${item.title || item.nombre || 'Requisito documental'}`;
-    if (searchInput) searchInput.value = "";
+    const filterVal = (options && options.preserveSearch) ? (options.searchValue || (searchInput ? searchInput.value : "")) : "";
+    if (searchInput) searchInput.value = filterVal;
 
-    this.renderListaArchivosAsignar("");
+    this.renderListaArchivosAsignar(filterVal);
     modal.classList.add("active");
   },
 
@@ -2034,6 +2040,264 @@ const DocumentalEngine = {
     if (itemId) {
       App.subirSubsanacionItem(itemId);
     }
+  },
+
+  /**
+   * Asegura la creación del modal visor de archivos físicos de la carpeta del proyecto
+   */
+  ensureFolderFilesModal() {
+    let modal = document.getElementById("folderFilesModal");
+    if (modal) return modal;
+
+    const modalHtml = `
+      <div id="folderFilesModal" class="modal-overlay">
+        <div class="modal-window" style="max-width: 780px; max-height: 86vh; display: flex; flex-direction: column;">
+          <div class="modal-header" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-bottom: 1px solid #a7f3d0;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:36px;height:36px;border-radius:8px;background:#00412E;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;">📂</div>
+              <div>
+                <h4 class="modal-title" id="folderFilesModalTitle" style="color:#00412E; font-size:15px; margin:0;">Archivos en la Carpeta del Proyecto</h4>
+                <div id="folderFilesModalSubtitle" style="font-size:12px;color:#047857;margin-top:2px;font-weight:600;">Sincronización directa con carpeta en su PC</div>
+              </div>
+            </div>
+            <button type="button" class="btn-viewer-close-circle" title="Cerrar ventana" onclick="DocumentalEngine.cerrarModalArchivosCarpeta()">✕</button>
+          </div>
+
+          <div class="modal-body" style="padding:16px 20px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; flex:1;">
+            <div id="folderFilesSyncNotice" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); padding: 10px 14px; border-radius: 8px; font-size: 12px; color: var(--text-main); line-height: 1.45; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+              <span id="folderFilesSyncText">Los documentos agregados o actualizados en la carpeta de su PC se reflejan aquí automáticamente.</span>
+              <button type="button" class="btn-primary" style="padding:5px 12px;font-size:11.5px;background:#00412E;border-color:#00412E;white-space:nowrap;" onclick="FolderReader.refreshActiveProjectFolder({ manual: true })">
+                🔄 Actualizar Carpeta Ahora
+              </button>
+            </div>
+
+            <div>
+              <input type="text" id="folderFilesSearchInput" class="form-input" placeholder="🔍 Filtrar por nombre de archivo, subcarpeta o ítem asignado..." oninput="DocumentalEngine.filtrarArchivosCarpeta(this.value)" style="width:100%;font-size:13px;padding:8px 12px;">
+            </div>
+
+            <div id="folderFilesCountLabel" style="font-size:11.5px;color:var(--text-muted);font-weight:600;"></div>
+
+            <div id="folderFilesListContainer" style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;padding:8px;background:var(--color-bg-alt);">
+            </div>
+          </div>
+
+          <div class="modal-footer" style="padding:12px 20px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; background:var(--color-bg-card); flex-wrap:wrap; gap:10px;">
+            <button type="button" class="btn-secondary" style="font-size:12px;" onclick="DocumentalEngine.cerrarModalArchivosCarpeta(); FolderReader.triggerFolderPicker()">
+              📁 Seleccionar / Cambiar Carpeta...
+            </button>
+            <button type="button" class="btn-secondary" onclick="DocumentalEngine.cerrarModalArchivosCarpeta()">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.insertAdjacentHTML("beforeend", modalHtml);
+    return document.getElementById("folderFilesModal");
+  },
+
+  abrirModalArchivosCarpeta(options = {}) {
+    const pId = (window.App && App.currentProjectId);
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) ||
+                (window.SIPRO_DATA && SIPRO_DATA.expedientesMap && SIPRO_DATA.expedientesMap[pId]) ||
+                (window.App && App.currentAuditRecord);
+
+    if (!exp) {
+      alert("Por favor cargue o seleccione un expediente municipal primero.");
+      return;
+    }
+
+    const modal = this.ensureFolderFilesModal();
+    if (!modal) return;
+
+    const pool = [];
+    const seenKeys = new Set();
+    if (Array.isArray(exp.archivos)) {
+      exp.archivos.forEach(f => {
+        if (!f || !f.name || f._isExtractedVirtual) return;
+        if (window.FolderReader && typeof FolderReader.isIgnoredWatchFile === "function" && FolderReader.isIgnoredWatchFile(f.name, f.webkitRelativePath || "")) return;
+        const key = (f.webkitRelativePath || f.name) + "|" + (f.size || 0);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          pool.push(f);
+        }
+      });
+    }
+    this._folderModalFiles = pool;
+
+    const titleEl = document.getElementById("folderFilesModalTitle");
+    const subEl = document.getElementById("folderFilesModalSubtitle");
+    const syncTextEl = document.getElementById("folderFilesSyncText");
+    const searchInput = document.getElementById("folderFilesSearchInput");
+
+    if (titleEl) titleEl.textContent = `Archivos de la Carpeta — ${exp.municipio || exp.rawFolderName || "Expediente"}`;
+    if (subEl) {
+      const hora = exp._lastFolderSyncAt ? new Date(exp._lastFolderSyncAt).toLocaleTimeString("es-CO") : "Reciente";
+      subEl.textContent = exp.dirHandle
+        ? `🟢 Enlace en vivo activo con "${exp.dirHandle.name || exp.rawFolderName}" • Última verificación: ${hora}`
+        : `🟡 Modo estático (use "Seleccionar / Cambiar Carpeta" para enlazar directamente con su PC)`;
+    }
+    if (syncTextEl) {
+      const diff = exp._lastFolderSyncDiff;
+      if (diff && ((diff.added && diff.added.length > 0) || (diff.modified && diff.modified.length > 0))) {
+        const aCount = diff.added ? diff.added.length : 0;
+        const mCount = diff.modified ? diff.modified.length : 0;
+        syncTextEl.innerHTML = `✨ <b>Última sincronización:</b> ${aCount > 0 ? `+${aCount} nuevo(s)` : ""}${aCount > 0 && mCount > 0 ? ", " : ""}${mCount > 0 ? `~${mCount} actualizado(s)` : ""} detectado(s) en la carpeta.`;
+      } else {
+        syncTextEl.textContent = exp.dirHandle
+          ? "Los archivos que agregue, modifique o elimine en esta carpeta de su PC se reflejarán automáticamente."
+          : "Cargue la carpeta mediante el selector moderno para habilitar sincronización automática desde su PC.";
+      }
+    }
+
+    const filterVal = (options && options.preserveSearch) ? (options.searchValue || (searchInput ? searchInput.value : "")) : "";
+    if (searchInput) searchInput.value = filterVal;
+
+    this.renderListaArchivosCarpeta(filterVal);
+    modal.classList.add("active");
+  },
+
+  renderListaArchivosCarpeta(filterText = "") {
+    const listCont = document.getElementById("folderFilesListContainer");
+    const countEl = document.getElementById("folderFilesCountLabel");
+    if (!listCont) return;
+
+    const pId = (window.App && App.currentProjectId);
+    const exp = (window.proyectosAuditados && window.proyectosAuditados[pId]) || (window.App && App.currentAuditRecord) || {};
+    const files = this._folderModalFiles || [];
+
+    // Mapa inverso: nombre archivo -> ítems asociados
+    const assignedMap = {};
+    const fMap = { ...(exp.archivosFileMap || {}), ...((exp.datos && exp.datos.archivosFiles) || {}) };
+    Object.entries(fMap).forEach(([k, f]) => {
+      if (f && f.name) {
+        assignedMap[f.name] = assignedMap[f.name] || [];
+        if (!assignedMap[f.name].includes(k)) assignedMap[f.name].push(k);
+      }
+    });
+    const fichaData = exp.fichaPriorizacion || (exp.datos && exp.datos.fichaPriorizacion);
+    if (fichaData && fichaData.fileName) {
+      assignedMap[fichaData.fileName] = assignedMap[fichaData.fileName] || [];
+      if (!assignedMap[fichaData.fileName].includes("Ficha")) assignedMap[fichaData.fileName].unshift("Ficha");
+    }
+
+    const diff = exp._lastFolderSyncDiff || {};
+    const addedSet = new Set((diff.added || []).map(a => a.relPath || a.name));
+    const modSet = new Set((diff.modified || []).map(m => m.relPath || m.name));
+
+    const q = (filterText || "").trim().toLowerCase();
+    const filtered = files.filter(f => {
+      if (!q) return true;
+      const n = (f.name || "").toLowerCase();
+      const p = (f.webkitRelativePath || "").toLowerCase();
+      const itemsStr = (assignedMap[f.name] || []).join(" ").toLowerCase();
+      return n.includes(q) || p.includes(q) || itemsStr.includes(q);
+    });
+
+    if (countEl) {
+      countEl.textContent = `Mostrando ${filtered.length} de ${files.length} archivo(s) físico(s) en la carpeta`;
+    }
+
+    if (filtered.length === 0) {
+      listCont.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12.5px;">🔍 No se encontraron archivos en la carpeta${q ? ` para "<b>${this.escapeHtml(filterText)}</b>"` : ""}.</div>`;
+      return;
+    }
+
+    // Ordenar primero archivos nuevos o actualizados recientemente
+    const sortedFiltered = [...filtered].sort((a, b) => {
+      const aNew = addedSet.has(a.webkitRelativePath || a.name) || addedSet.has(a.name) ? 2 : (modSet.has(a.webkitRelativePath || a.name) ? 1 : 0);
+      const bNew = addedSet.has(b.webkitRelativePath || b.name) || addedSet.has(b.name) ? 2 : (modSet.has(b.webkitRelativePath || b.name) ? 1 : 0);
+      if (aNew !== bNew) return bNew - aNew;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+
+    listCont.innerHTML = sortedFiltered.map(file => {
+      const origIndex = files.indexOf(file);
+      const ext = (file.name.slice(file.name.lastIndexOf(".") + 1) || "").toLowerCase();
+      let icon = "📄";
+      if (["xlsx", "xls", "xlsm", "xlsb", "csv"].includes(ext)) icon = "📊";
+      else if (["pdf"].includes(ext)) icon = "📑";
+      else if (["kml", "kmz"].includes(ext)) icon = "🗺️";
+      else if (["docx", "doc"].includes(ext)) icon = "📝";
+      else if (["jpg", "jpeg", "png", "webp"].includes(ext)) icon = "🖼️";
+      else if (["zip", "rar", "7z"].includes(ext)) icon = "📦";
+
+      const relPath = file.webkitRelativePath || file.name;
+      const pathParts = relPath.split("/");
+      const folderDisplay = pathParts.length > 1 ? pathParts.slice(0, -1).join(" / ") : "Raíz de carpeta";
+      const sizeStr = file.size ? (file.size > 1048576 ? `${(file.size / 1048576).toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`) : "0 KB";
+      const modDateStr = file.lastModified ? new Date(file.lastModified).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" }) : "";
+
+      const isNew = addedSet.has(relPath) || addedSet.has(file.name);
+      const isMod = !isNew && (modSet.has(relPath) || modSet.has(file.name));
+      const matchedItems = assignedMap[file.name] || [];
+
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--color-bg-card);border:1px solid ${isNew ? '#10b981' : (isMod ? '#f59e0b' : 'var(--border-subtle)')};border-radius:6px;gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
+            <span style="font-size:20px;flex-shrink:0;">${icon}</span>
+            <div style="min-width:0;flex:1;">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span style="font-size:12.5px;font-weight:700;color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${this.escapeHtml(file.name)}">${this.escapeHtml(file.name)}</span>
+                ${isNew ? `<span class="file-badge-new">🆕 NUEVO</span>` : ""}
+                ${isMod ? `<span class="file-badge-updated">✏️ ACTUALIZADO</span>` : ""}
+              </div>
+              <div style="font-size:10.5px;color:var(--text-muted);display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap;">
+                <span>📁 ${this.escapeHtml(folderDisplay)}</span>
+                <span>• ${sizeStr}</span>
+                ${modDateStr ? `<span>• ${modDateStr}</span>` : ""}
+                ${matchedItems.length > 0 ? `
+                  <span style="background:rgba(16,185,129,0.12);color:#047857;padding:1px 6px;border-radius:3px;font-weight:700;">
+                    ✓ Ítem: ${matchedItems.join(", ")}
+                  </span>
+                ` : `
+                  <span style="background:rgba(100,116,139,0.12);color:#475569;padding:1px 6px;border-radius:3px;font-weight:600;">
+                    Sin asignar automáticamente
+                  </span>
+                `}
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+            <button type="button" class="btn-secondary" style="padding:4px 10px;font-size:11px;" onclick="DocumentalEngine.abrirArchivoCarpetaDirecto(${origIndex})" title="Previsualizar este archivo">
+              👁️ Ver
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  },
+
+  filtrarArchivosCarpeta(val) {
+    this.renderListaArchivosCarpeta(val);
+  },
+
+  cerrarModalArchivosCarpeta() {
+    const modal = document.getElementById("folderFilesModal");
+    if (modal) modal.classList.remove("active");
+  },
+
+  abrirArchivoCarpetaDirecto(fileIndex) {
+    const file = this._folderModalFiles && this._folderModalFiles[fileIndex];
+    if (!file) return;
+    const fileUrl = URL.createObjectURL(file);
+    this.activeObjectUrls = this.activeObjectUrls || [];
+    this.activeObjectUrls.push(fileUrl);
+
+    const ext = (file.name.slice(file.name.lastIndexOf(".") + 1) || "").toLowerCase();
+    if (ext === "kmz" || ext === "kml") {
+      this.cerrarModalArchivosCarpeta();
+      if (window.App) App.switchTab("tab-1b");
+      return;
+    }
+    const itemPseudo = {
+      id: "ARCHIVO_CARPETA",
+      num: "📁",
+      title: file.name,
+      entity: "Archivo en carpeta del proyecto",
+      rule: "Documento leído directamente desde la carpeta local"
+    };
+    this.cerrarModalArchivosCarpeta();
+    this.openViewerModal("ARCHIVO_CARPETA", itemPseudo, file, fileUrl);
   },
 
   /**

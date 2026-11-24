@@ -970,6 +970,514 @@ const FolderReader = {
     this.setupInputs();
     this.setupDropzones();
     this.initCrossTabSync();
+    this.setupFolderAutoSyncListeners();
+  },
+
+  _folderWatchers: {},
+  _refreshLocks: {},
+  _autoSyncDebounceTimers: {},
+  _autoSyncIntervalId: null,
+  _autoSyncListenersBound: false,
+  _toastTimer: null,
+
+  /**
+   * Ignora archivos temporales/sistema y el propio archivo de trazabilidad al vigilar cambios en disco
+   */
+  isIgnoredWatchFile(name, relPath = "") {
+    if (!name) return true;
+    const lower = name.toLowerCase().trim();
+    if (lower === "sipro_auditoria.json") return true;
+    if (lower.startsWith("~$") || lower.startsWith("._") || lower.startsWith(".")) return true;
+    if (lower === "desktop.ini" || lower === "thumbs.db" || lower === ".ds_store") return true;
+    if (/\.(tmp|crdownload|part|lock)$/i.test(lower)) return true;
+    if (relPath && (relPath.includes("/.") || relPath.startsWith("__MACOSX") || relPath.includes("/__MACOSX"))) return true;
+    return false;
+  },
+
+  /**
+   * Construye un mapa ligero de firma (sin leer bytes completos) desde una lista de archivos File
+   */
+  buildFileSignatureMap(files = []) {
+    const sigMap = new Map();
+    for (const f of files) {
+      if (!f || !f.name) continue;
+      const rel = f.webkitRelativePath || f.name;
+      if (this.isIgnoredWatchFile(f.name, rel)) continue;
+      // Excluir archivos virtuales generados por descompresión en memoria (solo vigilar archivos físicos)
+      if (f._isExtractedVirtual) continue;
+      sigMap.set(rel, {
+        name: f.name,
+        relPath: rel,
+        size: Number(f.size || 0),
+        lastModified: Number(f.lastModified || 0)
+      });
+    }
+    return sigMap;
+  },
+
+  /**
+   * Escanea únicamente los metadatos de archivos dentro de un FileSystemDirectoryHandle
+   */
+  async scanDirectorySnapshot(dirHandle, subPathPrefix = null) {
+    const sigMap = new Map();
+    if (!dirHandle) return sigMap;
+
+    const walk = async (handle, currentPath) => {
+      for await (const entry of handle.values()) {
+        if (!entry || !entry.name) continue;
+        const rel = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+        if (entry.kind === "file") {
+          if (this.isIgnoredWatchFile(entry.name, rel)) continue;
+          if (subPathPrefix && !(rel.startsWith(subPathPrefix + "/") || rel === subPathPrefix)) continue;
+          try {
+            const fileMeta = await entry.getFile();
+            sigMap.set(rel, {
+              name: entry.name,
+              relPath: rel,
+              size: Number(fileMeta.size || 0),
+              lastModified: Number(fileMeta.lastModified || 0)
+            });
+          } catch (eReadMeta) {
+            // El archivo puede estar bloqueado momentáneamente mientras el SO lo copia
+          }
+        } else if (entry.kind === "directory") {
+          if (entry.name.startsWith(".") || entry.name === "__MACOSX") continue;
+          await walk(entry, rel);
+        }
+      }
+    };
+
+    await walk(dirHandle, dirHandle.name || "");
+    return sigMap;
+  },
+
+  /**
+   * Lee todos los objetos File físicos de un FileSystemDirectoryHandle
+   */
+  async readFilesFromDirectoryHandle(dirHandle, subPathPrefix = null) {
+    const files = [];
+    if (!dirHandle) return files;
+
+    const walk = async (handle, currentPath) => {
+      for await (const entry of handle.values()) {
+        if (!entry || !entry.name) continue;
+        const rel = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+        if (entry.kind === "file") {
+          if (this.isIgnoredWatchFile(entry.name, rel)) continue;
+          if (subPathPrefix && !(rel.startsWith(subPathPrefix + "/") || rel === subPathPrefix)) continue;
+          try {
+            const file = await entry.getFile();
+            Object.defineProperty(file, "webkitRelativePath", {
+              value: rel,
+              configurable: true
+            });
+            file._handle = entry;
+            files.push(file);
+          } catch (eFile) {
+            console.warn(`Aviso al leer archivo ${rel}:`, eFile);
+          }
+        } else if (entry.kind === "directory") {
+          if (entry.name.startsWith(".") || entry.name === "__MACOSX") continue;
+          await walk(entry, rel);
+        }
+      }
+    };
+
+    await walk(dirHandle, dirHandle.name || "");
+    return files;
+  },
+
+  /**
+   * Calcula diferencias exactas entre dos instantáneas de carpeta (agregados, modificados, eliminados)
+   */
+  computeFolderDiff(prevMap, nextMap) {
+    const added = [];
+    const modified = [];
+    const removed = [];
+
+    if (!prevMap) {
+      for (const [, v] of nextMap.entries()) added.push(v);
+      return { changed: added.length > 0, added, modified, removed };
+    }
+
+    for (const [rel, nextInfo] of nextMap.entries()) {
+      const prevInfo = prevMap.get(rel);
+      if (!prevInfo) {
+        added.push(nextInfo);
+      } else if (prevInfo.size !== nextInfo.size || prevInfo.lastModified !== nextInfo.lastModified) {
+        modified.push(nextInfo);
+      }
+    }
+
+    for (const [rel, prevInfo] of prevMap.entries()) {
+      if (!nextMap.has(rel)) {
+        removed.push(prevInfo);
+      }
+    }
+
+    return {
+      changed: added.length > 0 || modified.length > 0 || removed.length > 0,
+      added,
+      modified,
+      removed
+    };
+  },
+
+  /**
+   * Configura observadores globales (foco de ventana, visibilidad y sondeo ligero periódico)
+   */
+  setupFolderAutoSyncListeners() {
+    if (this._autoSyncListenersBound || typeof window === "undefined") return;
+    this._autoSyncListenersBound = true;
+
+    const scheduleActiveCheck = (delayMs = 350) => {
+      const activeId = window.App && App.currentProjectId;
+      if (!activeId) return;
+      clearTimeout(this._autoSyncDebounceTimers[activeId]);
+      this._autoSyncDebounceTimers[activeId] = setTimeout(() => {
+        this.checkProjectFolderChanges(activeId, { silent: true });
+      }, delayMs);
+    };
+
+    window.addEventListener("focus", () => scheduleActiveCheck(350));
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          scheduleActiveCheck(350);
+        }
+      });
+    }
+
+    // Sondeo ligero de metadatos cada 3 segundos mientras la pestaña esté visible
+    this._autoSyncIntervalId = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (this.isProcessing) return;
+      const activeId = window.App && App.currentProjectId;
+      if (!activeId) return;
+      const rec = window.proyectosAuditados && window.proyectosAuditados[activeId];
+      if (rec && rec.dirHandle) {
+        this.checkProjectFolderChanges(activeId, { silent: true });
+      }
+    }, 3000);
+  },
+
+  /**
+   * Registra vigilancia automática (FileSystemObserver + huella) para un proyecto con dirHandle
+   */
+  async attachProjectFolderWatcher(projectId, dirHandle, signatureMap = null) {
+    if (!projectId) return;
+    this.stopProjectFolderWatcher(projectId);
+
+    const rec = window.proyectosAuditados && window.proyectosAuditados[projectId];
+    if (rec && signatureMap) {
+      rec._folderFileSignatureMap = signatureMap;
+    }
+
+    if (!dirHandle) return;
+
+    const watcherState = { observer: null, dirHandle };
+    this._folderWatchers[projectId] = watcherState;
+
+    if (typeof window !== "undefined" && "FileSystemObserver" in window) {
+      try {
+        const observer = new window.FileSystemObserver((records) => {
+          const hasRelevantChange = !Array.isArray(records) || records.some(r => {
+            const changedName = r && r.changedHandle && r.changedHandle.name ? r.changedHandle.name : "";
+            const relStr = r && Array.isArray(r.relativePathComponents) ? r.relativePathComponents.join("/") : "";
+            return !changedName || !this.isIgnoredWatchFile(changedName, relStr);
+          });
+          if (!hasRelevantChange) return;
+
+          clearTimeout(this._autoSyncDebounceTimers[projectId]);
+          this._autoSyncDebounceTimers[projectId] = setTimeout(() => {
+            this.checkProjectFolderChanges(projectId, { silent: true });
+          }, 550);
+        });
+        await observer.observe(dirHandle, { recursive: true });
+        watcherState.observer = observer;
+      } catch (obsErr) {
+        console.warn("FileSystemObserver no pudo iniciarse (se usará sondeo + focus):", obsErr);
+      }
+    }
+  },
+
+  stopProjectFolderWatcher(projectId) {
+    if (!projectId) return;
+    clearTimeout(this._autoSyncDebounceTimers[projectId]);
+    const w = this._folderWatchers && this._folderWatchers[projectId];
+    if (w && w.observer && typeof w.observer.disconnect === "function") {
+      try { w.observer.disconnect(); } catch (e) { }
+    }
+    if (this._folderWatchers) delete this._folderWatchers[projectId];
+  },
+
+  stopAllFolderWatchers() {
+    if (!this._folderWatchers) return;
+    Object.keys(this._folderWatchers).forEach(id => this.stopProjectFolderWatcher(id));
+  },
+
+  /**
+   * Actualiza la firma tras escribir un archivo internamente desde la aplicación (evita auto-refresco redundante)
+   */
+  async updateSignatureAfterWrite(projectId) {
+    const rec = window.proyectosAuditados && window.proyectosAuditados[projectId];
+    if (!rec || !rec.dirHandle) return;
+    try {
+      const nextMap = await this.scanDirectorySnapshot(rec.dirHandle, rec.projectFolderPrefix || null);
+      rec._folderFileSignatureMap = nextMap;
+    } catch (e) { }
+  },
+
+  /**
+   * Verifica si hubo archivos agregados, modificados o eliminados en la carpeta física del proyecto
+   */
+  async checkProjectFolderChanges(projectId, options = {}) {
+    projectId = projectId || (window.App && App.currentProjectId);
+    if (!projectId) {
+      if (options.manual) {
+        this.showToast("⚠️ Cargue primero una carpeta de proyecto para actualizar.");
+      }
+      return false;
+    }
+
+    const rec = window.proyectosAuditados && window.proyectosAuditados[projectId];
+    if (!rec) return false;
+
+    if (this._refreshLocks[projectId] || this.isProcessing) return false;
+
+    if (!rec.dirHandle) {
+      if (options.manual) {
+        if (window.showDirectoryPicker) {
+          this.showToast("ℹ️ Esta carpeta se cargó en modo estático. Seleccione nuevamente la carpeta para activar la sincronización directa.");
+          await this.triggerFolderPicker();
+        } else {
+          this.showToast("ℹ️ Su navegador no permite re-lectura automática de carpeta. Cargue la carpeta nuevamente para reflejar cambios.");
+          const inp = document.getElementById("folderInput") || document.getElementById("sidebarFolderInput");
+          if (inp) inp.click();
+        }
+      }
+      return false;
+    }
+
+    this._refreshLocks[projectId] = true;
+    try {
+      // Verificar permiso de lectura (solo solicitar si es clic manual del usuario)
+      if (typeof rec.dirHandle.queryPermission === "function") {
+        let perm = await rec.dirHandle.queryPermission({ mode: "read" });
+        if (perm !== "granted") {
+          if (options.manual && typeof rec.dirHandle.requestPermission === "function") {
+            perm = await rec.dirHandle.requestPermission({ mode: "read" });
+          }
+          if (perm !== "granted") {
+            if (options.manual) {
+              this.showToast("⚠️ Permiso de lectura requerido para actualizar la carpeta.");
+            }
+            return false;
+          }
+        }
+      }
+
+      const nextMap = await this.scanDirectorySnapshot(rec.dirHandle, rec.projectFolderPrefix || null);
+      const prevMap = rec._folderFileSignatureMap || null;
+      const diff = this.computeFolderDiff(prevMap, nextMap);
+
+      if (!diff.changed) {
+        rec._lastFolderSyncAt = Date.now();
+        this.updateFolderSyncStatusUI(rec);
+        if (options.manual) {
+          this.showToast(`✓ Carpeta al día: ${nextMap.size} archivo(s) verificados sin cambios pendientes.`);
+        }
+        return false;
+      }
+
+      await this.refreshProjectFromDirectoryHandle(projectId, diff, options);
+      return true;
+    } catch (err) {
+      console.warn("Aviso verificando cambios en carpeta:", err);
+      if (options.manual) {
+        this.showToast("⚠️ No se pudo re-escanear la carpeta: " + (err.message || err));
+      }
+      return false;
+    } finally {
+      this._refreshLocks[projectId] = false;
+    }
+  },
+
+  /**
+   * Re-lee los archivos desde el FileSystemDirectoryHandle y actualiza el proyecto en vivo preservando el trabajo del auditor
+   */
+  async refreshProjectFromDirectoryHandle(projectId, diff = null, options = {}) {
+    const rec = window.proyectosAuditados && window.proyectosAuditados[projectId];
+    if (!rec || !rec.dirHandle) return null;
+
+    this.isProcessing = true;
+    this.updateFolderSyncStatusUI(rec, "syncing");
+
+    try {
+      const freshRawFiles = await this.readFilesFromDirectoryHandle(rec.dirHandle, rec.projectFolderPrefix || null);
+      if (!freshRawFiles || freshRawFiles.length === 0) {
+        if (options.manual) {
+          this.showToast("⚠️ La carpeta seleccionada no contiene archivos legibles.");
+        }
+        return null;
+      }
+
+      const freshSigMap = this.buildFileSignatureMap(freshRawFiles);
+
+      // Capturar estado vivo en memoria para no perder revisiones manuales ni ediciones de Fase 3
+      const prevDatos = rec.datos || {};
+      const prevDocStatus = prevDatos.documentosStatus || {};
+      const preserveState = {
+        modalidad: rec.modalidad || prevDatos.modalidad,
+        procesoEspecial: rec.procesoEspecial || prevDatos.procesoEspecial,
+        revisionSupervisor: JSON.parse(JSON.stringify(rec.revisionSupervisor || prevDatos.revisionSupervisor || {})),
+        fase3: rec.fase3 ? JSON.parse(JSON.stringify(rec.fase3)) : null,
+        fase1C: rec.fase1C ? { toleranciaPct: rec.fase1C.toleranciaPct } : null,
+        historialSubsanaciones: rec.historialSubsanaciones ? [...rec.historialSubsanaciones] : [],
+        manualAssignments: { ...(prevDocStatus.archivosDetectados || {}) },
+        previousMetadata: { ...(rec.archivosMetadata || prevDatos.archivosMetadata || {}) },
+        datosIdentificacion: {
+          nombreExpediente: prevDatos.nombreExpediente,
+          codigo: prevDatos.codigo,
+          municipio: rec.municipio,
+          codMunicipio: rec.codMunicipio,
+          subregion: rec.subregion,
+          vereda: prevDatos.vereda,
+          alcalde: prevDatos.alcalde,
+          secretarioPlaneacion: prevDatos.secretarioPlaneacion
+        }
+      };
+
+      // Recordar si algún modal de archivos estaba abierto antes de refrescar
+      const assignModalEl = document.getElementById("assignDocModal");
+      const wasAssignOpen = Boolean(assignModalEl && assignModalEl.classList.contains("active"));
+      const assignTargetId = (typeof DocumentalEngine !== "undefined") ? DocumentalEngine._assignTargetItemId : null;
+      const assignSearchEl = document.getElementById("assignDocSearchInput");
+      const prevAssignSearch = assignSearchEl ? assignSearchEl.value : "";
+
+      const folderFilesModalEl = document.getElementById("folderFilesModal");
+      const wasFolderFilesOpen = Boolean(folderFilesModalEl && folderFilesModalEl.classList.contains("active"));
+      const folderFilesSearchEl = document.getElementById("folderFilesSearchInput");
+      const prevFolderFilesSearch = folderFilesSearchEl ? folderFilesSearchEl.value : "";
+
+      // Expandir comprimidos de la carpeta actualizada
+      const expandedFiles = await this.expandirArchivosComprimidos(freshRawFiles);
+      const fichas = expandedFiles.filter(f => this.isFichaPriorizacionFile(f));
+      const fichaFile = fichas.find(f => ["xlsx", "xls", "xlsm", "xlsb"].includes(this.getFileExtension(f)))
+        || fichas.find(f => this.getFileExtension(f) === "pdf")
+        || fichas[0]
+        || null;
+
+      const updatedRec = await this.processSingleProjectFiles(expandedFiles, fichaFile, rec.dirHandle, {
+        silent: true,
+        targetProjectId: projectId,
+        projectFolderPrefix: rec.projectFolderPrefix || null,
+        preserveState,
+        diff
+      });
+
+      if (updatedRec) {
+        updatedRec._folderFileSignatureMap = freshSigMap;
+        updatedRec._lastFolderSyncAt = Date.now();
+        updatedRec._lastFolderSyncDiff = diff;
+        if (this._folderWatchers && this._folderWatchers[projectId]) {
+          this._folderWatchers[projectId].dirHandle = rec.dirHandle;
+        }
+
+        if (window.App) {
+          App.populateProjectSelect();
+          if (App.currentProjectId === projectId) {
+            App.cargarProyecto(projectId, { preserveTab: true });
+          }
+        }
+        this.updateFolderSyncStatusUI(updatedRec, "synced");
+
+        if (wasAssignOpen && assignTargetId && typeof DocumentalEngine !== "undefined") {
+          DocumentalEngine.abrirModalAsignarArchivo(assignTargetId, { preserveSearch: true, searchValue: prevAssignSearch });
+        }
+        if (wasFolderFilesOpen && typeof DocumentalEngine !== "undefined" && typeof DocumentalEngine.abrirModalArchivosCarpeta === "function") {
+          DocumentalEngine.abrirModalArchivosCarpeta({ preserveSearch: true, searchValue: prevFolderFilesSearch });
+        }
+
+        // Notificación clara con resumen de cambios detectados en disco
+        const parts = [];
+        if (diff && diff.added && diff.added.length > 0) {
+          const names = diff.added.slice(0, 2).map(a => a.name).join(", ");
+          const extra = diff.added.length > 2 ? ` (+${diff.added.length - 2})` : "";
+          parts.push(`+${diff.added.length} nuevo(s): ${names}${extra}`);
+        }
+        if (diff && diff.modified && diff.modified.length > 0) {
+          const names = diff.modified.slice(0, 2).map(m => m.name).join(", ");
+          const extra = diff.modified.length > 2 ? ` (+${diff.modified.length - 2})` : "";
+          parts.push(`~${diff.modified.length} actualizado(s): ${names}${extra}`);
+        }
+        if (diff && diff.removed && diff.removed.length > 0) {
+          parts.push(`-${diff.removed.length} eliminado(s)`);
+        }
+        const summary = parts.length > 0 ? parts.join(" | ") : `${freshRawFiles.length} archivos sincronizados`;
+        this.showToast(`🔄 Carpeta actualizada automáticamente (${summary})`);
+      }
+
+      return updatedRec;
+    } finally {
+      this.isProcessing = false;
+      const latestRec = window.proyectosAuditados && window.proyectosAuditados[projectId];
+      if (latestRec) this.updateFolderSyncStatusUI(latestRec);
+    }
+  },
+
+  /**
+   * Acción pública para botones de actualización manual de la carpeta del proyecto activo
+   */
+  async refreshActiveProjectFolder(options = { manual: true }) {
+    const activeId = window.App && App.currentProjectId;
+    return this.checkProjectFolderChanges(activeId, { manual: options.manual !== false });
+  },
+
+  /**
+   * Actualiza los indicadores visuales de archivos y sincronización en cabecera y Tab 2
+   */
+  updateFolderSyncStatusUI(rec, overrideState = null) {
+    const syncEl = document.getElementById("expBannerSyncStatus");
+    const tab2CountEl = document.getElementById("tab2FilesCountBadge");
+    const filesCountEl = document.getElementById("expBannerFilesCount");
+
+    if (rec) {
+      const physicalCount = Array.isArray(rec.archivos)
+        ? rec.archivos.filter(f => f && !f._isExtractedVirtual && !this.isIgnoredWatchFile(f.name, f.webkitRelativePath || "")).length
+        : 0;
+      const totalCount = (rec.datos && rec.datos.totalArchivosCargados) || (rec.archivos ? rec.archivos.length : 0);
+      const displayCount = physicalCount > 0 ? physicalCount : totalCount;
+
+      if (filesCountEl) {
+        filesCountEl.innerText = `${displayCount} Archivo${displayCount === 1 ? '' : 's'} en Carpeta`;
+      }
+      if (tab2CountEl) {
+        tab2CountEl.innerText = String(displayCount);
+      }
+    }
+
+    if (!syncEl) return;
+    if (!rec) {
+      syncEl.style.display = "none";
+      return;
+    }
+
+    syncEl.style.display = "inline-flex";
+    if (overrideState === "syncing") {
+      syncEl.className = "folder-sync-pill sync-syncing";
+      syncEl.innerHTML = "🔄 Sincronizando...";
+      syncEl.title = "Leyendo cambios de archivos en su equipo...";
+    } else if (rec.dirHandle) {
+      const hora = rec._lastFolderSyncAt ? new Date(rec._lastFolderSyncAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Activo";
+      syncEl.className = "folder-sync-pill sync-active";
+      syncEl.innerHTML = `🟢 Auto-sync (${hora})`;
+      syncEl.title = "Sincronización automática activa con la carpeta de su PC. Los archivos que agregue o modifique se detectarán automáticamente.";
+    } else {
+      syncEl.className = "folder-sync-pill sync-static";
+      syncEl.innerHTML = "🟡 Modo estático";
+      syncEl.title = "Carpeta cargada sin enlace directo. Haga clic en 'Actualizar Carpeta' o vuelva a cargarla para ver nuevos archivos.";
+    }
   },
 
   /**
@@ -1106,26 +1614,9 @@ const FolderReader = {
           }
         }
         if (dirHandle) {
-          const files = [];
-          async function readDir(handle, currentPath = "") {
-            for await (const entry of handle.values()) {
-              if (entry.kind === "file") {
-                const file = await entry.getFile();
-                Object.defineProperty(file, "webkitRelativePath", {
-                  value: currentPath ? `${currentPath}/${file.name}` : file.name,
-                  configurable: true
-                });
-                file._handle = entry;
-                files.push(file);
-              } else if (entry.kind === "directory") {
-                await readDir(entry, currentPath ? `${currentPath}/${entry.name}` : entry.name);
-              }
-            }
-          }
-          await readDir(dirHandle, dirHandle.name);
+          const files = await this.readFilesFromDirectoryHandle(dirHandle);
           if (files.length > 0) {
-            const exp = await this.readFolder(files, dirHandle);
-            if (exp) exp.dirHandle = dirHandle;
+            await this.readFolder(files, dirHandle);
             return;
           }
         }
@@ -1273,6 +1764,8 @@ const FolderReader = {
                     lastModified: file.lastModified || Date.now(),
                     type: "application/vnd.google-earth.kmz"
                   });
+                  kmzFile._isExtractedVirtual = true;
+                  kmzFile._parentArchiveName = file.name;
                   Object.defineProperty(kmzFile, 'webkitRelativePath', {
                     value: `${parentFolder}/${cleanEntryName}`,
                     writable: false,
@@ -1293,7 +1786,8 @@ const FolderReader = {
                         type: "application/vnd.google-earth.kml+xml"
                       });
                       kmlFile._cachedKmlText = kmlText;
-                      kmzFile._cachedKmlText = kmlText;
+                      kmlFile._isExtractedVirtual = true;
+                      kmlFile._parentArchiveName = kmzFile.name;
                       Object.defineProperty(kmlFile, 'webkitRelativePath', {
                         value: `${parentFolder}/${cleanKmlName}`,
                         writable: false,
@@ -1316,9 +1810,10 @@ const FolderReader = {
                     type: "application/vnd.google-earth.kml+xml"
                   });
                   kmlFile._cachedKmlText = kmlText;
-                  file._cachedKmlText = kmlText;
+                  kmlFile._isExtractedVirtual = true;
+                  kmlFile._parentArchiveName = file.name;
                   Object.defineProperty(kmlFile, 'webkitRelativePath', {
-                    value: `${parentFolder}/${cleanEntryName}`,
+                    value: `${parentFolder}/${relPath}`,
                     writable: false,
                     configurable: true
                   });
@@ -1339,6 +1834,8 @@ const FolderReader = {
                       const nFile = new File([blob], cleanNestedName, {
                         lastModified: file.lastModified || Date.now()
                       });
+                      nFile._isExtractedVirtual = true;
+                      nFile._parentArchiveName = file.name;
                       if (cleanNestedName.toLowerCase().endsWith(".kml")) {
                         nFile._cachedKmlText = await nEntry.async("text");
                       }
@@ -1360,6 +1857,8 @@ const FolderReader = {
                 const extractedFile = new File([blob], cleanEntryName, {
                   lastModified: file.lastModified || Date.now()
                 });
+                extractedFile._isExtractedVirtual = true;
+                extractedFile._parentArchiveName = file.name;
                 Object.defineProperty(extractedFile, 'webkitRelativePath', {
                   value: `${parentFolder}/${cleanEntryName}`,
                   writable: false,
@@ -1411,11 +1910,12 @@ const FolderReader = {
               }
 
               if (extractedFile) {
+                extractedFile._isExtractedVirtual = true;
+                extractedFile._parentArchiveName = file.name;
                 if (cleanEntryName.toLowerCase().endsWith(".kml") && typeof extractedFile.text === "function") {
                   try {
                     const kmlTxt = await extractedFile.text();
                     extractedFile._cachedKmlText = kmlTxt;
-                    file._cachedKmlText = kmlTxt;
                   } catch (kErr) { }
                 }
                 Object.defineProperty(extractedFile, 'webkitRelativePath', {
@@ -1441,7 +1941,8 @@ const FolderReader = {
                           type: "application/vnd.google-earth.kml+xml"
                         });
                         kmlFile._cachedKmlText = text;
-                        extractedFile._cachedKmlText = text;
+                        kmlFile._isExtractedVirtual = true;
+                        kmlFile._parentArchiveName = extractedFile.name;
                         Object.defineProperty(kmlFile, 'webkitRelativePath', {
                           value: `${parentFolder}/${cleanKmlName}`,
                           writable: false,
@@ -1535,7 +2036,9 @@ const FolderReader = {
       if (projectGroups.length > 1) {
         // Procesamiento en lote de múltiples proyectos reales en subcarpetas
         for (const grp of projectGroups) {
-          const rec = await this.processSingleProjectFiles(grp.files, grp.fichaFile, dirHandle);
+          const rec = await this.processSingleProjectFiles(grp.files, grp.fichaFile, dirHandle, {
+            projectFolderPrefix: grp.folderPrefix || null
+          });
           if (rec) lastCreatedId = rec.id;
         }
         App.populateProjectSelect();
@@ -1578,35 +2081,42 @@ const FolderReader = {
         const itemPath = item.webkitRelativePath || "";
         if (dir && (itemPath.startsWith(dir + "/") || itemPath === dir)) return true;
         const itemTop = itemPath.split('/')[0];
-        if (fichaTop && itemTop && fichaTop === itemTop) return true;
+        if (fichaTop && itemTop && fichaTop === itemTop && !dir) return true;
         return false;
       });
 
       groups.push({
         fichaFile: f,
+        folderPrefix: dir || fichaTop || null,
         files: relatedFiles.length > 0 ? relatedFiles : [f]
       });
     });
 
-    return groups.length > 0 ? groups : [{ fichaFile: fichas[0], files: files }];
+    return groups.length > 0 ? groups : [{ fichaFile: fichas[0], folderPrefix: null, files: files }];
   },
 
   /**
    * Procesa los archivos de un proyecto específico de forma 100% aislada
    * Ejecuta Fase 1A, Fase 1B y Fase 2 y encapsula el resultado en window.proyectosAuditados[id]
    */
-  async processSingleProjectFiles(rawFiles, fichaFile, dirHandle = null) {
+  async processSingleProjectFiles(rawFiles, fichaFile, dirHandle = null, options = {}) {
     const t0 = performance.now();
+    const isSilent = Boolean(options && options.silent);
+    const preserveState = (options && options.preserveState) || null;
+    const projectFolderPrefix = (options && options.projectFolderPrefix) || null;
     console.log(`[AUDIT-STEP] Starting project files processing... (${rawFiles.length} files)`);
     // Asegurar descompresión completa en memoria sin duplicar si ya fue expandido
     const files = (rawFiles && rawFiles._isAlreadyExpanded) ? rawFiles : await this.expandirArchivosComprimidos(rawFiles);
     console.log(`[AUDIT-STEP] 0. Expansion finished: ${(performance.now() - t0).toFixed(0)}ms (${files.length} files)`);
 
     // Obtener nombre de la carpeta de forma segura sin split('.') destructivo
-    const rawFolderName = this.getRawFolderName(files, dirHandle);
+    const rawFolderName = projectFolderPrefix
+      ? (projectFolderPrefix.split('/').pop() || this.getRawFolderName(files, dirHandle))
+      : this.getRawFolderName(files, dirHandle);
 
     // Generar proyectoId sanitizado (solo letras, números, guiones y guiones bajos)
-    const proyectoId = 'proj_' + rawFolderName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+    const proyectoId = (options && options.targetProjectId) ||
+      ('proj_' + rawFolderName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase());
 
     // =========================================================================
     // PASO 1: DETECCIÓN Y LECTURA BLINDADA DE "FICHA DE PRIORIZACIÓN"
@@ -2151,7 +2661,7 @@ const FolderReader = {
     const newExpedienteId = `EXP-${fichaData.codMunicipio || '05000'}-${slug}`;
 
     // =========================================================================
-    // LECTURA DE ARCHIVO DE TRAZABILIDAD (sipro_auditoria.json) O LIMPIEZA DE CACHÉ
+    // LECTURA DE ARCHIVO DE TRAZABILIDAD (sipro_auditoria.json) O ESTADO EN MEMORIA
     // =========================================================================
     let savedAuditData = null;
     const auditJsonFile = files.find(f => f.name.toLowerCase() === "sipro_auditoria.json");
@@ -2190,6 +2700,46 @@ const FolderReader = {
       }
     }
 
+    // Si se está refrescando la carpeta en vivo, priorizar el estado vivo en memoria sobre disco/localStorage
+    if (preserveState) {
+      savedAuditData = savedAuditData ? { ...savedAuditData } : {};
+      if (preserveState.modalidad) savedAuditData.modalidad = preserveState.modalidad;
+      if (preserveState.revisionSupervisor) savedAuditData.revisionSupervisor = preserveState.revisionSupervisor;
+      if (preserveState.fase3) savedAuditData.fase3 = preserveState.fase3;
+      if (preserveState.fase1C) savedAuditData.fase1C = preserveState.fase1C;
+      if (preserveState.historialSubsanaciones) savedAuditData.historialSubsanaciones = preserveState.historialSubsanaciones;
+      if (preserveState.manualAssignments) {
+        savedAuditData.documentosStatus = savedAuditData.documentosStatus || {};
+        savedAuditData.documentosStatus.archivosDetectados = preserveState.manualAssignments;
+      }
+      if (preserveState.previousMetadata) {
+        savedAuditData.archivosMetadata = preserveState.previousMetadata;
+      }
+      if (preserveState.datosIdentificacion) {
+        const prevId = preserveState.datosIdentificacion;
+        const wasAmbiguousPrev = !prevId.municipio || prevId.municipio === "MUNICIPIO POR CONFIRMAR";
+        const mergedId = {};
+        if (prevId.nombreExpediente && !prevId.nombreExpediente.includes("MUNICIPIO POR CONFIRMAR")) {
+          mergedId.nombreExpediente = prevId.nombreExpediente;
+        }
+        if (prevId.codigo && !prevId.codigo.includes("05000") && prevId.codigo !== "EXP-05000-PH") {
+          mergedId.codigo = prevId.codigo;
+        }
+        if (prevId.alcalde && prevId.alcalde.nombre && !prevId.alcalde.nombre.startsWith("ALCALDE MUNICIPAL DE") && !extractedAlcalde) {
+          mergedId.alcalde = prevId.alcalde;
+        }
+        if (prevId.secretarioPlaneacion && prevId.secretarioPlaneacion.nombre && !prevId.secretarioPlaneacion.nombre.startsWith("SECRETARIO(A)") && !extractedSecretario) {
+          mergedId.secretarioPlaneacion = prevId.secretarioPlaneacion;
+        }
+        if (!wasAmbiguousPrev && isAmbiguous && prevId.municipio) {
+          fichaData.municipio = prevId.municipio;
+          fichaData.codMunicipio = prevId.codMunicipio || fichaData.codMunicipio;
+          fichaData.subregion = prevId.subregion || fichaData.subregion;
+        }
+        savedAuditData.datosIdentificacion = { ...(savedAuditData.datosIdentificacion || {}), ...mergedId };
+      }
+    }
+
     // =========================================================================
     // RESTAURACIÓN DE ASIGNACIONES MANUALES Y CALIFICACIONES DE FASE 2
     // =========================================================================
@@ -2202,8 +2752,9 @@ const FolderReader = {
       if (!fileName || typeof fileName !== "string") continue;
       const itId = Number(rawItemId);
       if (isNaN(itId)) continue;
+      // Si la re-clasificación automática ya encontró un archivo distinto recién agregado, respetar el nuevo si no existía antes
       const matchedFile = files.find(f => f && f.name && f.name.toLowerCase() === fileName.toLowerCase());
-      if (matchedFile) {
+      if (matchedFile && !detectedMap[itId]) {
         detectedMap[itId] = matchedFile;
         detectedMap[String(itId)] = matchedFile;
         archivosDetectadosMap[itId] = matchedFile.name;
@@ -2211,16 +2762,48 @@ const FolderReader = {
         if (!detectedFilesMap[itId]) detectedFilesMap[itId] = [];
         if (!detectedFilesMap[itId].includes(matchedFile)) detectedFilesMap[itId].unshift(matchedFile);
 
-        if (!archivosMetadata[itId]) {
-          const savedMeta = (savedAuditData.archivosMetadata && (savedAuditData.archivosMetadata[itId] || savedAuditData.archivosMetadata[String(itId)]))
-                         || (savedAuditData.fase2 && savedAuditData.fase2.archivosMetadata && (savedAuditData.fase2.archivosMetadata[itId] || savedAuditData.fase2.archivosMetadata[String(itId)]));
-          archivosMetadata[itId] = savedMeta || {
-            fileName: matchedFile.name,
-            sizeBytes: matchedFile.size,
-            lastModified: matchedFile.lastModified,
-            textSnippet: `Documento asignado: ${matchedFile.name}`
-          };
-          archivosMetadata[String(itId)] = archivosMetadata[itId];
+        const savedMeta = (savedAuditData.archivosMetadata && (savedAuditData.archivosMetadata[itId] || savedAuditData.archivosMetadata[String(itId)]))
+                       || (savedAuditData.fase2 && savedAuditData.fase2.archivosMetadata && (savedAuditData.fase2.archivosMetadata[itId] || savedAuditData.fase2.archivosMetadata[String(itId)]));
+        const fileChangedOnDisk = savedMeta && (savedMeta.sizeBytes !== matchedFile.size || savedMeta.lastModified !== matchedFile.lastModified);
+
+        if (!archivosMetadata[itId] || fileChangedOnDisk) {
+          if (itemsVigencia.includes(itId) && (!savedMeta || fileChangedOnDisk)) {
+            let newMeta = {
+              fileName: matchedFile.name,
+              sizeBytes: matchedFile.size,
+              lastModified: matchedFile.lastModified,
+              textSnippet: `Documento asignado: ${matchedFile.name}`
+            };
+            try {
+              const extM = this.getFileExtension(matchedFile);
+              let snippetM = "";
+              if (extM === "pdf") snippetM = await this.readPdfOrText(matchedFile, 5);
+              else if (["txt", "csv", "json"].includes(extM)) snippetM = await matchedFile.text();
+              else if (["xlsx", "xls", "xlsm", "xlsb"].includes(extM)) snippetM = await this.readExcelAsText(matchedFile);
+              if (snippetM) {
+                itemTextsMap[itId] = snippetM;
+                itemTextsMap[String(itId)] = snippetM;
+                newMeta.textSnippet = snippetM.slice(0, 500);
+              }
+              if (typeof DocumentalEngine !== "undefined" && typeof DocumentalEngine.extraerFechaDocumento === "function") {
+                const extDateM = DocumentalEngine.extraerFechaDocumento(matchedFile, snippetM);
+                if (extDateM) {
+                  newMeta.fechaDoc = extDateM.fecha;
+                  newMeta.fechaDocStr = extDateM.fechaStr;
+                }
+              }
+            } catch (eMetaRefresh) { }
+            archivosMetadata[itId] = newMeta;
+            archivosMetadata[String(itId)] = newMeta;
+          } else {
+            archivosMetadata[itId] = savedMeta || {
+              fileName: matchedFile.name,
+              sizeBytes: matchedFile.size,
+              lastModified: matchedFile.lastModified,
+              textSnippet: `Documento asignado: ${matchedFile.name}`
+            };
+            archivosMetadata[String(itId)] = archivosMetadata[itId];
+          }
         }
       }
     }
@@ -2257,9 +2840,13 @@ const FolderReader = {
       subregion: fichaData.subregion || "ANTIOQUIA",
       modalidad: modalidad,
       vereda: (geoConfig.tramos && geoConfig.tramos.length > 0)
-        ? geoConfig.tramos.slice(0, 4).map(t => t.nombrePlacemark).join(", ")
+        ? (geoConfig.tramos.length > 4
+          ? `${geoConfig.tramos.slice(0, 4).map(t => t.nombrePlacemark).join(", ")} (+${geoConfig.tramos.length - 4} más)`
+          : geoConfig.tramos.map(t => t.nombrePlacemark).join(", "))
         : (geoConfig.puntosContraste.length > 0
-          ? geoConfig.puntosContraste.slice(0, 4).map(p => p.sector).join(", ")
+          ? (geoConfig.puntosContraste.length > 4
+            ? `${geoConfig.puntosContraste.slice(0, 4).map(p => p.sector).join(", ")} (+${geoConfig.puntosContraste.length - 4} más)`
+            : geoConfig.puntosContraste.map(p => p.sector).join(", "))
           : "Tramos según expediente cargado"),
       nombreTramo: `Placa Huella ${fichaData.municipio} (${finalLength}m)`,
       codigoVial: (savedAuditData && savedAuditData.datosIdentificacion && savedAuditData.datosIdentificacion.codigoVial)
@@ -2429,6 +3016,7 @@ const FolderReader = {
     };
 
     // Encapsular TODO el estado indexado de forma segura por proyectoId
+    const physicalSigMap = this.buildFileSignatureMap(files);
     window.proyectosAuditados = window.proyectosAuditados || {};
     window.proyectosAuditados[proyectoId] = {
       id: proyectoId,
@@ -2441,6 +3029,10 @@ const FolderReader = {
       modalidad: modalidad,
       procesoEspecial: processMode,
       dirHandle: dirHandle || null,
+      projectFolderPrefix: projectFolderPrefix || null,
+      _folderFileSignatureMap: physicalSigMap,
+      _lastFolderSyncAt: Date.now(),
+      _lastFolderSyncDiff: (options && options.diff) || null,
       fichaPriorizacion: fichaData,
       historialSubsanaciones: (savedAuditData && savedAuditData.historialSubsanaciones) || [],
       datos: proyectoData,
@@ -2554,6 +3146,40 @@ const FolderReader = {
             it24.observacion = geoObs;
           }
         }
+      } else {
+        // Limpiar observaciones auto-generadas de faltante si el KMZ/KML ya fue detectado en carpeta
+        const geoSlotId = is2026_2 ? 2 : 24;
+        const gPad = String(geoSlotId).padStart(2, "0");
+        ["item_24", "FASE_2_ITEM_24", "item_02", "FASE_2_ITEM_02", `item_${gPad}`, `FASE_2_ITEM_${gPad}`, "FASE_1B_GEO"].forEach(k => {
+          const val = expObjMaster.fase3.matrizObservaciones[k];
+          if (typeof val === "string" && /faltante|no se aport[oó]/i.test(val)) {
+            delete expObjMaster.fase3.matrizObservaciones[k];
+            delete expObjMaster.fase3.observacionesEditadas[k];
+          } else if (val && typeof val === "object" && (val.estado === "Faltante" || /faltante|no se aport[oó]/i.test(val.motivo || ""))) {
+            delete expObjMaster.fase3.matrizObservaciones[k];
+            delete expObjMaster.fase3.observacionesEditadas[k];
+          }
+        });
+      }
+
+      // Limpiar observaciones auto-generadas de faltante para cualquier ítem ahora detectado/conforme
+      if (expObjMaster.fase2 && Array.isArray(expObjMaster.fase2.items)) {
+        expObjMaster.fase2.items.forEach(it => {
+          if (it && it.conforme) {
+            const pad = String(it.num || it.id).padStart(2, "0");
+            const raw = String(it.num || it.id);
+            [`FASE_2_ITEM_${pad}`, `FASE_2_ITEM_${raw}`, `item_${pad}`, `item_${raw}`].forEach(k => {
+              const v = expObjMaster.fase3.matrizObservaciones[k];
+              if (typeof v === "string" && /faltante|no se aport[oó]/i.test(v)) {
+                delete expObjMaster.fase3.matrizObservaciones[k];
+                delete expObjMaster.fase3.observacionesEditadas[k];
+              } else if (v && typeof v === "object" && (v.estado === "Faltante" || /faltante|no aportado/i.test(v.motivo || ""))) {
+                delete expObjMaster.fase3.matrizObservaciones[k];
+                delete expObjMaster.fase3.observacionesEditadas[k];
+              }
+            });
+          }
+        });
       }
     }
 
@@ -2562,19 +3188,26 @@ const FolderReader = {
     SIPRO_DATA.expedientesMap[proyectoId].despieceExtraido = despieceConfig.despieceExtraido || despieceConfig;
     SIPRO_DATA.proyectos = Object.values(window.proyectosAuditados).map(p => p.datos);
 
-    if (savedAuditData) {
-      const fechaAviso = savedAuditData.fechaEdicion || new Date(savedAuditData.timestamp || Date.now()).toLocaleString("es-CO");
-      this.showToast(`🔄 Sesión de revisión previa restaurada (Última edición: ${fechaAviso})`);
-    } else if (isAmbiguous) {
-      App.openExpedienteModal();
-      this.showToast("⚠️ Ficha leída pero municipio ambiguo. Por favor confirma el municipio.");
-    } else {
-      const missingCount = totalItemsCount - matchedCount;
-      const cv = despieceConfig.concretoVolumes;
-      const msg = missingCount === 0
-        ? `✓ Carpeta de ${fichaData.municipio}: 100% Completa (${modalidad}). Despiece (${finalLength}m, ${despieceConfig.pesoTotalDeclaradoKg}kg) y Concreto (${cv.totalConcretoGlobalM3}m³) listos en memoria.`
-        : `⚠️ Carpeta de ${fichaData.municipio}: ${matchedCount} aportados, ${missingCount} FALTANTES (${modalidad}). Despiece (${finalLength}m) y Concreto (${cv.totalConcretoGlobalM3}m³) indexados.`;
-      this.showToast(msg);
+    // Iniciar observador automático si dispone de dirHandle y no es una re-sincronización ya observada
+    if (dirHandle && !preserveState) {
+      this.attachProjectFolderWatcher(proyectoId, dirHandle, physicalSigMap);
+    }
+
+    if (!isSilent) {
+      if (savedAuditData) {
+        const fechaAviso = savedAuditData.fechaEdicion || new Date(savedAuditData.timestamp || Date.now()).toLocaleString("es-CO");
+        this.showToast(`🔄 Sesión de revisión previa restaurada (Última edición: ${fechaAviso})`);
+      } else if (isAmbiguous) {
+        App.openExpedienteModal();
+        this.showToast("⚠️ Ficha leída pero municipio ambiguo. Por favor confirma el municipio.");
+      } else {
+        const missingCount = totalItemsCount - matchedCount;
+        const cv = despieceConfig.concretoVolumes;
+        const msg = missingCount === 0
+          ? `✓ Carpeta de ${fichaData.municipio}: 100% Completa (${modalidad}). Despiece (${finalLength}m, ${despieceConfig.pesoTotalDeclaradoKg}kg) y Concreto (${cv.totalConcretoGlobalM3}m³) listos en memoria.`
+          : `⚠️ Carpeta de ${fichaData.municipio}: ${matchedCount} aportados, ${missingCount} FALTANTES (${modalidad}). Despiece (${finalLength}m) y Concreto (${cv.totalConcretoGlobalM3}m³) indexados.`;
+        this.showToast(msg);
+      }
     }
 
     // Sincronización vial con ArcGIS Circular 10 y cálculo espacial completo
@@ -2605,6 +3238,149 @@ const FolderReader = {
     return window.proyectosAuditados[proyectoId];
   },
 
+  isValidRegionalCoord(lat, lng) {
+    return typeof lat === "number" && typeof lng === "number" &&
+      !isNaN(lat) && !isNaN(lng) &&
+      lat >= -4.5 && lat <= 13.5 &&
+      lng >= -82.0 && lng <= -66.5;
+  },
+
+  getElementsByLocalName(root, localName) {
+    if (!root || typeof root.getElementsByTagName !== "function") return [];
+    const target = String(localName || "").toLowerCase();
+    const all = root.getElementsByTagName("*");
+    const matches = [];
+    for (let i = 0; i < all.length; i++) {
+      const node = all[i];
+      const ln = (node.localName || node.tagName || "").replace(/^.*:/, "").toLowerCase();
+      if (ln === target) matches.push(node);
+    }
+    return matches;
+  },
+
+  getDirectChildTextByLocalName(el, localName) {
+    if (!el || !el.children) return "";
+    const target = String(localName || "").toLowerCase();
+    for (let i = 0; i < el.children.length; i++) {
+      const ch = el.children[i];
+      const ln = (ch.localName || ch.tagName || "").replace(/^.*:/, "").toLowerCase();
+      if (ln === target) return (ch.textContent || "").trim();
+    }
+    return "";
+  },
+
+  getPlacemarkName(pm, fallback) {
+    const directName = this.getDirectChildTextByLocalName(pm, "name");
+    if (directName) return directName;
+    const anyName = this.getElementsByLocalName(pm, "name")[0];
+    if (anyName && anyName.textContent && anyName.textContent.trim()) {
+      return anyName.textContent.trim();
+    }
+    const simpleDataNodes = this.getElementsByLocalName(pm, "SimpleData");
+    for (const sd of simpleDataNodes) {
+      const attr = (sd.getAttribute && (sd.getAttribute("name") || "")) || "";
+      if (/^(?:nombre|name|tramo|sector|vereda|via|descripcion)$/i.test(attr.trim()) && sd.textContent && sd.textContent.trim()) {
+        return sd.textContent.trim();
+      }
+    }
+    return fallback;
+  },
+
+  parseKmlDocumentSafe(kmlText) {
+    if (!kmlText || typeof kmlText !== "string") return null;
+    const parser = new DOMParser();
+
+    // Limpiar BOM UTF-8, espacios previos a declaración XML y caracteres de control inválidos en XML 1.0
+    const cleaned = kmlText
+      .replace(/^\uFEFF/, "")
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+      .trimStart();
+
+    let xmlDoc = parser.parseFromString(cleaned, "text/xml");
+    const hasXmlError = (doc) => !doc || doc.getElementsByTagName("parsererror").length > 0 || this.getElementsByLocalName(doc, "parsererror").length > 0;
+
+    if (!hasXmlError(xmlDoc)) {
+      return xmlDoc;
+    }
+
+    // Recuperación 1: escapar '&' sueltos fuera de CDATA y asegurar namespaces comunes (gx, kml, atom)
+    let repaired = cleaned
+      .split(/(<!\[CDATA\[[\s\S]*?\]\]>)/g)
+      .map((chunk, idx) => {
+        if (idx % 2 === 1) return chunk;
+        return chunk.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)/g, "&amp;");
+      })
+      .join("");
+
+    repaired = repaired.replace(/<kml\b([^>]*)>/i, (full, attrs) => {
+      let nextAttrs = attrs || "";
+      if (!/xmlns:gx\s*=/i.test(nextAttrs) && /\bgx:/i.test(repaired)) {
+        nextAttrs += ' xmlns:gx="http://www.google.com/kml/ext/2.2"';
+      }
+      if (!/xmlns:kml\s*=/i.test(nextAttrs) && /\bkml:/i.test(repaired)) {
+        nextAttrs += ' xmlns:kml="http://www.opengis.net/kml/2.2"';
+      }
+      if (!/xmlns:atom\s*=/i.test(nextAttrs) && /\batom:/i.test(repaired)) {
+        nextAttrs += ' xmlns:atom="http://www.w3.org/2005/Atom"';
+      }
+      return `<kml${nextAttrs}>`;
+    });
+
+    xmlDoc = parser.parseFromString(repaired, "text/xml");
+    if (!hasXmlError(xmlDoc)) {
+      return xmlDoc;
+    }
+
+    // Recuperación 2: parser HTML5 tolerante a fallos para recuperar todos los Placemark aunque haya un error XML a mitad del archivo
+    console.warn("KML con sintaxis XML irregular: aplicando recuperación tolerante HTML5 para evitar pérdida de tramos.");
+    return parser.parseFromString(repaired, "text/html");
+  },
+
+  parseGxTrackCoordinates(trackEl) {
+    if (!trackEl) return [];
+    const coordNodes = this.getElementsByLocalName(trackEl, "coord");
+    const coords = [];
+    for (const node of coordNodes) {
+      const txt = (node.textContent || "").trim();
+      if (!txt) continue;
+      const parts = txt.split(/[\s,]+/).map(Number);
+      if (parts.length >= 2 && isFinite(parts[0]) && isFinite(parts[1])) {
+        const lng = parts[0];
+        const lat = parts[1];
+        if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          coords.push({ lng, lat });
+        }
+      }
+    }
+    return coords;
+  },
+
+  async _extractZipEntriesRecursive(zip, sourcePrefix, outKmls, outAlerts) {
+    if (!zip || !zip.files) return;
+    for (const [relPath, entry] of Object.entries(zip.files)) {
+      if (!entry || entry.dir) continue;
+      if (relPath.startsWith("__MACOSX") || relPath.includes("/.") || relPath.startsWith(".")) continue;
+      const entryLower = relPath.toLowerCase();
+      try {
+        if (entryLower.endsWith(".kml")) {
+          const text = await entry.async("text");
+          outKmls.push({
+            sourceFile: `${sourcePrefix} > ${relPath}`,
+            innerPath: relPath,
+            kmlText: text
+          });
+        } else if ((entryLower.endsWith(".kmz") || entryLower.endsWith(".zip")) && typeof JSZip !== "undefined") {
+          const nestedBuf = await entry.async("arraybuffer");
+          const nestedZip = await JSZip.loadAsync(nestedBuf);
+          await this._extractZipEntriesRecursive(nestedZip, `${sourcePrefix} > ${relPath}`, outKmls, outAlerts);
+        }
+      } catch (innerErr) {
+        console.warn(`Error al extraer entrada comprimida ${relPath}:`, innerErr);
+        outAlerts.push(`Aviso extrayendo ${relPath} de ${sourcePrefix}: ${innerErr.message}`);
+      }
+    }
+  },
+
   /**
    * Extrae recursivamente archivos .kml y .kmz de contenedores (.zip, .kmz, .7z, .rar)
    */
@@ -2614,18 +3390,16 @@ const FolderReader = {
     const fileName = file.name;
     const lower = fileName.toLowerCase();
 
-    // 1. Si ya tiene el texto KML pre-extraído en memoria, usarlo de inmediato
-    if (file._cachedKmlText) {
-      extractedKmls.push({
-        sourceFile: fileName,
-        innerPath: fileName,
-        kmlText: file._cachedKmlText
-      });
-      return { extractedKmls, alerts };
-    }
-
-    // 2. Archivo .kml directo
+    // 1. Archivo .kml con texto pre-extraído o lectura directa
     if (lower.endsWith(".kml")) {
+      if (file._cachedKmlText) {
+        extractedKmls.push({
+          sourceFile: fileName,
+          innerPath: fileName,
+          kmlText: file._cachedKmlText
+        });
+        return { extractedKmls, alerts };
+      }
       try {
         const text = await file.text();
         extractedKmls.push({
@@ -2639,70 +3413,27 @@ const FolderReader = {
       return { extractedKmls, alerts };
     }
 
-    // 3. Archivo .kmz (Estrictamente con JSZip.loadAsync(await file.arrayBuffer()))
-    if (lower.endsWith(".kmz") && typeof JSZip !== "undefined") {
+    // 2. Archivos .kmz y .zip (extracción recursiva completa con JSZip)
+    if ((lower.endsWith(".kmz") || lower.endsWith(".zip")) && typeof JSZip !== "undefined") {
       try {
         const buffer = await file.arrayBuffer();
         const zip = await JSZip.loadAsync(buffer);
-        for (const [relPath, entry] of Object.entries(zip.files)) {
-          if (!entry.dir && relPath.toLowerCase().endsWith(".kml")) {
-            const text = await entry.async("text");
-            extractedKmls.push({
-              sourceFile: `${fileName} > ${relPath}`,
-              innerPath: relPath,
-              kmlText: text
-            });
-          }
-        }
+        await this._extractZipEntriesRecursive(zip, fileName, extractedKmls, alerts);
       } catch (e) {
-        alerts.push(`Se detectó el archivo comprimido ${fileName}, pero ocurrió un error al abrirlo: ${e.message}`);
+        if (file._cachedKmlText) {
+          extractedKmls.push({
+            sourceFile: fileName,
+            innerPath: fileName,
+            kmlText: file._cachedKmlText
+          });
+        } else {
+          alerts.push(`Se detectó el archivo comprimido ${fileName}, pero requiere extracción manual o formato .zip/.kmz estándar: ${e.message}`);
+        }
       }
       return { extractedKmls, alerts };
     }
 
-    // 4. Archivo .zip (Estrictamente con JSZip.loadAsync(await file.arrayBuffer()))
-    if (lower.endsWith(".zip") && typeof JSZip !== "undefined") {
-      try {
-        const buffer = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(buffer);
-        for (const [relPath, entry] of Object.entries(zip.files)) {
-          if (entry.dir) continue;
-          const entryLower = relPath.toLowerCase();
-
-          if (entryLower.endsWith(".kml")) {
-            const text = await entry.async("text");
-            extractedKmls.push({
-              sourceFile: `${fileName} > ${relPath}`,
-              innerPath: relPath,
-              kmlText: text
-            });
-          } else if (entryLower.endsWith(".kmz")) {
-            // Descompresión recursiva en cascada de KMZ anidado dentro de ZIP
-            try {
-              const kmzBuffer = await entry.async("arraybuffer");
-              const innerZip = await JSZip.loadAsync(kmzBuffer);
-              for (const [innerRelPath, innerEntry] of Object.entries(innerZip.files)) {
-                if (!innerEntry.dir && innerRelPath.toLowerCase().endsWith(".kml")) {
-                  const text = await innerEntry.async("text");
-                  extractedKmls.push({
-                    sourceFile: `${fileName} > ${relPath} > ${innerRelPath}`,
-                    innerPath: innerRelPath,
-                    kmlText: text
-                  });
-                }
-              }
-            } catch (innerErr) {
-              console.warn(`Error al descomprimir KMZ interno ${relPath}:`, innerErr);
-            }
-          }
-        }
-      } catch (e) {
-        alerts.push(`Se detectó el archivo comprimido ${fileName}, pero requiere extracción manual o formato .zip/.kmz estándar.`);
-      }
-      return { extractedKmls, alerts };
-    }
-
-    // 5. Archivos .7z y .rar (usando libarchive.js con Worker Blob)
+    // 3. Archivos .7z y .rar (usando libarchive.js con Worker Blob)
     if (lower.endsWith(".7z") || lower.endsWith(".rar")) {
       let extracted = false;
       try {
@@ -2720,20 +3451,12 @@ const FolderReader = {
                 kmlText: text
               });
               extracted = true;
-            } else if (entryLower.endsWith(".kmz") && typeof JSZip !== "undefined") {
-              const kmzBuf = await entryFile.arrayBuffer();
-              const innerZip = await JSZip.loadAsync(kmzBuf);
-              for (const [innerRelPath, innerEntry] of Object.entries(innerZip.files)) {
-                if (!innerEntry.dir && innerRelPath.toLowerCase().endsWith(".kml")) {
-                  const text = await innerEntry.async("text");
-                  extractedKmls.push({
-                    sourceFile: `${fileName} > ${entryName} > ${innerRelPath}`,
-                    innerPath: innerRelPath,
-                    kmlText: text
-                  });
-                  extracted = true;
-                }
-              }
+            } else if ((entryLower.endsWith(".kmz") || entryLower.endsWith(".zip")) && typeof JSZip !== "undefined") {
+              const nestedBuf = await entryFile.arrayBuffer();
+              const innerZip = await JSZip.loadAsync(nestedBuf);
+              const beforeLen = extractedKmls.length;
+              await this._extractZipEntriesRecursive(innerZip, `${fileName} > ${entryName}`, extractedKmls, alerts);
+              if (extractedKmls.length > beforeLen) extracted = true;
             }
           }
         }
@@ -2752,10 +3475,25 @@ const FolderReader = {
 
   /**
    * Parsea dinámicamente archivos georreferenciados (.kml, .kmz, .zip, .7z, .rar)
-   * CONSERVANDO ESTRICTAMENTE CADA TRAMO SEPARADO (Prohibido concatenar coordenadas)
+   * CONSERVANDO ESTRICTAMENTE TODOS LOS TRAMOS DEL ARCHIVO (Sin ocultar capas ni truncar geometrías)
    */
   async parseGeorefFiles(georefFiles, fichaData) {
-    const fileList = Array.isArray(georefFiles) ? georefFiles : [georefFiles];
+    const rawList = Array.isArray(georefFiles) ? georefFiles : [georefFiles];
+    // Evitar procesar dos veces un contenedor .kmz/.zip si sus .kml internos ya vienen expandidos en la misma lista
+    const expandedParents = new Set(
+      rawList
+        .filter(f => f && f._isExtractedVirtual && f._parentArchiveName)
+        .map(f => f._parentArchiveName)
+    );
+    const fileList = rawList.filter(f => {
+      if (!f) return false;
+      const lower = (f.name || "").toLowerCase();
+      if (!f._isExtractedVirtual && (lower.endsWith(".kmz") || lower.endsWith(".zip")) && expandedParents.has(f.name)) {
+        return false;
+      }
+      return true;
+    });
+
     const allExtractedKmls = [];
     const allAlerts = [];
     const processedNames = [];
@@ -2773,7 +3511,7 @@ const FolderReader = {
     if (allExtractedKmls.length === 0) {
       const defCod = fichaData.codMunicipio || '05000';
       const declaredCod = (fichaData.codigosViales && fichaData.codigosViales[0]) || `${defCod}VT01`;
-      const failedArchive = fileList.find(f => f._extractionError || /\.(zip|kmz|7z|rar)$/i.test(f.name));
+      const failedArchive = rawList.find(f => f && (f._extractionError || /\.(zip|kmz|7z|rar)$/i.test(f.name)));
       let alertaComp = null;
       if (failedArchive) {
         alertaComp = failedArchive._extractionError || (allAlerts.length > 0 ? allAlerts[0] : `Se detectó el archivo comprimido ${failedArchive.name}, pero requiere extracción manual o formato .zip/.kmz estándar.`);
@@ -2831,215 +3569,186 @@ const FolderReader = {
     let totalLengthM = 0;
     var tramosConformes = 0;
 
-    const parser = new DOMParser();
+    const pushTramoCoords = (coords, tramoName, tipoGeometria, sourceFile) => {
+      if (!coords || coords.length < 2) return;
+      const hasCoordInRegion = coords.some(c => this.isValidRegionalCoord(c.lat, c.lng));
+      if (!hasCoordInRegion) return;
+
+      const firstLat = coords[0].lat;
+      const firstLng = coords[0].lng;
+      const midIdx = Math.floor(coords.length / 2);
+      const midLat = coords[midIdx].lat;
+      const midLng = coords[midIdx].lng;
+      const lastIdx = coords.length - 1;
+      const lastLat = coords[lastIdx].lat;
+      const lastLng = coords[lastIdx].lng;
+
+      const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
+      const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
+
+      if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) return;
+      seenTramos.add(lineGeoKey);
+      seenTramos.add(revLineGeoKey);
+
+      let lenM = 0;
+      for (let j = 0; j < coords.length - 1; j++) {
+        lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
+      }
+
+      // Omitir únicamente polígonos gigantes administrativos que superen 50 km o sean límites municipales explícitos sin mención de vía/tramo
+      if (tipoGeometria === "Polygon" || tipoGeometria === "LinearRing") {
+        const isExplicitBoundary = /^(?:limite|límite|perimetro\s+urbano|perímetro\s+urbano|cabecera\s+m(?:unicipal|pal)|mpio\s+de|municipio\s+de)/i.test(tramoName) &&
+          !/(?:tramo|via\b|vía\b|placa|huella|sector|vereda)/i.test(tramoName);
+        if (lenM > 50000 || (isExplicitBoundary && lenM > 15000)) return;
+      }
+
+      totalLengthM += lenM;
+      const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
+
+      rawTramos.push({
+        idTramo: idTramo,
+        nombrePlacemark: tramoName,
+        sourceFile: sourceFile,
+        tipoGeometria: tipoGeometria,
+        coords: coords,
+        lenM: lenM
+      });
+    };
+
+    const pushPointCoord = (primaryCoord, ptName, description, sourceFile) => {
+      if (!primaryCoord) return;
+      const lat = primaryCoord.lat;
+      const lng = primaryCoord.lng;
+      if (!this.isValidRegionalCoord(lat, lng)) return;
+
+      const normName = String(ptName || "").trim().toLowerCase();
+      const pointGeoKey = `${lat.toFixed(6)}_${lng.toFixed(6)}_${normName}`;
+      if (seenPoints.has(pointGeoKey)) return;
+      seenPoints.add(pointGeoKey);
+
+      const idPunto = `PTO-${String(puntoCounter++).padStart(2, "0")}`;
+      rawPuntos.push({
+        idPunto: idPunto,
+        nombrePlacemark: ptName,
+        description: description || "",
+        sourceFile: sourceFile,
+        primaryCoord: primaryCoord
+      });
+    };
 
     // =========================================================================
-    // PASO 1: Extraer geometrías crudas (LineStrings, Polygons, Points) de los KMLs
+    // PASO 1: Extraer TODAS las geometrías (LineStrings, gx:Tracks, Polygons, LinearRings, Points)
     // =========================================================================
     for (const item of allExtractedKmls) {
-      await new Promise(r => setTimeout(r, 0)); // Ceder control antes de parsear cada archivo KML
+      await new Promise(r => setTimeout(r, 0));
       try {
-        const xmlDoc = parser.parseFromString(item.kmlText, "text/xml");
-        const placemarks = xmlDoc.getElementsByTagName("Placemark");
+        const xmlDoc = this.parseKmlDocumentSafe(item.kmlText);
+        if (!xmlDoc) continue;
+
+        const placemarks = this.getElementsByLocalName(xmlDoc, "Placemark");
+        const handledGeomNodes = new Set();
 
         for (let i = 0; i < placemarks.length; i++) {
           const pm = placemarks[i];
+          try {
+            const baseName = this.getPlacemarkName(pm, `Tramo ${tramoCounter}`);
 
-          // 1. Omitir elementos y capas ocultas (<visibility>0</visibility>) en Google Earth
-          const visNode = pm.getElementsByTagName("visibility")[0];
-          if (visNode && visNode.textContent.trim() === "0") {
-            continue; // Elemento oculto en Google Earth
-          }
-          let parentEl = pm.parentElement;
-          let isParentHidden = false;
-          while (parentEl && parentEl.tagName !== "kml" && parentEl !== xmlDoc) {
-            if (parentEl.tagName === "Folder" || parentEl.tagName === "Document") {
-              const pVis = parentEl.querySelector(":scope > visibility");
-              if (pVis && pVis.textContent.trim() === "0") {
-                isParentHidden = true;
-                break;
-              }
-            }
-            parentEl = parentEl.parentElement;
-          }
-          if (isParentHidden) continue;
-
-          const nameNode = pm.getElementsByTagName("name")[0];
-          const baseName = nameNode ? nameNode.textContent.trim() : `Tramo ${tramoCounter}`;
-
-          // Extraer LineStrings independientes (incluso dentro de MultiGeometry)
-          if (rawTramos.length < 60) {
-            const lineStrings = pm.getElementsByTagName("LineString");
+            // 1. LineStrings (incluidos dentro de MultiGeometry o con prefijo de namespace)
+            const lineStrings = this.getElementsByLocalName(pm, "LineString");
             for (let lsIdx = 0; lsIdx < lineStrings.length; lsIdx++) {
-              if (rawTramos.length >= 60) break;
               const ls = lineStrings[lsIdx];
-              const coordNode = ls.getElementsByTagName("coordinates")[0];
+              handledGeomNodes.add(ls);
+              const coordNode = this.getElementsByLocalName(ls, "coordinates")[0];
               if (coordNode) {
                 const coords = this.parseCoordinatesText(coordNode.textContent);
-                if (coords.length > 1) {
-                  // Deduplicación por Coordenadas Geográficas Exactas (primer, medio y último vértice)
-                  const firstLat = coords[0].lat;
-                  const firstLng = coords[0].lng;
-                  const midIdx = Math.floor(coords.length / 2);
-                  const midLat = coords[midIdx].lat;
-                  const midLng = coords[midIdx].lng;
-                  const lastIdx = coords.length - 1;
-                  const lastLat = coords[lastIdx].lat;
-                  const lastLng = coords[lastIdx].lng;
-
-                  // Filtro territorial estricto: omitir tramos cuyas coordenadas caigan fuera de Antioquia / Colombia
-                  const hasCoordInAntioquia = coords.some(c => c.lat >= 5.0 && c.lat <= 9.2 && c.lng >= -77.6 && c.lng <= -73.6);
-                  if (!hasCoordInAntioquia) continue;
-
-                  const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
-                  const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
-
-                  if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
-                    continue; // Tramo duplicado omitido
-                  }
-                  seenTramos.add(lineGeoKey);
-                  seenTramos.add(revLineGeoKey);
-
-                  let lenM = 0;
-                  for (let j = 0; j < coords.length - 1; j++) {
-                    lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
-                  }
-                  if (lenM > 6000) continue; // Un eje continuo mayor a 6 km es una carretera o red territorial completa, no un tramo de obra de placa huella
-                  totalLengthM += lenM;
-
-                  const tramoName = lineStrings.length > 1
-                    ? `${baseName} (Subtramo ${lsIdx + 1})`
-                    : baseName;
-
-                  const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
-
-                  rawTramos.push({
-                    idTramo: idTramo,
-                    nombrePlacemark: tramoName,
-                    sourceFile: item.sourceFile,
-                    tipoGeometria: "LineString",
-                    coords: coords,
-                    lenM: lenM
-                  });
-                }
+                const tramoName = lineStrings.length > 1
+                  ? `${baseName} (Subtramo ${lsIdx + 1})`
+                  : baseName;
+                pushTramoCoords(coords, tramoName, "LineString", item.sourceFile);
               }
             }
-          }
 
-          // Extraer Polygons independientes (outerBoundaryIs -> LinearRing -> coordinates)
-          // Regla técnica estricta: En proyectos de placa huella los tramos viales son lineales (LineString).
-          // Los polígonos suelen ser límites administrativos ("MPIO DE NARIÑO"), cascos urbanos ("CABECERA MPAL"),
-          // predios catastrales ("GLORIA ELENA") o reservas. Solo se aceptan si expresamente nombran un tramo/vía
-          // o si no existe ningún LineString en el expediente.
-          const polygons = pm.getElementsByTagName("Polygon");
-          const isRoadPolygon = /(?:tramo|via\b|vía\b|placa[\s_-]*huella|intervencion|intervención|eje)/i.test(baseName) &&
-            !/(?:mpio|municipio|cabecera|limite|límite|predio|lote|manzana|catast|reserva|cuenca|zona|área|area)/i.test(baseName);
+            // 2. gx:Track (rutas GPS grabadas en Google Earth / móviles)
+            const gxTracks = this.getElementsByLocalName(pm, "Track");
+            for (let trkIdx = 0; trkIdx < gxTracks.length; trkIdx++) {
+              const trk = gxTracks[trkIdx];
+              handledGeomNodes.add(trk);
+              const coords = this.parseGxTrackCoordinates(trk);
+              const tramoName = gxTracks.length > 1
+                ? `${baseName} (Track ${trkIdx + 1})`
+                : baseName;
+              pushTramoCoords(coords, tramoName, "gx:Track", item.sourceFile);
+            }
 
-          if (polygons.length > 0 && rawTramos.length < 60 && (isRoadPolygon || (rawTramos.length === 0 && !/(?:mpio|municipio|cabecera|limite|predio|lote|catast)/i.test(baseName)))) {
+            // 3. Polygons (todos los polígonos válidos de tramos/sectores/corredores)
+            const polygons = this.getElementsByLocalName(pm, "Polygon");
             for (let polyIdx = 0; polyIdx < polygons.length; polyIdx++) {
-              if (rawTramos.length >= 60) break;
               const poly = polygons[polyIdx];
-              const coordNode = poly.getElementsByTagName("coordinates")[0];
+              handledGeomNodes.add(poly);
+              const innerRings = this.getElementsByLocalName(poly, "LinearRing");
+              innerRings.forEach(r => handledGeomNodes.add(r));
+              const coordNode = this.getElementsByLocalName(poly, "coordinates")[0];
               if (coordNode) {
                 const coords = this.parseCoordinatesText(coordNode.textContent);
-                if (coords.length > 1) {
-                  let lenM = 0;
-                  for (let j = 0; j < coords.length - 1; j++) {
-                    lenM += this.haversineMeters(coords[j].lat, coords[j].lng, coords[j + 1].lat, coords[j + 1].lng);
-                  }
-                  if (lenM > 4000) continue; // Un polígono con perímetro > 4km es un predio o zona territorial, no un tramo de placa huella
-
-                  // Deduplicación por Coordenadas Geográficas Exactas para Polígonos
-                  const firstLat = coords[0].lat;
-                  const firstLng = coords[0].lng;
-                  const midIdx = Math.floor(coords.length / 2);
-                  const midLat = coords[midIdx].lat;
-                  const midLng = coords[midIdx].lng;
-                  const lastIdx = coords.length - 1;
-                  const lastLat = coords[lastIdx].lat;
-                  const lastLng = coords[lastIdx].lng;
-
-                  // Filtro territorial estricto: omitir polígonos fuera de Antioquia / Colombia
-                  const hasCoordInAntioquia = coords.some(c => c.lat >= 5.0 && c.lat <= 9.2 && c.lng >= -77.6 && c.lng <= -73.6);
-                  if (!hasCoordInAntioquia) continue;
-
-                  const lineGeoKey = `${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${coords.length}`;
-                  const revLineGeoKey = `${lastLat.toFixed(6)},${lastLng.toFixed(6)}_${midLat.toFixed(6)},${midLng.toFixed(6)}_${firstLat.toFixed(6)},${firstLng.toFixed(6)}_${coords.length}`;
-
-                  if (seenTramos.has(lineGeoKey) || seenTramos.has(revLineGeoKey)) {
-                    continue; // Polígono duplicado omitido
-                  }
-                  seenTramos.add(lineGeoKey);
-                  seenTramos.add(revLineGeoKey);
-
-                  totalLengthM += lenM;
-
-                  const tramoName = polygons.length > 1
-                    ? `${baseName} (Polígono ${polyIdx + 1})`
-                    : `${baseName} (Polígono)`;
-
-                  const idTramo = `TR-${String(tramoCounter++).padStart(2, "0")}`;
-
-                  rawTramos.push({
-                    idTramo: idTramo,
-                    nombrePlacemark: tramoName,
-                    sourceFile: item.sourceFile,
-                    tipoGeometria: "Polygon",
-                    coords: coords,
-                    lenM: lenM
-                  });
-                }
+                const tramoName = polygons.length > 1
+                  ? `${baseName} (Polígono ${polyIdx + 1})`
+                  : `${baseName} (Polígono)`;
+                pushTramoCoords(coords, tramoName, "Polygon", item.sourceFile);
               }
             }
-          }
 
-          // Extraer Points independientes
-          if (rawPuntos.length < 80) {
-            const points = pm.getElementsByTagName("Point");
+            // 4. LinearRings independientes no contenidos en Polygon
+            const linearRings = this.getElementsByLocalName(pm, "LinearRing");
+            for (let lrIdx = 0; lrIdx < linearRings.length; lrIdx++) {
+              const lr = linearRings[lrIdx];
+              if (handledGeomNodes.has(lr)) continue;
+              handledGeomNodes.add(lr);
+              const coordNode = this.getElementsByLocalName(lr, "coordinates")[0];
+              if (coordNode) {
+                const coords = this.parseCoordinatesText(coordNode.textContent);
+                const tramoName = linearRings.length > 1
+                  ? `${baseName} (Anillo ${lrIdx + 1})`
+                  : baseName;
+                pushTramoCoords(coords, tramoName, "LinearRing", item.sourceFile);
+              }
+            }
+
+            // 5. Points independientes
+            const points = this.getElementsByLocalName(pm, "Point");
+            const descNode = this.getElementsByLocalName(pm, "description")[0];
+            const description = descNode ? descNode.textContent.trim() : "";
             for (let ptIdx = 0; ptIdx < points.length; ptIdx++) {
-              if (rawPuntos.length >= 80) break;
               const pt = points[ptIdx];
-              const coordNode = pt.getElementsByTagName("coordinates")[0];
+              handledGeomNodes.add(pt);
+              const coordNode = this.getElementsByLocalName(pt, "coordinates")[0];
               if (coordNode) {
                 const coords = this.parseCoordinatesText(coordNode.textContent);
                 if (coords.length > 0) {
-                  const primaryCoord = coords[0];
-                  const lat = primaryCoord.lat;
-                  const lng = primaryCoord.lng;
-
-                  // Filtro territorial estricto: omitir puntos fuera de Antioquia / Colombia
-                  // Descarta puntos de muestra turísticos o globales (Torre Eiffel, Sydney, Cristo Redentor, etc.)
-                  if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) {
-                    continue;
-                  }
-
-                  // Huella única de punto basada en coordenadas redondeadas a 6 decimales (~0.11 m)
-                  const pointGeoKey = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
-                  if (seenPoints.has(pointGeoKey)) {
-                    continue; // Punto duplicado en misma coordenada exacta omitido
-                  }
-                  seenPoints.add(pointGeoKey);
-
                   const ptName = points.length > 1
                     ? `${baseName} (Punto ${ptIdx + 1})`
                     : baseName;
-
-                  const descNode = pm.getElementsByTagName("description")[0];
-                  const description = descNode ? descNode.textContent.trim() : "";
-
-                  const idPunto = `PTO-${String(puntoCounter++).padStart(2, "0")}`;
-
-                  rawPuntos.push({
-                    idPunto: idPunto,
-                    nombrePlacemark: ptName,
-                    description: description,
-                    sourceFile: item.sourceFile,
-                    primaryCoord: primaryCoord
-                  });
+                  pushPointCoord(coords[0], ptName, description, item.sourceFile);
                 }
               }
             }
+          } catch (pmErr) {
+            console.warn(`Aviso procesando Placemark #${i + 1} en ${item.sourceFile}:`, pmErr);
           }
+        }
+
+        // Respaldo: geometrías sueltas fuera de <Placemark>
+        const orphanLines = this.getElementsByLocalName(xmlDoc, "LineString");
+        for (const ls of orphanLines) {
+          if (handledGeomNodes.has(ls)) continue;
+          const coordNode = this.getElementsByLocalName(ls, "coordinates")[0];
+          if (coordNode) {
+            pushTramoCoords(this.parseCoordinatesText(coordNode.textContent), `Tramo ${tramoCounter}`, "LineString", item.sourceFile);
+          }
+        }
+        const orphanTracks = this.getElementsByLocalName(xmlDoc, "Track");
+        for (const trk of orphanTracks) {
+          if (handledGeomNodes.has(trk)) continue;
+          pushTramoCoords(this.parseGxTrackCoordinates(trk), `Tramo ${tramoCounter}`, "gx:Track", item.sourceFile);
         }
       } catch (err) {
         console.warn(`Error al parsear KML de ${item.sourceFile}:`, err);
@@ -3052,13 +3761,10 @@ const FolderReader = {
     let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
     let validCoordCount = 0;
 
-    // Regla de coherencia territorial: Proyectos viales de Antioquia (Colombia)
-    // Latitud válida: [4.0, 10.0], Longitud válida: [-78.5, -73.0].
-    // Excluye marcadores mundiales accidentales (ej. Torre Eiffel, Sydney, Tokio) que deforman el Bbox.
     rawTramos.forEach(t => {
       (t.coords || []).forEach(c => {
         if (c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
-          if (c.lat < 4.0 || c.lat > 10.0 || c.lng < -78.5 || c.lng > -73.0) return;
+          if (!this.isValidRegionalCoord(c.lat, c.lng)) return;
           validCoordCount++;
           if (c.lng < minLon) minLon = c.lng;
           if (c.lng > maxLon) maxLon = c.lng;
@@ -3071,7 +3777,7 @@ const FolderReader = {
     rawPuntos.forEach(p => {
       const c = p.primaryCoord;
       if (c && c.lng !== undefined && c.lat !== undefined && !isNaN(c.lng) && !isNaN(c.lat)) {
-        if (c.lat < 4.0 || c.lat > 10.0 || c.lng < -78.5 || c.lng > -73.0) return;
+        if (!this.isValidRegionalCoord(c.lat, c.lng)) return;
         validCoordCount++;
         if (c.lng < minLon) minLon = c.lng;
         if (c.lng > maxLon) maxLon = c.lng;
@@ -3080,7 +3786,14 @@ const FolderReader = {
       }
     });
 
-    const projectBbox = validCoordCount > 0 ? { minLon, minLat, maxLon, maxLat } : null;
+    const BBOX_MARGIN = 0.05;
+    const projectBbox = validCoordCount > 0 ? {
+      minLon: +(minLon - BBOX_MARGIN).toFixed(6),
+      minLat: +(minLat - BBOX_MARGIN).toFixed(6),
+      maxLon: +(maxLon + BBOX_MARGIN).toFixed(6),
+      maxLat: +(maxLat + BBOX_MARGIN).toFixed(6),
+      hasMargin: true
+    } : null;
 
     // =========================================================================
     // PASO 3: Await obligatorio para descargar las vías oficiales de la Circular 10
@@ -3370,17 +4083,25 @@ const FolderReader = {
 
   /**
    * Helper para parsear strings de coordenadas KML en formato lng,lat[,alt]
+   * Tolera espacios alrededor de comas, tabulaciones y saltos de línea
    */
   parseCoordinatesText(rawText) {
     if (!rawText) return [];
-    const tokens = rawText.trim().split(/\s+/);
+    const normalized = String(rawText).replace(/\s*,\s*/g, ",").trim();
+    if (!normalized) return [];
+    const tokens = normalized.split(/[\s;]+/);
     const coords = [];
     for (const token of tokens) {
       if (!token) continue;
-      const parts = token.split(",").map(Number);
-      if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-        // En KML es: [0] = longitud, [1] = latitud
-        coords.push({ lng: parts[0], lat: parts[1] });
+      const parts = token.split(",");
+      if (parts.length < 2) continue;
+      const lng = Number(parts[0]);
+      const lat = Number(parts[1]);
+      if (parts[0] !== "" && parts[1] !== "" && isFinite(lng) && isFinite(lat)) {
+        if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          // En KML es: [0] = longitud, [1] = latitud
+          coords.push({ lng, lat });
+        }
       }
     }
     return coords;
@@ -6344,9 +7065,11 @@ const FolderReader = {
     toast.style.opacity = "1";
     toast.style.display = "flex";
 
-    setTimeout(() => {
+    clearTimeout(this._toastTimer);
+    clearTimeout(this._toastHideTimer);
+    this._toastTimer = setTimeout(() => {
       toast.style.opacity = "0";
-      setTimeout(() => { toast.style.display = "none"; }, 300);
+      this._toastHideTimer = setTimeout(() => { toast.style.display = "none"; }, 300);
     }, 4500);
   }
 };

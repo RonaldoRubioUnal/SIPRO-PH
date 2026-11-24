@@ -5225,3 +5225,70 @@ body.mode-convenios-2026-2 .sidebar-upload-btn {
     display: none !important;
   }
 }
+
+/* Badges de sincronización en vivo de carpeta y cambios detectados */
+.badge-count:hover {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+  transition: all 0.15s ease;
+}
+
+.folder-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.folder-sync-pill.sync-static {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #b45309;
+}
+
+.folder-sync-pill.sync-syncing {
+  background: rgba(2, 132, 199, 0.12);
+  border-color: rgba(2, 132, 199, 0.4);
+  color: #0369a1;
+}
+
+[data-theme="dark"] .folder-sync-pill.sync-active {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+[data-theme="dark"] .folder-sync-pill.sync-static {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+[data-theme="dark"] .folder-sync-pill.sync-syncing {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+}
+
+.file-badge-new {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.file-badge-updated {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}

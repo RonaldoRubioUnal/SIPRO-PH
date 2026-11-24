@@ -289,7 +289,7 @@ const App = {
    * Repinta toda la interfaz exclusivamente con los datos y métricas pre-calculadas en memoria
    * Sin recalcular desde cero si ya fue procesado.
    */
-  cargarProyecto(proyectoId) {
+  cargarProyecto(proyectoId, options = {}) {
     if (!proyectoId) {
       this.renderEmptyState();
       return;
@@ -388,7 +388,9 @@ const App = {
     SpatialEngine.syncToggleButtonsUI();
     SpatialEngine.initOrUpdateMap("leafletMapContainer", record.datos);
     this.updateSpatialSidebar();
-    SpatialEngine.zoomToProjectTracks(record.datos);
+    if (!options || !options.preserveTab || this.currentTab === "tab-1b") {
+      SpatialEngine.zoomToProjectTracks(record.datos);
+    }
 
     // G. Fase 2: Lista de 27 o 28 ítems y estados documentales (con botones de Abrir Documento)
     DocumentalEngine.renderDocumentalMatrix(record.fase2, document.getElementById("documentalMatrixContainer"), this.currentFilterCluster || "ALL");
@@ -453,8 +455,14 @@ const App = {
 
     const bannerCount = document.getElementById("expBannerFilesCount");
     if (bannerCount) {
-      const fileCount = project.totalArchivosCargados || (record.archivos ? record.archivos.length : 0);
-      bannerCount.innerText = `${fileCount} Archivos Detectados`;
+      const physicalCount = Array.isArray(record.archivos) && window.FolderReader && typeof FolderReader.isIgnoredWatchFile === "function"
+        ? record.archivos.filter(f => f && !f._isExtractedVirtual && !FolderReader.isIgnoredWatchFile(f.name, f.webkitRelativePath || "")).length
+        : 0;
+      const fileCount = physicalCount > 0 ? physicalCount : (project.totalArchivosCargados || (record.archivos ? record.archivos.length : 0));
+      bannerCount.innerText = `${fileCount} Archivo${fileCount === 1 ? '' : 's'} en Carpeta`;
+    }
+    if (window.FolderReader && typeof FolderReader.updateFolderSyncStatusUI === "function") {
+      FolderReader.updateFolderSyncStatusUI(record);
     }
 
     const bannerName = document.getElementById("expBannerName");
@@ -1246,6 +1254,11 @@ const App = {
     if (kpiCob) kpiCob.innerText = "0%";
     const kpiDoc = document.getElementById("kpiDocVal");
     if (kpiDoc) kpiDoc.innerText = "0 / 27";
+    const tab2CountEl = document.getElementById("tab2FilesCountBadge");
+    if (tab2CountEl) tab2CountEl.innerText = "0";
+    if (window.FolderReader && typeof FolderReader.updateFolderSyncStatusUI === "function") {
+      FolderReader.updateFolderSyncStatusUI(null);
+    }
 
     // Sidebar de parámetros inicial: todo en blanco esperando carpeta
     this.renderStructuralSidebar({
@@ -1295,7 +1308,7 @@ const App = {
           <div style="font-size:16px;font-weight:700;color:var(--text-main);margin-bottom:6px;">Dictamen Oficial de Viabilidad Técnica</div>
           <div style="font-size:13px;max-width:540px;margin:0 auto 16px;">El dictamen técnico favorable y la ficha de priorización se emitirán automáticamente cuando cargue la carpeta del municipio y se superen las compuertas 1A, 1B y 2.</div>
           <div style="display:flex;gap:12px;justify-content:center;">
-            <button class="btn-primary" style="background:#0284C7;padding:8px 18px;" onclick="document.getElementById('folderInput').click()">
+            <button class="btn-primary" style="background:#0284C7;padding:8px 18px;" onclick="FolderReader.triggerFolderPicker()">
               📁 Cargar Carpeta Municipio
             </button>
           </div>
@@ -1508,6 +1521,10 @@ const App = {
 
     if (!confirm(`¿Confirma que desea retirar el expediente de ${mpio}?`)) return;
 
+    if (window.FolderReader && typeof FolderReader.stopProjectFolderWatcher === "function") {
+      FolderReader.stopProjectFolderWatcher(proyectoId);
+    }
+
     delete window.proyectosAuditados[proyectoId];
     if (window.SIPRO_DATA) {
       if (SIPRO_DATA.expedientesMap) delete SIPRO_DATA.expedientesMap[proyectoId];
@@ -1538,6 +1555,10 @@ const App = {
     if (total === 0) return;
 
     if (!confirm(`¿Confirma que desea retirar la totalidad de los ${total} expedientes cargados?`)) return;
+
+    if (window.FolderReader && typeof FolderReader.stopAllFolderWatchers === "function") {
+      FolderReader.stopAllFolderWatchers();
+    }
 
     window.proyectosAuditados = {};
     if (window.SIPRO_DATA) {
@@ -2214,6 +2235,9 @@ const App = {
             const writable = await fileHandle.createWritable();
             await writable.write(file);
             await writable.close();
+            if (window.FolderReader && typeof FolderReader.updateSignatureAfterWrite === "function") {
+              await FolderReader.updateSignatureAfterWrite(projectId);
+            }
             console.log(`Archivo físico de subsanación guardado en disco: ${targetName}`);
           } catch (diskErr) {
             console.warn("No se pudo escribir directamente en el disco:", diskErr);

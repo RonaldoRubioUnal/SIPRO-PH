@@ -381,11 +381,31 @@ const SpatialEngine = {
   },
 
   /**
+   * Valida que una coordenada caiga dentro de Colombia/región andina-caribe (descarta 0,0 o marcadores globales)
+   */
+  isValidRegionalCoord(lat, lng) {
+    return typeof lat === "number" && typeof lng === "number" &&
+      !isNaN(lat) && !isNaN(lng) &&
+      lat >= -4.5 && lat <= 13.5 &&
+      lng >= -82.0 && lng <= -66.5;
+  },
+
+  /**
    * Calcula el Bounding Box con margen de seguridad de 0.05 grados (~5 km) alrededor de todos los tramos
    */
   calculateProjectBbox(project) {
     if (!project) return null;
-    if (project.bbox && project.bbox.minLon !== undefined) return project.bbox;
+    if (project.bbox && project.bbox.minLon !== undefined && project.bbox.hasMargin) return project.bbox;
+    if (project.bbox && project.bbox.minLon !== undefined) {
+      const MARGIN = 0.05;
+      return {
+        minLon: +(project.bbox.minLon - MARGIN).toFixed(6),
+        minLat: +(project.bbox.minLat - MARGIN).toFixed(6),
+        maxLon: +(project.bbox.maxLon + MARGIN).toFixed(6),
+        maxLat: +(project.bbox.maxLat + MARGIN).toFixed(6),
+        hasMargin: true
+      };
+    }
     const geo = project.georreferenciacion || project.fase1B || project;
     const tramos = geo.tramos || [];
     const puntos = geo.puntosInspeccion || geo.puntosContraste || geo.puntos || [];
@@ -399,8 +419,7 @@ const SpatialEngine = {
         const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : null);
         const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : null);
         if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
-          // Filtrar a coordenadas territoriales de Antioquia / Colombia
-          if (lat < 4.0 || lat > 10.0 || lng < -78.5 || lng > -73.0) return;
+          if (!this.isValidRegionalCoord(lat, lng)) return;
           count++;
           if (lng < minLon) minLon = lng;
           if (lng > maxLon) maxLon = lng;
@@ -416,7 +435,7 @@ const SpatialEngine = {
           const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : null);
           const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : null);
           if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
-            if (lat < 4.0 || lat > 10.0 || lng < -78.5 || lng > -73.0) return;
+            if (!this.isValidRegionalCoord(lat, lng)) return;
             count++;
             if (lng < minLon) minLon = lng;
             if (lng > maxLon) maxLon = lng;
@@ -425,7 +444,7 @@ const SpatialEngine = {
           }
         });
       } else if (p.lng !== undefined && p.lat !== undefined && p.lat !== 0) {
-        if (p.lat < 4.0 || p.lat > 10.0 || p.lng < -78.5 || p.lng > -73.0) return;
+        if (!this.isValidRegionalCoord(p.lat, p.lng)) return;
         count++;
         if (p.lng < minLon) minLon = p.lng;
         if (p.lng > maxLon) maxLon = p.lng;
@@ -441,24 +460,21 @@ const SpatialEngine = {
       minLon: +(minLon - MARGIN).toFixed(6),
       minLat: +(minLat - MARGIN).toFixed(6),
       maxLon: +(maxLon + MARGIN).toFixed(6),
-      maxLat: +(maxLat + MARGIN).toFixed(6)
+      maxLat: +(maxLat + MARGIN).toFixed(6),
+      hasMargin: true
     };
   },
 
   /**
-   * Filtro geométrico por Bounding Box sobre una lista de features
+   * Filtro geométrico por intersección de Bounding Box sobre una lista de features
    */
   filterFeaturesByBbox(features, bbox) {
     if (!bbox || !Array.isArray(features)) return [];
     return features.filter(f => {
-      const geom = f.geometry;
-      if (!geom) return false;
-      let coords = [];
-      if (geom.type === "LineString") coords = geom.coordinates;
-      else if (geom.type === "MultiLineString") {
-        for (let l of geom.coordinates) coords.push(...l);
-      }
-      return coords.some(c => c[0] >= bbox.minLon && c[0] <= bbox.maxLon && c[1] >= bbox.minLat && c[1] <= bbox.maxLat);
+      const fb = f._bbox || this.calculateFeatureBbox(f);
+      if (!fb) return false;
+      return fb[2] >= bbox.minLat && fb[0] <= bbox.maxLat &&
+             fb[3] >= bbox.minLon && fb[1] <= bbox.maxLon;
     });
   },
 
@@ -531,17 +547,23 @@ const SpatialEngine = {
   async obtenerRedVialParaProyecto(municipio, bbox, codMunicipio) {
     const daneCode = codMunicipio || (municipio ? this.getDaneCodeForMunicipio(municipio) : null);
 
-    // Retorno inmediato si ya fue descargada y cacheada para este municipio
+    // Retorno inmediato si ya fue descargada y cubre el Bounding Box solicitado para este municipio
     if (daneCode && this.roadsByMunicipio && this.roadsByMunicipio[daneCode]) {
       const cached = this.roadsByMunicipio[daneCode];
-      this.projectRoadsData = {
-        terciaria: cached.terciaria,
-        secundaria: cached.secundaria,
-        primaria: cached.primaria,
-        municipio: municipio,
-        daneCode: daneCode
-      };
-      return cached;
+      const cb = cached._coveredBbox;
+      const bboxCovered = !bbox || (cb &&
+        bbox.minLon >= cb.minLon && bbox.maxLon <= cb.maxLon &&
+        bbox.minLat >= cb.minLat && bbox.maxLat <= cb.maxLat);
+      if (bboxCovered) {
+        this.projectRoadsData = {
+          terciaria: cached.terciaria,
+          secundaria: cached.secundaria,
+          primaria: cached.primaria,
+          municipio: municipio,
+          daneCode: daneCode
+        };
+        return cached;
+      }
     }
 
     const base = this.ARCGIS_BASE_URL;
@@ -631,6 +653,7 @@ const SpatialEngine = {
       type: "FeatureCollection",
       municipio: municipio,
       daneCode: daneCode,
+      _coveredBbox: bbox ? { ...bbox } : null,
       features: [...tercFeatures, ...secFeatures, ...primFeatures],
       terciaria: this.projectRoadsData.terciaria,
       secundaria: this.projectRoadsData.secundaria,
@@ -1724,12 +1747,12 @@ const SpatialEngine = {
       geo.tramos = geo.tramos.filter(t => {
         const coords = t.coordenadas || [];
         if (coords.length > 0) {
-          const hasInAntioquia = coords.some(c => {
+          const hasInRegion = coords.some(c => {
             const lat = c.lat !== undefined ? c.lat : (Array.isArray(c) ? c[0] : 0);
             const lng = c.lng !== undefined ? c.lng : (Array.isArray(c) ? c[1] : 0);
-            return lat >= 5.0 && lat <= 9.2 && lng >= -77.6 && lng <= -73.6;
+            return this.isValidRegionalCoord(lat, lng);
           });
-          if (!hasInAntioquia) return false;
+          if (!hasInRegion) return false;
         }
         if (coords.length > 1) {
           const firstLat = coords[0].lat !== undefined ? coords[0].lat : (Array.isArray(coords[0]) ? coords[0][0] : 0);
@@ -1756,9 +1779,10 @@ const SpatialEngine = {
       geo.puntos = geo.puntos.filter(p => {
         const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
         const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
-        if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) return false;
+        if (!this.isValidRegionalCoord(lat, lng)) return false;
         if (lat && lng) {
-          const key = `${lat.toFixed(6)}_${lng.toFixed(6)}`;
+          const ptName = (p.nombrePlacemark || p.sector || "").trim().toLowerCase();
+          const key = `${lat.toFixed(6)}_${lng.toFixed(6)}_${ptName}`;
           if (seenP.has(key)) return false;
           seenP.add(key);
         }
@@ -1770,7 +1794,7 @@ const SpatialEngine = {
       geo.puntosInspeccion = geo.puntosInspeccion.filter(p => {
         const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
         const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
-        if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) return false;
+        if (!this.isValidRegionalCoord(lat, lng)) return false;
         return true;
       });
     }
@@ -2584,8 +2608,8 @@ const SpatialEngine = {
       const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
       const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
       if (!lat || !lng) return;
-      // Filtro territorial Antioquia: descartar puntos fuera de límites departamentales
-      if (lat < 5.0 || lat > 9.2 || lng < -77.6 || lng > -73.6) return;
+      // Filtro territorial: descartar puntos fuera de límites regionales
+      if (!this.isValidRegionalCoord(lat, lng)) return;
 
       const isOk = p.cumple;
       const pointLatLng = [lat, lng];
@@ -2678,8 +2702,8 @@ const SpatialEngine = {
         lng2 = v.coordMasCercanaEje.lng;
       }
       if (lat1 == null || lng1 == null || lat2 == null || lng2 == null || isNaN(lat1) || isNaN(lat2)) return null;
-      // Filtro territorial: descartar vectores cuyo origen KML esté fuera de Antioquia
-      if (lat1 < 5.0 || lat1 > 9.2 || lng1 < -77.6 || lng1 > -73.6) return null;
+      // Filtro territorial: descartar vectores cuyo origen KML esté fuera de región válida
+      if (!this.isValidRegionalCoord(lat1, lng1)) return null;
 
       const dist = v.distM !== undefined ? v.distM : (v.distanciaEjeM || 0);
       const cumple = dist <= this.BUFFER_TOLERANCIA_M;
@@ -2907,7 +2931,7 @@ const SpatialEngine = {
           lat = c.lat;
           lng = c.lng;
         }
-        if (lat !== undefined && lng !== undefined && lat >= 5.0 && lat <= 9.2 && lng >= -77.6 && lng <= -73.6) {
+        if (lat !== undefined && lng !== undefined && this.isValidRegionalCoord(lat, lng)) {
           allLatLngs.push([lat, lng]);
         }
       });
@@ -2917,13 +2941,13 @@ const SpatialEngine = {
       const lat = p.lat || (Array.isArray(p.coordenadas) ? p.coordenadas[0] : 0);
       const lng = p.lng || (Array.isArray(p.coordenadas) ? p.coordenadas[1] : 0);
       if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
-        if (lat >= 5.0 && lat <= 9.2 && lng >= -77.6 && lng <= -73.6) {
+        if (this.isValidRegionalCoord(lat, lng)) {
           allLatLngs.push([lat, lng]);
         }
       } else if (p.coordsTrack && p.coordsTrack.length > 0) {
         p.coordsTrack.forEach(c => {
           if (c.lat !== undefined && c.lng !== undefined && !isNaN(c.lat) && !isNaN(c.lng)) {
-            if (c.lat >= 5.0 && c.lat <= 9.2 && c.lng >= -77.6 && c.lng <= -73.6) {
+            if (this.isValidRegionalCoord(c.lat, c.lng)) {
               allLatLngs.push([c.lat, c.lng]);
             }
           }
